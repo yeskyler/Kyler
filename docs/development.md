@@ -57,7 +57,7 @@ Use `--offline` only when the needed dependencies are already cached.
 With a configured backend running, use another terminal and the same configuration:
 
 ```sh
-export KYLER_CONFIG="$HOME/.kyler-dev/config.toml"
+export KYLER_CONFIG=~/.kyler-dev/config.toml
 cd web
 npm ci
 npm run dev -- --hostname 127.0.0.1 --port 30002
@@ -80,7 +80,7 @@ Do not run destructive tests against a normal user's workspace or session store.
 For first-time backend setup from a checkout:
 
 ```sh
-export KYLER_CONFIG="$HOME/.kyler-dev/config.toml"
+export KYLER_CONFIG=~/.kyler-dev/config.toml
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```

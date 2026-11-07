@@ -60,33 +60,38 @@ kyler service start
 
 ## 开发
 
-安装 stable [Rust](https://rust-lang.org/tools/install/) 和
+在 macOS 或 Linux 上安装 stable [Rust](https://rust-lang.org/tools/install/) 和
 [Node.js 24](https://nodejs.org/en/download)，Node.js 自带 npm。
 
 ```sh
 git clone https://github.com/yeskyler/Kyler.git
 cd Kyler
-cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
 ```
 
-配置并启动后端：
+配置并启动后端，`cargo run` 会自动完成所需的编译：
 
 ```sh
-export KYLER_CONFIG="$HOME/.kyler-dev/config.toml"
-./kyler-rs/target/debug/kyler configure --addresses
-./kyler-rs/target/debug/kyler serve
+export KYLER_CONFIG=~/.kyler-dev/config.toml
+cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
+cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```
 
 在另一个终端中，从仓库根目录启动 Web：
 
 ```sh
-export KYLER_CONFIG="$HOME/.kyler-dev/config.toml"
+export KYLER_CONFIG=~/.kyler-dev/config.toml
 cd web
 npm ci
 npm run dev -- --hostname 127.0.0.1 --port 30002
 ```
 
 打开 **http://127.0.0.1:30002**。开发服务与已安装的服务同时运行时，应使用不同端口。
+
+如需只编译整个工作区而不启动服务：
+
+```sh
+cargo build --manifest-path kyler-rs/Cargo.toml --workspace
+```
 
 ## 文档导航
 
