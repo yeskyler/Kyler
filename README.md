@@ -61,27 +61,26 @@ kyler service start
 
 ## Development
 
-Install stable [Rust](https://rust-lang.org/tools/install/) and
+On macOS or Linux, install stable [Rust](https://rust-lang.org/tools/install/) and
 [Node.js 24](https://nodejs.org/en/download) with npm.
 
 ```sh
 git clone https://github.com/yeskyler/Kyler.git
 cd Kyler
-cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
 ```
 
-Configure and start the backend:
+Configure and start the backend. `cargo run` builds it automatically:
 
 ```sh
-export KYLER_CONFIG="$HOME/.kyler-dev/config.toml"
-./kyler-rs/target/debug/kyler configure --addresses
-./kyler-rs/target/debug/kyler serve
+export KYLER_CONFIG=~/.kyler-dev/config.toml
+cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
+cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```
 
 Start Web in a second terminal from the repository root:
 
 ```sh
-export KYLER_CONFIG="$HOME/.kyler-dev/config.toml"
+export KYLER_CONFIG=~/.kyler-dev/config.toml
 cd web
 npm ci
 npm run dev -- --hostname 127.0.0.1 --port 30002
@@ -89,6 +88,12 @@ npm run dev -- --hostname 127.0.0.1 --port 30002
 
 Open **http://127.0.0.1:30002**. Development and installed services must use separate
 ports when running together.
+
+To build every workspace member without starting a service:
+
+```sh
+cargo build --manifest-path kyler-rs/Cargo.toml --workspace
+```
 
 ## Documentation
 
