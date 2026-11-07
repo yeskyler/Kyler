@@ -97,7 +97,8 @@ git push origin v0.1.0
 The tag must match `[workspace.package].version`; use a fresh matching version
 for subsequent releases. Watch the repository's Actions tab for progress.
 
-The workflow validates the tag and scripts, then runs four native builds:
+The workflow runs the shared [CI checks](../.github/workflows/ci.yml), validates
+the tag and scripts, then runs four native builds:
 
 | Runner | Archive target |
 | --- | --- |

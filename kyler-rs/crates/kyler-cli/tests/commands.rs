@@ -295,7 +295,11 @@ async fn ctrl_c_requests_cancellation_and_waits_for_confirmation() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(fixture.state.cancelled.load(Ordering::SeqCst));
+    assert!(
+        fixture.state.cancelled.load(Ordering::SeqCst),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(String::from_utf8_lossy(&out.stderr).contains("cancelled"));
 }
 

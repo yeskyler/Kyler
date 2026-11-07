@@ -98,9 +98,18 @@ async fn completion(
         Ok(Event::default().data("[DONE]")),
     ]))
 }
-async fn run(client: &Client, input: &str, workspace: &Path) -> String {
+async fn run(client: &Client, input: &str, workspace: &Path) -> (String, PathBuf) {
     let session = client.create_session_in(workspace).await.unwrap();
     let permissions = client.permissions(&session.session_id).await.unwrap();
+    let execution_workspace = PathBuf::from(permissions.workspace.as_ref().unwrap());
+    if input == "cargo check" {
+        std::fs::write(execution_workspace.join("Cargo.toml"), "[package]\nname='sandbox-runtime-test'\nversion='0.1.0'\nedition='2024'\n[lib]\npath='lib.rs'\n[workspace]\n").unwrap();
+        std::fs::write(
+            execution_workspace.join("lib.rs"),
+            "pub fn answer() -> u32 { 42 }\n",
+        )
+        .unwrap();
+    }
     let writable = permissions
         .options
         .iter()
@@ -154,7 +163,7 @@ async fn run(client: &Client, input: &str, workspace: &Path) -> String {
         while let Some(event) = stream.next().await.unwrap() {
             if let ClientEvent::Result(result) = event {
                 assert_eq!(result.status, RunStatus::Completed, "{result:?}");
-                return result.output.unwrap();
+                return (result.output.unwrap(), execution_workspace);
             }
         }
         panic!("no final result")
@@ -236,13 +245,17 @@ async fn check(workspace_write: bool) {
     let info = client.info().await.unwrap();
     assert_eq!(info.model, "launch-model");
     assert_eq!(info.sliding_window_tokens, Some(76800));
-    let listing = run(
+    let (listing, execution_workspace) = run(
         &client,
         "\u{67e5}\u{770b}\u{5f53}\u{524d}\u{76ee}\u{5f55}\u{7ed3}\u{6784}",
         &cwd,
     )
     .await;
-    assert!(listing.contains("directory-proof.txt"), "{listing}");
+    assert!(
+        listing.contains(execution_workspace.to_str().unwrap()),
+        "{listing}"
+    );
+    assert!(!listing.contains("directory-proof.txt"), "{listing}");
     let first = requests.lock().unwrap()[0].clone();
     let names: Vec<_> = first["tools"]
         .as_array()
@@ -257,7 +270,7 @@ async fn check(workspace_write: bool) {
     assert!(names.contains(&"run_command"));
     let prompts = first["messages"].to_string();
     let cwd: PathBuf = std::fs::canonicalize(cwd).unwrap();
-    assert!(prompts.contains(cwd.to_str().unwrap()));
+    assert!(prompts.contains(execution_workspace.to_str().unwrap()));
     assert!(prompts.contains("Reply in the language of the user's current request"));
     // The shared server must not couple concurrent sessions to one directory.
     let other = workspace.join("other-project");
@@ -276,13 +289,15 @@ async fn check(workspace_write: bool) {
         )
     );
     assert!(
-        a.contains("directory-proof.txt") && !a.contains("other-only.txt"),
-        "{a}"
+        !a.0.contains("directory-proof.txt") && !a.0.contains("other-only.txt"),
+        "{a:?}"
     );
     assert!(
-        b.contains("other-only.txt") && !b.contains("directory-proof.txt"),
-        "{b}"
+        !b.0.contains("other-only.txt") && !b.0.contains("directory-proof.txt"),
+        "{b:?}"
     );
+    assert_ne!(a.1, b.1);
+    assert_ne!(a.1, execution_workspace);
     assert_eq!(
         client
             .create_session_in(dir.path())
@@ -312,22 +327,23 @@ async fn check(workspace_write: bool) {
             Some(400)
         );
     }
-    let outside = run(&client, "outside", &cwd).await;
+    let (outside, _) = run(&client, "outside", &cwd).await;
     assert!(
         outside.contains("denied") || outside.contains("outside"),
         "{outside}"
     );
     assert!(!outside.contains("Applications/"));
     if workspace_write {
-        let result = run(&client, "write", &cwd).await;
-        assert!(cwd.join("created.txt").is_file(), "{result}");
+        let (result, written_workspace) = run(&client, "write", &cwd).await;
+        assert!(written_workspace.join("created.txt").is_file(), "{result}");
+        assert!(!cwd.join("created.txt").exists());
         assert!(!workspace.join("created.txt").exists());
         assert_eq!(
-            std::fs::read_to_string(cwd.join("created.txt")).unwrap(),
+            std::fs::read_to_string(written_workspace.join("created.txt")).unwrap(),
             "hello\n\nworld\n"
         );
         for (input, expected) in [("cargo version", "cargo "), ("rustc version", "rustc ")] {
-            let result = run(&client, input, &cwd).await;
+            let (result, _) = run(&client, input, &cwd).await;
             let output: Value = serde_json::from_str(&result).unwrap();
             assert_eq!(output["exit_code"], 0, "{result}");
             assert!(
@@ -335,13 +351,12 @@ async fn check(workspace_write: bool) {
                 "{result}"
             );
         }
-        std::fs::write(cwd.join("Cargo.toml"), "[package]\nname='sandbox-runtime-test'\nversion='0.1.0'\nedition='2024'\n[lib]\npath='lib.rs'\n[workspace]\n").unwrap();
-        std::fs::write(cwd.join("lib.rs"), "pub fn answer() -> u32 { 42 }\n").unwrap();
-        let result = run(&client, "cargo check", &cwd).await;
+        let (result, build_workspace) = run(&client, "cargo check", &cwd).await;
         let output: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(output["exit_code"], 0, "{result}");
-        assert!(cwd.join("target").is_dir());
-        let result = run(&client, "missing command", &cwd).await;
+        assert!(build_workspace.join("target").is_dir());
+        assert!(!cwd.join("target").exists());
+        let (result, _) = run(&client, "missing command", &cwd).await;
         assert!(result.contains("sandbox PATH"), "{result}");
     }
     let pid = child.id().unwrap();

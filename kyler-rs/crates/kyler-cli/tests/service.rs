@@ -345,6 +345,8 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
     std::fs::create_dir(&workspace).unwrap();
     let session = client.create_session_in(&workspace).await.unwrap();
     let state = client.permissions(&session.session_id).await.unwrap();
+    let execution_workspace = PathBuf::from(state.workspace.as_ref().unwrap());
+    assert_ne!(execution_workspace, workspace.canonicalize().unwrap());
     assert!(
         state
             .options
@@ -416,12 +418,12 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
         }
         finished(&client, &run.run_id).await;
         assert_eq!(
-            workspace.join("managed-created.txt").exists(),
+            execution_workspace.join("managed-created.txt").exists(),
             mode == PermissionMode::WorkspaceAccess
         );
     }
     assert_eq!(
-        std::fs::read_to_string(workspace.join("managed-created.txt")).unwrap(),
+        std::fs::read_to_string(execution_workspace.join("managed-created.txt")).unwrap(),
         "approved\n"
     );
     client
@@ -462,10 +464,13 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
                 .all(|record| record.status == ApprovalStatus::Allowed && !record.requires_user)
         );
     }
-    assert!(workspace.join("assets/nested").is_dir());
+    assert!(execution_workspace.join("assets/nested").is_dir());
     assert_eq!(
-        std::fs::read_to_string(workspace.join("auto-created.txt")).unwrap(),
+        std::fs::read_to_string(execution_workspace.join("auto-created.txt")).unwrap(),
         "updated\n"
     );
+    assert!(!workspace.join("managed-created.txt").exists());
+    assert!(!workspace.join("auto-created.txt").exists());
+    assert!(!workspace.join("assets").exists());
     model.abort();
 }

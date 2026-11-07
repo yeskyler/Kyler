@@ -24,6 +24,12 @@ env:
   NEXT_TELEMETRY_DISABLED: '1'
 
 jobs:
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+
   validate:
     runs-on: ubuntu-24.04
     steps:
@@ -56,7 +62,7 @@ jobs:
           sh -n scripts/install.sh scripts/package.sh scripts/release.sh
 
   build:
-    needs: validate
+    needs: [checks, validate]
     strategy:
       fail-fast: false
       matrix:

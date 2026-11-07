@@ -15,7 +15,9 @@ The Rust workspace is inside `kyler-rs/`; the repository root has no Cargo manif
 
 On macOS, install command-line build tools with `xcode-select --install`.
 On Ubuntu/Debian, the usual starting dependencies are `build-essential`, `pkg-config`,
-and `libssl-dev`; install any additional native libraries reported by the build.
+and `libssl-dev`; native Linux sandbox tests also need `bubblewrap` and a host
+that permits its user namespaces. Install any additional native libraries reported
+by the build.
 Install Python through your operating system or the official Python distribution.
 Verify the development tools before building:
 
@@ -72,6 +74,18 @@ npm run build
 The frontend reads the backend connection from server-side configuration. If
 port 30002 is occupied by the installed Web service, use another development port.
 Do not run destructive tests against a normal user's workspace or session store.
+
+## Continuous integration
+
+The [CI workflow](../.github/workflows/ci.yml) runs for pushes and pull requests
+to `dev` and `main`, and can be started manually. Rust formatting, workspace
+checks/tests, and isolated installer/publisher tests run on Linux and macOS. Web
+lint, tests, and a production build run on Linux with Node.js 24. Tests use local
+fixtures; no model credentials or live benchmark runs are required.
+
+The Release workflow calls the same checks before building release bundles.
+Branch protection must be configured separately in GitHub; repository plans may
+restrict its availability for private repositories.
 
 ## Configuration and local execution
 
