@@ -1,7 +1,14 @@
 "use client";
 
 import { type PropsWithChildren, useState, type FC, isValidElement } from "react";
-import { XIcon, PlusIcon, FileText, Loader2Icon, AlertCircleIcon } from "lucide-react";
+import {
+  XIcon,
+  PlusIcon,
+  FileText,
+  Loader2Icon,
+  AlertCircleIcon,
+  CheckCircle2Icon,
+} from "lucide-react";
 import { AttachmentPrimitive, ComposerPrimitive, MessagePrimitive } from "@assistant-ui/react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogTitle, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -9,6 +16,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { useAttachmentState } from "./attachment-state";
 import { cn } from "@/lib/utils";
+import { PasteAttachmentStatus } from "@/components/kyler/paste-composer";
 
 type AttachmentPreviewProps = {
   src: string;
@@ -73,7 +81,7 @@ const AttachmentThumb: FC<{ src: string | undefined }> = ({ src }) => {
 };
 
 const AttachmentUI: FC = () => {
-  const { isComposer, src, isImage, name, typeLabel, isUploading, isError, errorMessage } =
+  const { isComposer, src, isImage, name, typeLabel, isUploading, isError, isReady, errorMessage } =
     useAttachmentState();
 
   return (
@@ -98,12 +106,26 @@ const AttachmentUI: FC = () => {
                   role={src ? "button" : "group"}
                   tabIndex={0}
                   aria-label={`${src ? `Preview ${name}` : `${typeLabel} attachment ${name}`}${
-                    isError ? ", upload failed" : isUploading ? ", uploading" : ""
+                    isError
+                      ? ", upload failed"
+                      : isUploading
+                        ? ", uploading"
+                        : isReady && isComposer
+                          ? ", ready to send"
+                          : ""
                   }`}
                 />
               }
             >
               <AttachmentThumb src={src} />
+              {isComposer && isReady && (
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-0.5 right-0.5 rounded-full bg-background p-0.5"
+                >
+                  <CheckCircle2Icon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                </span>
+              )}
               {isUploading && (
                 <div
                   aria-hidden="true"
@@ -126,6 +148,7 @@ const AttachmentUI: FC = () => {
         </AttachmentPrimitive.Root>
         <TooltipContent side="top">
           <AttachmentPrimitive.Name />
+          {isComposer && isReady && <span className="ml-1">· Ready to send</span>}
           {errorMessage && <p className="aui-attachment-error-message">{errorMessage}</p>}
         </TooltipContent>
       </Tooltip>
@@ -161,6 +184,7 @@ export const ComposerAttachments: FC = () => {
   return (
     <div className="aui-composer-attachments flex w-full flex-row items-center gap-2 overflow-x-auto empty:hidden">
       <ComposerPrimitive.Attachments>{() => <AttachmentUI />}</ComposerPrimitive.Attachments>
+      <PasteAttachmentStatus />
     </div>
   );
 };

@@ -27,6 +27,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
+  PasteComposerRoot,
+  PasteComposerInput,
+  PasteComposerSend,
+} from "@/components/kyler/paste-composer";
+import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
   AuiIf,
@@ -503,7 +508,7 @@ const ThreadSuggestionItem: FC = () => {
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   const { ComposerHeader, ComposerFooter } = useContext(ThreadComponentsContext);
   return (
-    <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+    <PasteComposerRoot className="aui-composer-root relative flex w-full flex-col">
       <div className="rounded-(--composer-radius) border border-foreground/10 bg-muted/25 shadow-[0_4px_24px_-12px_rgb(0_0_0/0.16)] focus-within:border-foreground/20 dark:shadow-none">
         {ComposerHeader && <ComposerHeader />}
         <ComposerPrimitive.AttachmentDropzone
@@ -515,7 +520,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           }
         >
           <ComposerAttachments />
-          <ComposerPrimitive.Input
+          <PasteComposerInput
             placeholder=""
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-64 min-h-17 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-7 outline-none"
             rows={2}
@@ -531,7 +536,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           <ComposerFooter />
         </div>
       )}
-    </ComposerPrimitive.Root>
+    </PasteComposerRoot>
   );
 };
 
@@ -598,7 +603,7 @@ const ComposerAction: FC = () => {
             !shouldShowComposerResume(s)
           }
         >
-          <ComposerPrimitive.Send
+          <PasteComposerSend
             render={
               <TooltipIconButton
                 tooltip="Send message"
@@ -612,7 +617,7 @@ const ComposerAction: FC = () => {
             }
           >
             <ArrowUpIcon className="aui-composer-send-icon size-4" />
-          </ComposerPrimitive.Send>
+          </PasteComposerSend>
         </AuiIf>
         <AuiIf condition={shouldShowComposerResume}>
           <ComposerPrimitive.Resume
@@ -897,8 +902,9 @@ const EditComposer: FC = () => {
       data-slot="aui_edit-composer-wrapper"
       className="flex flex-col px-2 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
-      <ComposerPrimitive.Root className="aui-edit-composer-root -mx-px -mb-px border-foreground/10 focus-within:border-foreground/20 ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color]">
-        <ComposerPrimitive.Input
+      <PasteComposerRoot className="aui-edit-composer-root -mx-px -mb-px border-foreground/10 focus-within:border-foreground/20 ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color]">
+        <ComposerAttachments />
+        <PasteComposerInput
           className="aui-edit-composer-input text-foreground min-h-14 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none"
           autoFocus
         />
@@ -908,11 +914,11 @@ const EditComposer: FC = () => {
           >
             Cancel
           </ComposerPrimitive.Cancel>
-          <ComposerPrimitive.Send render={<Button size="sm" className="h-8 px-3" />}>
+          <PasteComposerSend render={<Button size="sm" className="h-8 px-3" />}>
             Update
-          </ComposerPrimitive.Send>
+          </PasteComposerSend>
         </div>
-      </ComposerPrimitive.Root>
+      </PasteComposerRoot>
     </MessagePrimitive.Root>
   );
 };

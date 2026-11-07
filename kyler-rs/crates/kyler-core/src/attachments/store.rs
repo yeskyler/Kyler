@@ -363,7 +363,7 @@ mod tests {
         archive
             .start_file("word/document.xml", SimpleFileOptions::default())
             .unwrap();
-        archive.write_all(b"<w:document xmlns:w=\"urn:test\"><w:p><w:r><w:t>Hello &amp; world</w:t></w:r></w:p></w:document>").unwrap();
+        archive.write_all(b"<w:document xmlns:w=\"urn:test\"><w:p><w:r><w:t>Hello &amp; world</w:t><w:tab/><w:t>column</w:t></w:r></w:p></w:document>").unwrap();
         let bytes = archive.finish().unwrap().into_inner();
         let root = tempfile::tempdir().unwrap();
         let store = AttachmentStore::new(root.path());
@@ -378,6 +378,6 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(read.content, "Hello & world");
+        assert_eq!(read.content, "Hello & world\tcolumn");
     }
 }
