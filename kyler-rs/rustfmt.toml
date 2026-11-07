@@ -1,0 +1,5 @@
+# Import groups: local modules, standard library, external dependencies, workspace crates.
+# Stable rustfmt sorts within each explicitly separated group.
+edition = "2024"
+reorder_imports = true
+reorder_modules = true

@@ -1,0 +1,30 @@
+[package]
+name = "kyler-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kyler-client.workspace = true
+kyler-protocol.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+ratatui-textarea.workspace = true
+unicode-width.workspace = true
+unicode-segmentation.workspace = true
+tokio.workspace = true
+futures.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+tempfile.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+arboard = { version = "3", default-features = false, features = ["image-data"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+
+[dev-dependencies]
+kyler-config.workspace = true
+axum.workspace = true
+async-stream.workspace = true

@@ -1,0 +1,35 @@
+[package]
+name = "kyler-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "kyler"
+
+[[bin]]
+name = "kyler"
+path = "src/main.rs"
+
+[dependencies]
+kyler-client.workspace = true
+kyler-tui.workspace = true
+kyler-core.workspace = true
+kyler-config.workspace = true
+kyler-protocol.workspace = true
+kyler-server.workspace = true
+kyler-logging.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+toml.workspace = true
+crossterm.workspace = true
+tempfile.workspace = true
+reqwest.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+kyler-evals.workspace = true
+axum.workspace = true
+futures.workspace = true
+async-stream.workspace = true

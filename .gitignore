@@ -1,0 +1,62 @@
+# Rust build output
+/kyler-rs/target/
+/target/
+
+# Release bundles and local runtime output
+/dist/
+/sessions/
+/logs/
+
+# Web dependencies, builds, and generated files
+/web/node_modules/
+/web/.next/
+/web/out/
+/web/build/
+/web/dist/
+/web/next-env.d.ts
+*.tsbuildinfo
+
+# Tool and package-manager caches
+.cache/
+.turbo/
+.swc/
+.npm/
+.pnpm-store/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+.eslintcache
+.stylelintcache
+
+# Test reports and coverage
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.coverage
+.coverage.*
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+/tmp/
+/.tmp/
+
+# Local credentials
+.env
+.env.*
+!.env.example
+
+# Finder metadata
+.DS_Store
+
+# Private benchmark data and local evaluation output
+/kyler-rs/crates/kyler-evals/datasets/
+/kyler-rs/crates/kyler-evals/results/
