@@ -57,6 +57,23 @@ Persistent sessions use an append-only `rollout.jsonl` journal and snapshots for
 and recovery. TUI and Web consume shared structured history rather than reconstructing
 tool state from plain assistant text.
 
+## Deliverables
+
+The `register_artifacts` tool replaces the current execution's deliverable list with
+explicit file paths, display names, and at most one primary file. Registration validates
+workspace access and the per-file size limit without granting additional permissions.
+At successful completion, the server retains immutable snapshots before publishing the
+terminal run event. Registration state belongs to one execution and does not carry
+forward into later turns.
+
+Registered files define the output list. When no files are registered, local links in
+the final response remain supported for compatibility. The host does not scan workspace
+directories for deliverables. Local dependencies of retained HTML files remain hidden
+from the top-level list. Web opens an available, supported primary file automatically;
+other files remain selectable from the browser. Missing primary files never cause an
+unrelated file to be selected automatically. File-loading failures show an error and a
+retry control.
+
 ## Context and memory
 
 Context management builds a bounded model-facing view, preserves the current question,

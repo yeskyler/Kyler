@@ -1,4 +1,4 @@
-//! Capture explicit final-message file references; never serve arbitrary workspace paths.
+//! Retain explicitly registered deliverables and legacy final-message file references.
 mod resources;
 
 use crate::environment::ExecutionEnvironment;
@@ -17,6 +17,49 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use kyler_protocol::api::artifacts::{ArtifactInfo, MAX_ARTIFACT_BYTES};
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct Deliverable {
+    pub path: String,
+    pub name: String,
+    #[serde(default)]
+    pub primary: bool,
+}
+
+pub(crate) fn validate_deliverables(files: &[Deliverable]) -> Result<()> {
+    ensure!(files.len() <= 32, "at most 32 deliverables are allowed");
+    ensure!(
+        files.iter().filter(|file| file.primary).count() <= 1,
+        "only one primary deliverable is allowed"
+    );
+    let mut paths = HashSet::new();
+    for file in files {
+        ensure!(
+            file.path.len() <= 4096 && local_reference(&file.path),
+            "invalid deliverable path"
+        );
+        ensure!(
+            !file.name.trim().is_empty()
+                && file.name.len() <= 255
+                && !file.name.chars().any(char::is_control)
+                && !file.name.contains(['/', '\\']),
+            "invalid deliverable name"
+        );
+        let decoded = percent_decode_str(file.path.split(['?', '#']).next().unwrap_or(&file.path))
+            .decode_utf8()?;
+        ensure!(
+            Path::new(decoded.as_ref())
+                .extension()
+                .map(|value| value.to_ascii_lowercase())
+                == Path::new(&file.name)
+                    .extension()
+                    .map(|value| value.to_ascii_lowercase()),
+            "deliverable name must preserve the file extension"
+        );
+        ensure!(paths.insert(&file.path), "duplicate deliverable path");
+    }
+    Ok(())
+}
 
 #[derive(Clone)]
 pub struct ArtifactStore {
@@ -79,6 +122,17 @@ impl ArtifactStore {
         output: &str,
         environment: Option<&ExecutionEnvironment>,
     ) -> Result<()> {
+        self.capture_registered(session, execution, output, environment, &[])
+    }
+    pub fn capture_registered(
+        &self,
+        session: &str,
+        execution: &str,
+        output: &str,
+        environment: Option<&ExecutionEnvironment>,
+        deliverables: &[Deliverable],
+    ) -> Result<()> {
+        validate_deliverables(deliverables)?;
         ensure!(
             Uuid::parse_str(execution)?.to_string() == execution,
             "invalid execution ID"
@@ -99,8 +153,11 @@ impl ArtifactStore {
                 _ => None,
             })
             .filter(|reference| reference.len() <= 4096 && local_reference(reference))
-            .take(32);
-        let mut queue = references
+            .take(if deliverables.is_empty() { 32 } else { 0 });
+        let mut queue = deliverables
+            .iter()
+            .map(|file| file.path.clone())
+            .chain(references)
             .map(|reference| (reference, false))
             .collect::<VecDeque<_>>();
         let mut resources = 0usize;
@@ -127,6 +184,7 @@ impl ArtifactStore {
                 execution_id: execution.into(),
                 reference: reference.clone(),
                 resource,
+                primary: !resource && deliverables.iter().any(|file| file.path == reference && file.primary),
                 name: Path::new(fallback)
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -158,8 +216,12 @@ impl ArtifactStore {
                         }
                     }
                     retained_bytes += bytes.len() as u64;
-                    info.name = name;
-                    info.mime_type = mime(&info.name).into();
+                    info.name = deliverables
+                        .iter()
+                        .find(|file| file.path == reference && !resource)
+                        .map(|file| file.name.clone())
+                        .unwrap_or(name.clone());
+                    info.mime_type = mime(&name).into();
                     info.size_bytes = bytes.len() as u64;
                     info.sha256 = Some(format!("{:x}", Sha256::digest(&bytes)));
                     info.available = true;
@@ -222,7 +284,10 @@ fn local_reference(reference: &str) -> bool {
         .unwrap_or_default()
         .contains(':')
 }
-fn read_source(reference: &str, environment: &ExecutionEnvironment) -> Result<(String, Vec<u8>)> {
+pub(crate) fn read_source(
+    reference: &str,
+    environment: &ExecutionEnvironment,
+) -> Result<(String, Vec<u8>)> {
     ensure!(reference.len() <= 4096, "file reference is too long");
     let reference = reference.split(['?', '#']).next().unwrap_or(reference);
     let decoded = percent_decode_str(reference).decode_utf8()?;
