@@ -228,3 +228,45 @@ test("provider reasoning is replayed separately from the assistant answer", () =
     false,
   );
 });
+
+test("history distinguishes queued calls and retains cancellation for repaired pending results", () => {
+  const call = events[2].content[0];
+  assert.equal(call.type, "tool_call");
+  if (call.type !== "tool_call") throw new Error("Expected tool call");
+  const queued = {
+    ...events[2],
+    content: [
+      { ...call, presentation: { ...call.presentation!, started_at: null, finished_at: null } },
+    ],
+  };
+  const running = historyMessages(
+    [events[0], queued],
+    [{ ...execution, status: "running", finished_at: null }],
+    "session",
+  );
+  const content = running.at(-1)!.content;
+  assert.ok(typeof content !== "string" && content[0].type === "tool-call");
+  assert.equal(content[0].providerMetadata?.kyler?.state, "queued");
+  const repaired: HistoryEvent = {
+    ...events[3],
+    content: [
+      {
+        type: "tool_result",
+        call_id: "c1",
+        name: "read_file",
+        status: "error",
+        output: "Execution interrupted; tool outcome is unknown.",
+        output_bytes: 48,
+        truncated: false,
+      },
+    ],
+  };
+  const cancelled = historyMessages(
+    [events[0], queued, repaired],
+    [{ ...execution, status: "cancelled" }],
+    "session",
+  ).at(-1)!.content;
+  assert.ok(typeof cancelled !== "string" && cancelled[0].type === "tool-call");
+  assert.equal(cancelled[0].providerMetadata?.kyler?.state, "cancelled");
+  assert.equal(cancelled[0].isError, false);
+});

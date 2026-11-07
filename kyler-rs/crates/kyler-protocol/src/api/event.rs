@@ -40,6 +40,16 @@ pub enum EventPayload {
         step: u32,
         text: String,
     },
+    ToolQueued {
+        call_id: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+        #[serde(default)]
+        activity: ActivityKind,
+        #[serde(default)]
+        source: ToolSource,
+    },
     ToolStarted {
         call_id: String,
         name: String,
@@ -78,6 +88,7 @@ impl EventPayload {
             Self::StepStarted { .. } => "step_started",
             Self::ReasoningDelta { .. } => "reasoning_delta",
             Self::TextDelta { .. } => "text_delta",
+            Self::ToolQueued { .. } => "tool_queued",
             Self::ToolStarted { .. } => "tool_started",
             Self::ToolFinished { .. } => "tool_finished",
             Self::RunCompleted { .. } => "run_completed",

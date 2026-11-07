@@ -181,10 +181,24 @@ export function historyMessages(
               : {},
           argsText: JSON.stringify(item.arguments),
           ...(execution?.status !== "running"
-            ? { result: "Outcome unknown; no tool result was retained.", isError: true }
+            ? {
+                result:
+                  execution?.status === "cancelled"
+                    ? "Cancelled."
+                    : "Outcome unknown; no tool result was retained.",
+                isError: execution?.status !== "cancelled",
+              }
             : {}),
           providerMetadata: {
             kyler: {
+              state:
+                execution?.status === "running"
+                  ? metadata && metadata.started_at === null
+                    ? "queued"
+                    : "running"
+                  : execution?.status === "cancelled"
+                    ? "cancelled"
+                    : "interrupted",
               activity: metadata?.activity ?? "tool",
               summary: item.summary ?? item.name,
               ...(metadata
@@ -220,14 +234,20 @@ export function historyMessages(
                 args: {},
                 argsText: "{}",
               };
+        const cancelled =
+          part.providerMetadata?.kyler?.state === "cancelled" &&
+          typeof part.providerMetadata?.kyler?.batch === "number" &&
+          part.providerMetadata?.kyler?.finishedAt === undefined &&
+          item.status !== "success";
         content[index] = {
           ...part,
           result: item.output,
-          isError: item.status !== "success",
+          isError: item.status !== "success" && !cancelled,
           providerMetadata: {
             ...part.providerMetadata,
             kyler: {
               ...part.providerMetadata?.kyler,
+              state: cancelled ? "cancelled" : "finished",
               historyOutput: item.output,
               outputTruncated: item.truncated,
               outputBytes: item.output_bytes,

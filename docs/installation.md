@@ -1,124 +1,154 @@
 # Installation
 
-The complete release includes Kyler, the Web UI, and a Node.js runtime. End users
-do not need Rust, Cargo, npm, or a separate Node.js installation. macOS and Linux
-are supported; use a release built for your operating system and CPU.
+A complete Kyler bundle contains the backend, Web application, TUI, CLI, and a native
+Node.js runtime. Installation does not require Rust, Cargo, npm, or a separate Node.js
+installation. The archive must match the host operating system and CPU architecture.
 
-Run repository commands below from the repository root.
+Run source-repository commands from the repository root.
 
-## Install a published release
+## Release installation
 
-Download `install.sh` from [GitHub Releases](https://github.com/yeskyler/Kyler/releases)
-and run it locally:
+Download and execute the installer:
 
 ```sh
+curl -fL https://github.com/yeskyler/Kyler/releases/latest/download/install.sh -o install.sh
 sh install.sh --modify-path
 ```
 
-Use `--version 0.1.0` to select an available version. The installer downloads the
-native archive for this machine and verifies its checksum. This requires the
-corresponding release assets to have been published. Downloading and installing
-an existing local archive is also supported below.
+`latest` selects the latest published non-prerelease version. The installer detects the
+host platform, downloads the corresponding archive and `SHA256SUMS`, and validates the
+archive before installation. `--version VERSION` selects a specific published release.
+The required platform archive must be present in that release.
 
-## Install a local release
+Unauthenticated download URLs require a publicly accessible repository. Private release
+assets require authenticated download followed by local bundle installation.
+
+## Local bundle installation
+
+Build and install a native bundle from source:
+
+```sh
+sh scripts/package.sh --download-node
+```
+
+On macOS Apple Silicon, the generated archive is installed with:
 
 ```sh
 sh scripts/install.sh --bundle ./dist/kyler-v0.1.0-aarch64-apple-darwin.tar.gz --modify-path
 ```
 
-Setup proceeds automatically through model configuration, service addresses, and
-service status/management. It asks for `OPENAI_BASE_URL` (an OpenAI-compatible Chat
-Completions API), a hidden `OPENAI_API_KEY`, and the model ID, followed by the backend
-and Web listening addresses. Enter keeps existing values; Esc cancels setup before
-replacing an existing installation. No model request is sent during setup.
+Archive names follow `kyler-v<version>-<target>.tar.gz`. The target identifies the
+operating system and architecture. [Release management](releasing.md) defines packaging
+requirements and artifact validation.
 
-| Setting | Default |
+## Configuration stages
+
+The installer completes three stages in sequence. Each stage advances after its required
+inputs pass validation; no additional navigation confirmation is required.
+
+### Model configuration
+
+| Input | Requirement or default |
 | --- | --- |
-| OPENAI_BASE_URL | `https://api.siliconflow.cn/v1` |
-| OPENAI_API_KEY | Required; input is hidden |
+| `OPENAI_BASE_URL` | `https://api.siliconflow.cn/v1`; OpenAI-compatible Chat Completions API |
+| `OPENAI_API_KEY` | Required; input is hidden |
 | Model | `deepseek-ai/DeepSeek-V4-Flash` |
-| Backend listen address | `127.0.0.1:30001` |
-| Backend connection URL | Derived from the backend listen address |
-| Web listen address | `127.0.0.1:30002` |
 
-Both listening addresses are configurable, including the IP and port. Examples:
-`127.0.0.1:31001`, `0.0.0.0:31002`, `[::1]:31002`. A listen address must be an IP
-on this machine (or a wildcard); it is not a public domain or HTTPS URL.
-Setup derives the Web-to-backend connection URL from the backend listening address,
-using loopback for wildcard addresses such as `0.0.0.0`. For a separately hosted
-backend, edit `[client].server_url` and its access token in the configuration file.
+Enter retains an existing value. A saved key is identified as configured without
+revealing its contents. Invalid input is rejected at the current prompt. Setup does not
+send a model request. Esc cancels configuration before an existing installation is
+replaced.
 
-After installation, open **http://127.0.0.1:30002**, or the Web address you chose.
-Both services start in the background by default. In the current terminal:
+### Service addresses
+
+| Input | Default |
+| --- | --- |
+| Backend listening address | `127.0.0.1:30001` |
+| Web listening address | `127.0.0.1:30002` |
+
+Listening addresses use a local IP address and a fixed port. IPv6 addresses use
+brackets. Wildcard listeners are supported; public domains and HTTPS URLs are configured
+at a reverse proxy. The backend and Web listeners must not overlap.
+
+Setup derives the Web-to-backend connection URL from the backend listener and uses
+loopback for wildcard addresses. A separately hosted backend is configured through
+`[client].server_url` and `[client].access_token` in the configuration file.
+
+A non-loopback Web listener requires an access password. Browser authentication uses
+HTTP Basic with username `kyler` and the configured password. Backend credentials remain
+on the Web server. HTTPS must terminate at a reverse proxy when the service is exposed
+over an untrusted network.
+
+Non-loopback backend services restrict project selection to the configured default
+workspace. Local project selection requires a loopback backend listener.
+
+### Service status and management
+
+After successful activation, the installer displays backend and Web status, connection
+addresses, the configuration path, and service management commands. The default browser
+address is **http://127.0.0.1:30002**.
+
+| Operation | Command |
+| --- | --- |
+| Inspect status | `kyler service status` |
+| Stop services | `kyler service stop` |
+| Start services | `kyler service start` |
+| Restart services | `kyler service start --restart` |
+| Reconfigure model and addresses | `kyler configure --web` |
+| Open the terminal interface | `kyler tui` |
+
+Restart services after changing the saved configuration. `--modify-path` updates the
+shell startup file for new terminals. To use the command in the current shell:
 
 ```sh
-export PATH="$HOME/.local/bin:$PATH"
-kyler service status
-kyler service stop
-kyler service start
-kyler service start --restart
+export PATH=~/.local/bin:"$PATH"
 ```
 
-For the terminal interface, run `kyler tui` in your project directory.
-To change the installed model and addresses, run `kyler configure --web`, then
-`kyler service start --restart`.
+## Installation paths and upgrades
 
-When Web listens beyond loopback, setup requires a Web access password. The
-browser uses HTTP Basic authentication (username `kyler`, configured password).
-Put HTTPS at a reverse proxy when exposing the service over an untrusted network.
-Backend credentials stay on the Web server; they are not sent to the browser.
-Non-loopback backend service launches restrict workspaces to the configured
-default workspace. Use a loopback backend behind the Web server for local folder
-selection and access to other local project directories.
+| Path | Contents |
+| --- | --- |
+| `~/.local/bin/kyler` | Command entry point |
+| `~/.local/share/kyler/versions/<version>/` | Versioned backend, Web application, and Node.js runtime |
+| `~/.local/share/kyler/current` | Active-version symbolic link |
+| `~/.kyler/config.toml` | Private application configuration |
+| `~/.kyler/logs/server.log` | Backend log |
+| `~/.kyler/logs/web.log` | Web log |
+| `~/.kyler/workspace/` | Default project directory |
 
-## Files and upgrades
+Reinstall a complete bundle to upgrade. The installer validates checksums and prepares a
+candidate configuration before activating the new version. Existing configuration,
+sessions, skills, and project files are preserved.
 
-```text
-~/.local/bin/kyler                         command entry
-~/.local/share/kyler/versions/<version>/    backend, Web UI, Node runtime
-~/.local/share/kyler/current               active version symlink
-~/.kyler/config.toml                      private configuration
-~/.kyler/logs/server.log                   backend log
-~/.kyler/logs/web.log                      Web log
-~/.kyler/workspace/                        default workspace
-```
+If startup fails, the installer attempts to stop the new services and restore the
+previous installation, configuration, and service state. When cleanup cannot be
+verified, installation reports the failure for inspection. Version directories remain
+available for recovery. [Troubleshooting](troubleshooting.md) covers service diagnostics
+and recovery.
 
-Run the same bundle install command to upgrade. Configuration, sessions, skills,
-and workspace files are preserved. The installer checks checksums, prepares a
-candidate configuration, and only then switches versions. If startup fails, it
-attempts verified cleanup and restores the previous binary, configuration, and
-previously running services. If safe cleanup cannot be verified, it reports the
-failure for inspection rather than stopping an unrelated process.
-Unused version directories are retained for recovery.
+## Installation options
 
-`--no-start` installs without starting services. `--no-configure` keeps the
-configuration as-is; an existing backend-only configuration must first enable
-`[web].enabled = true` to start Web. `--non-interactive` uses saved values and
-environment variables, including `KYLER_LLM_MODEL`, `KYLER_LLM_BASE_URL`,
-`KYLER_LLM_API_KEY`, `KYLER_SERVER_BIND`, `KYLER_WEB_BIND`,
-`KYLER_CLIENT_SERVER_URL`, and `KYLER_WEB_TOKEN`.
+| Option | Behavior |
+| --- | --- |
+| `--version VERSION` | Select a published release version |
+| `--modify-path` | Add the command directory to the shell startup file |
+| `--no-start` | Install without starting services |
+| `--no-configure` | Retain configuration without prompting |
+| `--non-interactive` | Use saved configuration and process environment without prompts |
+| `--bundle PATH` | Install a complete local archive or bundle directory |
+| `--local PATH` | Install a backend-only executable |
 
-Backend-only local installs remain supported:
+Non-interactive setup accepts the environment overrides listed in
+[configuration](configuration.md). A backend-only configuration requires `[web].enabled
+= true` before a complete installation can start the Web service.
+
+A backend-only source installation uses:
 
 ```sh
 cargo build --manifest-path kyler-rs/Cargo.toml --release -p kyler-cli
 sh scripts/install.sh --local ./kyler-rs/target/release/kyler --modify-path
 ```
 
-Use `--bundle` to upgrade a complete installation; `--local` does not include Web.
-
-## Download from a published release
-
-Once release assets are available, download the release's `install.sh` and run:
-
-```sh
-sh install.sh --modify-path
-sh install.sh --version 0.1.0 --modify-path
-```
-
-The script selects the native platform archive from `yeskyler/Kyler`, downloads
-it, and verifies its checksum. `KYLER_REPOSITORY=owner/repository` selects another
-release repository. Availability depends on the maintainer publishing the assets.
-
-See [configuration](configuration.md), [troubleshooting](troubleshooting.md), and
-[release packaging](releasing.md) for details.
+Complete installations must be upgraded with `--bundle`; `--local` does not include the
+Web application. `KYLER_REPOSITORY` selects the GitHub repository used for release
+downloads.

@@ -67,6 +67,31 @@ impl Agent {
         scope: Option<&SubagentScope>,
         stream: Option<&StreamControl>,
     ) -> Result<()> {
+        // Announce the entire batch before authorization or execution can block.
+        if let Some(stream) = stream {
+            for call in calls {
+                if let ChatCompletionMessageToolCalls::Function(call) = call {
+                    let arguments = serde_json::from_str(&call.function.arguments)
+                        .context("invalid tool arguments")?;
+                    let tool = self.toolbox.get(&call.function.name);
+                    stream
+                        .emit(AgentStreamEvent::ToolQueued {
+                            call_id: call.id.clone(),
+                            name: call.function.name.clone(),
+                            activity: tool
+                                .as_ref()
+                                .map(|tool| tool.activity_kind())
+                                .unwrap_or_default(),
+                            source: tool
+                                .as_ref()
+                                .map(|tool| tool.source_for_arguments(&arguments))
+                                .unwrap_or_default(),
+                            arguments,
+                        })
+                        .await?;
+                }
+            }
+        }
         for call in calls {
             let ChatCompletionMessageToolCalls::Function(f) = call else {
                 continue;

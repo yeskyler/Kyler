@@ -542,3 +542,69 @@ fn cancellation_flushes_ai_tail_and_final_recovery_reuses_the_current_cell() {
     state.stream(ClientEvent::Result(done));
     assert!(state.entries.iter().any(|entry| matches!(entry, Entry::Assistant(cell) if cell.is_finished() && cell.displayed() == "Cancelled tail")));
 }
+
+#[test]
+fn queued_batch_nodes_are_updated_in_place_and_cancelled_with_the_run() {
+    let mut state = ready();
+    state.run = Some("run".into());
+    state.phase = Phase::Running;
+    for (seq, id) in [(1, "a"), (2, "b")] {
+        server(
+            &mut state,
+            seq,
+            EventPayload::ToolQueued {
+                call_id: id.into(),
+                name: "read_file".into(),
+                summary: None,
+                activity: Default::default(),
+                source: Default::default(),
+            },
+        );
+    }
+    assert_eq!(
+        state
+            .entries
+            .iter()
+            .filter(|e| matches!(e, Entry::Tool { status, .. } if status == "queued"))
+            .count(),
+        2
+    );
+    server(
+        &mut state,
+        3,
+        EventPayload::ToolStarted {
+            call_id: "a".into(),
+            name: "read_file".into(),
+            summary: None,
+            activity: Default::default(),
+            source: Default::default(),
+        },
+    );
+    assert_eq!(
+        state
+            .entries
+            .iter()
+            .filter(|e| matches!(e, Entry::Tool { .. }))
+            .count(),
+        2
+    );
+    let text = transcript::lines(&state.entries)
+        .iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Queued"));
+    let ClientEvent::Result(mut info) = result("") else {
+        unreachable!()
+    };
+    info.status = RunStatus::Cancelled;
+    state.stream(ClientEvent::Result(info));
+    assert_eq!(
+        state
+            .entries
+            .iter()
+            .filter(|e| matches!(e, Entry::Tool { status, .. } if status == "cancelled"))
+            .count(),
+        2
+    );
+}

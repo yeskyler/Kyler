@@ -33,6 +33,15 @@ pub enum AgentStreamEvent {
         step: u32,
         text: String,
     },
+    ToolQueued {
+        call_id: String,
+        name: String,
+        arguments: serde_json::Value,
+        #[serde(default)]
+        activity: ActivityKind,
+        #[serde(default)]
+        source: ToolSource,
+    },
     ToolStarted {
         call_id: String,
         name: String,
