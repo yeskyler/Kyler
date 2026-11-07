@@ -92,14 +92,16 @@ export function Assistant() {
   };
   const infoRef = useRef<Info | null>(null);
   const activeKey = useRef<string | null>(null);
+  const requestedSession = useRef<string | null>(null);
   const loading = useRef(0);
   useEffect(() => {
     let disposed = false;
     const sequence = ++loading.current;
     async function load() {
+      // Opening the home page starts a draft; history requires an explicit selection.
+      const saved = requestedSession.current;
       const info = await api<Info>("info");
       infoRef.current = info;
-      const saved = localStorage.getItem(pendingSessionKey) ?? localStorage.getItem(storageKey);
       if (!saved) {
         const session = await createDraftSession();
         if (!disposed && sequence === loading.current) {
@@ -174,6 +176,7 @@ export function Assistant() {
     );
   };
   const selectSession = (id: string) => {
+    requestedSession.current = id;
     if (loaded?.key !== id) releaseDraft();
     const cached = opened[id];
     if (cached) {
@@ -205,6 +208,7 @@ export function Assistant() {
     }
     infoRef.current = info;
     releaseDraft();
+    requestedSession.current = null;
     activeKey.current = session.session_id;
     localStorage.removeItem(storageKey);
     localStorage.removeItem(pendingSessionKey);
