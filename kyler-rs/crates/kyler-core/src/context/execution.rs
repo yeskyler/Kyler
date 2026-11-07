@@ -38,6 +38,8 @@ pub struct ExecutionContext {
     pub tool_presentations: HashMap<String, ToolPresentation>,
     pub current_step: u32,
     pub plan: Option<ExecutionPlan>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deliverables: Vec<crate::artifacts::Deliverable>,
     pub final_result: Option<String>,
     pub usage: TokenUsage,
     #[serde(default)]
@@ -60,6 +62,7 @@ impl ExecutionContext {
             tool_presentations: HashMap::new(),
             current_step: 0,
             plan: None,
+            deliverables: Vec::new(),
             final_result: None,
             usage: TokenUsage::default(),
             subagent_usage: TokenUsage::default(),

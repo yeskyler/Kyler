@@ -186,3 +186,82 @@ fn html_keeps_local_dependencies_without_crawling_or_crossing_session_boundaries
     );
     assert!(store.list(&Uuid::new_v4().to_string()).unwrap().is_empty());
 }
+
+#[test]
+fn registered_deliverables_select_primary_without_collecting_intermediate_files() {
+    use kyler_core::artifacts::Deliverable;
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(workspace.join("outputs")).unwrap();
+    let workspace = workspace.canonicalize().unwrap();
+    std::fs::write(workspace.join("outputs/report.txt"), b"final report").unwrap();
+    std::fs::write(workspace.join("outputs/data.csv"), b"value\n1").unwrap();
+    std::fs::write(workspace.join("outputs/intermediate.txt"), b"draft").unwrap();
+    let environment = ExecutionEnvironment::new(
+        &workspace,
+        &workspace,
+        SandboxPolicy::workspace_write("artifacts", &workspace),
+        std::env::current_exe().unwrap(),
+        Arc::new(DirectSandbox),
+    )
+    .unwrap();
+    let store = ArtifactStore::new(root.path().join("artifacts"));
+    let session = Uuid::new_v4().to_string();
+    let execution = Uuid::new_v4().to_string();
+    // Merely existing under outputs never publishes files.
+    store
+        .capture(&session, &execution, "Done.", Some(&environment))
+        .unwrap();
+    assert!(store.list(&session).unwrap().is_empty());
+    let mut files = vec![
+        Deliverable {
+            path: "./outputs/data.csv".into(),
+            name: "Data.csv".into(),
+            primary: false,
+        },
+        Deliverable {
+            path: "./outputs/report.txt".into(),
+            name: "Final report.txt".into(),
+            primary: true,
+        },
+    ];
+    store
+        .capture_registered(
+            &session,
+            &execution,
+            "Done: [Report](./outputs/report.txt) [Draft](./outputs/intermediate.txt)",
+            Some(&environment),
+            &files,
+        )
+        .unwrap();
+    let retained = store.list(&session).unwrap();
+    assert_eq!(retained.len(), 2);
+    let primary = retained.iter().find(|file| file.primary).unwrap();
+    assert_eq!(primary.name, "Final report.txt");
+    assert_eq!(
+        store.download(&session, &primary.id).unwrap().1,
+        b"final report"
+    );
+    files[0].primary = true;
+    assert!(
+        store
+            .capture_registered(
+                &session,
+                &Uuid::new_v4().to_string(),
+                "Done.",
+                Some(&environment),
+                &files
+            )
+            .is_err()
+    );
+    // Registration belongs to one execution and does not leak into the next turn.
+    store
+        .capture(
+            &session,
+            &Uuid::new_v4().to_string(),
+            "No files.",
+            Some(&environment),
+        )
+        .unwrap();
+    assert_eq!(store.list(&session).unwrap().len(), 2);
+}

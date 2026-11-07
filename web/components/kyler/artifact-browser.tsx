@@ -47,6 +47,7 @@ type BrowserContext = {
   close: () => void;
   resize: (width: number) => void;
   refreshing: boolean;
+  error: string | null;
   reload: () => Promise<void>;
 };
 const Context = createContext<BrowserContext | null>(null);
@@ -66,12 +67,17 @@ export function ArtifactsProvider({ session, children }: { session: string; chil
   const currentState = useRef(state);
   currentState.current = state;
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const loadFiles = useRef<() => Promise<void>>(async () => undefined);
   const known = useRef<Set<string> | null>(null);
   const wasRunning = useRef(running);
   const files = useMemo(() => previewFiles(items, inputs), [items, inputs]);
   useEffect(() => {
+    known.current = null;
+    setItems([]);
+    setInputs([]);
+    setError(null);
     try {
       setState({
         ...restoreBrowserState(
@@ -109,6 +115,7 @@ export function ArtifactsProvider({ session, children }: { session: string; chil
       await loadWorkspaceFiles(session, request.signal)
         .then((result) => {
           if (request.signal.aborted) return;
+          setError(null);
           const next = previewFiles(result.outputs, result.inputs);
           if (!running) {
             const previous = known.current ?? new Set<string>();
@@ -118,7 +125,7 @@ export function ArtifactsProvider({ session, children }: { session: string; chil
               setState((value) => autoPreview(next, previous, session, value));
             }
           }
-          if (!running || !known.current)
+          if (!running)
             known.current = new Set(next.filter((file) => file.available).map((file) => file.key));
           setItems((previous) =>
             JSON.stringify(previous) === JSON.stringify(result.outputs) ? previous : result.outputs,
@@ -128,7 +135,10 @@ export function ArtifactsProvider({ session, children }: { session: string; chil
           );
         })
         .catch((error) => {
-          if (!request.signal.aborted) throw error;
+          if (!request.signal.aborted) {
+            setError("Unable to load session files. Check the backend connection and retry.");
+            throw error;
+          }
         });
     };
     loadFiles.current = load;
@@ -150,6 +160,7 @@ export function ArtifactsProvider({ session, children }: { session: string; chil
     <Context.Provider
       value={{
         session,
+        error,
         items,
         inputs,
         files,
@@ -188,7 +199,7 @@ export function SessionFilesMenu() {
     <Button
       variant="ghost"
       size="icon-sm"
-      title={running ? "Preview · Working" : "Preview"}
+      title={browser.error ?? (running ? "Preview · Working" : "Preview")}
       className={`relative z-40 size-7 rounded-md border-0 text-muted-foreground/70 hover:bg-foreground/5 ${browser.state.open ? "bg-foreground/5 text-foreground" : "bg-transparent"}`}
       aria-expanded={browser.state.open}
       data-working={running}
@@ -199,6 +210,9 @@ export function SessionFilesMenu() {
         className={`preview-monitor size-4 ${running ? "text-foreground" : ""}`}
         strokeWidth={running ? 2 : 1.5}
       />
+      {browser.error && (
+        <span className="absolute right-0 top-0 size-2 rounded-full bg-destructive" />
+      )}
       {running && (
         <span role="status" className="sr-only">
           Working

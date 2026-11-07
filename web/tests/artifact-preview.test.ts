@@ -26,6 +26,7 @@ const file: PreviewFile = {
   bytes: 100,
   available: true,
   kind: "html",
+  primary: true,
 };
 
 test("preview types recognize documents, images and unsupported archives", () => {
@@ -222,4 +223,21 @@ test("file navigation filters resources and searches names and display paths", (
   const absolute = { ...file, reference: "/private/session/index.html" };
   assert.equal(previewPath(absolute), "index.html");
   assert.equal(absolute.href, file.href);
+});
+
+test("only explicit primary deliverables open automatically", () => {
+  const secondary = { ...file, key: "secondary", primary: false };
+  const legacy = { ...file, key: "legacy", primary: undefined };
+  assert.equal(
+    autoPreview([secondary, legacy], new Set(), "s", initialBrowserState),
+    initialBrowserState,
+  );
+  assert.equal(
+    autoPreview([secondary, file], new Set(), "s", initialBrowserState).selected,
+    file.key,
+  );
+  assert.equal(
+    autoPreview([{ ...file, available: false }, secondary], new Set(), "s", initialBrowserState),
+    initialBrowserState,
+  );
 });

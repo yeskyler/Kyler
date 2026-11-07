@@ -4,6 +4,7 @@ export type Artifact = {
   execution_id: string;
   reference: string;
   resource?: boolean;
+  primary?: boolean;
   name: string;
   mime_type: string;
   size_bytes: number;

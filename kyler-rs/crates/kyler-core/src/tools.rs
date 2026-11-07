@@ -15,6 +15,7 @@ pub mod memory;
 pub mod output;
 pub mod plan;
 pub mod read_file;
+pub mod register_artifacts;
 pub mod save_skill;
 pub mod skills_resource;
 pub mod wait_tasks;
@@ -141,6 +142,7 @@ pub trait Tool: Send + Sync {
 pub async fn build_toolbox() -> anyhow::Result<ToolBox> {
     let tools: Vec<Arc<dyn Tool>> = vec![
         Arc::new(UpdatePlanTool),
+        Arc::new(register_artifacts::RegisterArtifactsTool),
         Arc::new(ListDirTool),
         Arc::new(ReadFileTool),
         Arc::new(GrepFilesTool),

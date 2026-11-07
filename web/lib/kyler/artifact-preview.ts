@@ -28,6 +28,7 @@ export type PreviewFile = {
   available: boolean;
   kind: PreviewKind;
   resource?: boolean;
+  primary?: boolean;
 };
 export type BrowserState = {
   selected: string | null;
@@ -101,6 +102,7 @@ export function previewFiles(outputs: Artifact[], inputs: WorkspaceInput[]): Pre
       available: file.available,
       kind: previewKind(file.name),
       resource: file.resource,
+      primary: file.primary,
     })),
     ...inputs.map(({ session_id, attachment: file }) => ({
       key: `uploaded:${session_id}:${file.id}`,
@@ -118,7 +120,7 @@ export function previewFiles(outputs: Artifact[], inputs: WorkspaceInput[]): Pre
   ];
 }
 
-/** Only newly retained outputs from this session may open the browser automatically. */
+/** Only a newly retained explicit primary deliverable may open the browser automatically. */
 export function autoPreview(
   files: PreviewFile[],
   known: Set<string>,
@@ -132,6 +134,7 @@ export function autoPreview(
       file.session === session &&
       file.available &&
       !file.resource &&
+      file.primary === true &&
       file.kind !== "unsupported",
   );
   return candidate && !state.open && !state.dismissed

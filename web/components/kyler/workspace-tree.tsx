@@ -40,6 +40,18 @@ export function WorkspaceTree() {
           className="w-full min-w-0 bg-transparent text-xs outline-none"
         />
       </label>
+      {browser.error && (
+        <div role="alert" className="mb-3 text-xs text-destructive">
+          <p>{browser.error}</p>
+          <button
+            type="button"
+            className="mt-1 underline"
+            onClick={() => void browser.reload().catch(() => undefined)}
+          >
+            Retry
+          </button>
+        </div>
+      )}
       <FileGroup
         searching={!!query.trim()}
         label="Inputs"

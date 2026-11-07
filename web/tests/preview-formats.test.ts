@@ -5,7 +5,7 @@ import {
   initialBrowserState,
   type PreviewFile,
 } from "../lib/kyler/artifact-preview.ts";
-test("previewable generated text opens the panel at a 70/30 split", () => {
+test("primary generated text opens the panel at a 70/30 split", () => {
   const file: PreviewFile = {
     key: "source",
     id: "source",
@@ -18,6 +18,7 @@ test("previewable generated text opens the panel at a 70/30 split", () => {
     bytes: 10,
     available: true,
     kind: "text",
+    primary: true,
   };
   const opened = autoPreview([file], new Set(), "s", { ...initialBrowserState, width: 45 });
   assert.equal(opened.open, true);

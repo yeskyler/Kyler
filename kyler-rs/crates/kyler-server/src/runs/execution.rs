@@ -162,13 +162,15 @@ impl RunManager {
                 let session = outcome.session.session_id.clone();
                 let execution = result.context.execution_id.clone();
                 let output = result.output.clone();
+                let deliverables = result.context.deliverables.clone();
                 let environment = agent.effective_execution_environment();
                 if !matches!(
-                    tokio::task::spawn_blocking(move || artifacts.capture(
+                    tokio::task::spawn_blocking(move || artifacts.capture_registered(
                         &session,
                         &execution,
                         &output,
-                        environment.as_deref()
+                        environment.as_deref(),
+                        &deliverables
                     ))
                     .await,
                     Ok(Ok(()))
