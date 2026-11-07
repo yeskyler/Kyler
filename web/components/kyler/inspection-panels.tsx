@@ -379,11 +379,6 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
               <Metric label="Used in latest request" value={data.retrieved_keys.length} />
               <Metric label="Context compressions" value={data.compression_count} />
             </dl>
-            <p className="break-words border-t border-border/50 pt-4 text-[11px] leading-5 text-muted-foreground">
-              {data.workspace_root
-                ? `Shared workspace · ${data.workspace_root}`
-                : "Persistent memory is scoped to this session."}
-            </p>
           </Section>
           <Section
             title="Session summary"

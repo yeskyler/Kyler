@@ -768,6 +768,7 @@ test("execution rendering retains activity metadata and an authoritative final a
       batch: 1,
       activity: "explore",
       summary: "Listed project files",
+      state: "finished",
       startedAt: 2000,
       finishedAt: 4000,
       sourceLabel: "MCP · project",
@@ -1184,4 +1185,116 @@ test("successful plan tools hydrate steps during streaming before the run finish
   );
   assert.deepEqual(snapshots.at(-1)?.plan, complete);
   assert.equal(calls.filter((path) => path.includes("/tool-calls/")).length, 2);
+});
+
+test("queued tools appear together, start without duplication, and settle on cancellation", async (t) => {
+  t.mock.method(globalThis, "fetch", async (path: string) =>
+    path.endsWith("/runs")
+      ? Response.json({ run_id: "queued" })
+      : stream([
+          { seq: 1, type: "tool_queued", call_id: "a", name: "read_file" },
+          { seq: 2, type: "tool_queued", call_id: "b", name: "read_file" },
+          { seq: 3, type: "tool_started", call_id: "a", name: "read_file", timestamp_ms: 100 },
+          { seq: 4, type: "tool_finished", call_id: "a", name: "read_file", status: "success" },
+          { seq: 5, type: "approval_updated", approval: { tool_call_id: "b", status: "pending" } },
+          { seq: 6, type: "run_cancelled" },
+        ]),
+  );
+  const updates: ChatModelRunResult[] = [];
+  for await (const update of chatAdapter("session", () => {}).run({
+    messages: [{ role: "user", content: [{ type: "text", text: "Inspect" }], attachments: [] }],
+    abortSignal: new AbortController().signal,
+  } as never) as AsyncGenerator<ChatModelRunResult>)
+    updates.push(update);
+  const state = (update: number, index: number) => {
+    const part = updates[update].content?.[index];
+    assert.ok(part?.type === "tool-call");
+    return part.providerMetadata?.kyler?.state;
+  };
+  assert.equal(updates[1].content?.length, 2);
+  assert.equal(state(1, 1), "queued");
+  assert.equal(updates[2].content?.length, 2);
+  assert.equal(state(2, 0), "running");
+  assert.equal(state(4, 1), "approval");
+  assert.equal(state(updates.length - 1, 1), "cancelled");
+});
+
+test("a stalled plan details request never holds back later tools or the final answer", async (t) => {
+  let aborted = false;
+  t.mock.method(globalThis, "fetch", async (path: string, init?: RequestInit) => {
+    if (path.includes("tool-calls"))
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            reject(new Error("Aborted"));
+          },
+          { once: true },
+        );
+      });
+    if (path.endsWith("/runs")) return Response.json({ run_id: "plan-stall" });
+    return stream([
+      { seq: 1, type: "tool_started", call_id: "plan", name: "update_plan" },
+      { seq: 2, type: "tool_finished", call_id: "plan", status: "success" },
+      { seq: 3, type: "tool_queued", call_id: "next", name: "read_file" },
+      { seq: 4, type: "tool_started", call_id: "next", name: "read_file" },
+      { seq: 5, type: "tool_finished", call_id: "next", status: "success" },
+      { seq: 6, type: "run_completed", output: "Done" },
+    ]);
+  });
+  const updates: ChatModelRunResult[] = [];
+  await Promise.race([
+    (async () => {
+      for await (const update of chatAdapter("session", () => {}).run({
+        messages: [{ role: "user", content: [{ type: "text", text: "Plan" }], attachments: [] }],
+        abortSignal: new AbortController().signal,
+      } as never) as AsyncGenerator<ChatModelRunResult>)
+        updates.push(update);
+    })(),
+    new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error("Events stalled behind plan details")), 1000);
+      t.after(() => clearTimeout(timer));
+    }),
+  ]);
+  assert.equal(updates.at(-1)?.status?.type, "complete");
+  assert.equal(updates.at(-1)?.content?.length, 3);
+  assert.equal(aborted, true);
+});
+
+test("older plan details cannot replace the latest successful plan", async (t) => {
+  let resolveOld: ((value: Response) => void) | undefined;
+  const plan = (summary: string) => ({
+    name: "update_plan",
+    status: "success",
+    arguments: { summary, steps: [{ id: summary, content: summary, status: "completed" }] },
+  });
+  t.mock.method(globalThis, "fetch", async (path: string) => {
+    if (path.endsWith("/tool-calls/old"))
+      return new Promise<Response>((resolve) => {
+        resolveOld = resolve;
+      });
+    if (path.endsWith("/tool-calls/new")) {
+      resolveOld!(Response.json(plan("old")));
+      return Response.json(plan("new"));
+    }
+    if (path.endsWith("/runs")) return Response.json({ run_id: "plans" });
+    return stream([
+      { seq: 1, type: "tool_started", call_id: "old", name: "update_plan" },
+      { seq: 2, type: "tool_finished", call_id: "old", status: "success" },
+      { seq: 3, type: "tool_started", call_id: "new", name: "update_plan" },
+      { seq: 4, type: "tool_finished", call_id: "new", status: "success" },
+      { seq: 5, type: "text_delta", step: 2, text: "Finished the current plan" },
+      { seq: 6, type: "run_completed", output: "Finished the current plan" },
+    ]);
+  });
+  let latest: ReturnType<typeof latestDisplayPlan>;
+  for await (const update of chatAdapter("session", () => {}).run({
+    messages: [{ role: "user", content: [{ type: "text", text: "Plan" }], attachments: [] }],
+    abortSignal: new AbortController().signal,
+  } as never) as AsyncGenerator<ChatModelRunResult>) {
+    latest = latestDisplayPlan([{ role: "assistant", content: update.content ?? [] }]);
+    if (latest) assert.equal(latest.summary, "new");
+  }
+  assert.equal(latest?.summary, "new");
 });

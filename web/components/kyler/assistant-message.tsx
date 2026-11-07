@@ -10,6 +10,8 @@ import {
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import {
+  ClockIcon,
+  MinusIcon,
   CheckIcon,
   ChevronDownIcon,
   CopyIcon,
@@ -50,23 +52,44 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
   const panelId = useId();
   const data = props.providerMetadata?.kyler;
   const summary = typeof data?.summary === "string" ? data.summary : "";
-  const failed = props.isError || props.status.type === "incomplete";
-  const waiting = props.status.type === "requires-action";
-  const running = !failed && !waiting && props.status.type === "running";
-  const StatusIcon = failed
-    ? XCircleIcon
-    : waiting
-      ? ShieldQuestionIcon
-      : running
-        ? LoaderCircleIcon
-        : CheckIcon;
-  const status = failed
-    ? "Failed"
-    : waiting
-      ? "Approval required"
-      : running
-        ? "Running"
-        : "Completed";
+  const messageStatus = useAuiState((state) => state.message.status);
+  const cancelled =
+    data?.state === "cancelled" ||
+    (props.result === undefined &&
+      messageStatus?.type === "incomplete" &&
+      messageStatus.reason === "cancelled");
+  const queued = !cancelled && data?.state === "queued" && props.result === undefined;
+  const failed = !cancelled && (props.isError || props.status.type === "incomplete");
+  const waiting =
+    !cancelled && (data?.state === "approval" || props.status.type === "requires-action");
+  const running =
+    !queued &&
+    !cancelled &&
+    !failed &&
+    !waiting &&
+    (data?.state === "running" || props.status.type === "running");
+  const StatusIcon = queued
+    ? ClockIcon
+    : cancelled
+      ? MinusIcon
+      : failed
+        ? XCircleIcon
+        : waiting
+          ? ShieldQuestionIcon
+          : running
+            ? LoaderCircleIcon
+            : CheckIcon;
+  const status = queued
+    ? "Queued"
+    : cancelled
+      ? "Cancelled"
+      : failed
+        ? "Failed"
+        : waiting
+          ? "Approval required"
+          : running
+            ? "Running"
+            : "Completed";
   const source = typeof data?.sourceLabel === "string" ? data.sourceLabel : undefined;
   const now = Date.now();
   const elapsed =
@@ -108,6 +131,8 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
             {source}
           </span>
         )}
+        {queued && <span className="shrink-0 text-[10px]">Queued</span>}
+        {cancelled && <span className="shrink-0 text-[10px]">Cancelled</span>}
         {waiting && <span className="shrink-0 text-[10px]">Approval required</span>}
         {elapsed && (
           <span className="ml-auto shrink-0 text-[10px] tabular-nums opacity-60">{elapsed}</span>
@@ -147,7 +172,13 @@ function ActivityDetails(props: ToolCallMessagePartProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (props.status.type === "requires-action") return;
+    if (
+      props.status.type === "requires-action" ||
+      ["queued", "approval"].includes(String(props.providerMetadata?.kyler?.state))
+    ) {
+      setLoading(false);
+      return;
+    }
     const retained = props.providerMetadata?.kyler;
     if (typeof retained?.historyOutput === "string") {
       setDetails({

@@ -166,6 +166,29 @@ export function chatAdapter(
       let step: number | undefined;
       let batch: number | undefined;
       const content: ThreadAssistantMessagePart[] = [];
+      const detailsController = new AbortController();
+      const detailsSignal = AbortSignal.any([abortSignal, detailsController.signal]);
+      let latestPlan: string | undefined;
+      const approvalStates = new Map<string, string>();
+      let closeEvents: (() => Promise<unknown>) | undefined;
+      const hydrations = new Map<string, Promise<{ id: string; apply: () => void }>>();
+      const settleTools = (cancelled: boolean) => {
+        content.forEach((part, index) => {
+          if (part.type !== "tool-call" || part.result !== undefined) return;
+          content[index] = {
+            ...part,
+            result: cancelled ? "Cancelled." : "Outcome unknown; no tool result was received.",
+            isError: !cancelled,
+            providerMetadata: {
+              ...part.providerMetadata,
+              kyler: {
+                ...part.providerMetadata?.kyler,
+                state: cancelled ? "cancelled" : "interrupted",
+              },
+            },
+          };
+        });
+      };
       const cancel = async () => {
         await api(`runs/${accepted.run_id}/cancel`, { method: "POST", body: "{}" });
       };
@@ -185,7 +208,26 @@ export function chatAdapter(
             runStorageKey(session),
             JSON.stringify({ id: accepted.run_id, input }),
           );
-        for await (const event of followRun(accepted.run_id, abortSignal)) {
+        const events = followRun(accepted.run_id, detailsSignal);
+        closeEvents = () => events.return(undefined);
+        let nextEvent: ReturnType<typeof events.next> | undefined;
+        while (true) {
+          nextEvent ??= events.next();
+          const ready = await Promise.race([
+            ...[...hydrations.values()].map((task) =>
+              task.then((value) => ({ kind: "details" as const, value })),
+            ),
+            nextEvent.then((value) => ({ kind: "event" as const, value })),
+          ]);
+          if (ready.kind === "details") {
+            hydrations.delete(ready.value.id);
+            ready.value.apply();
+            yield update();
+            continue;
+          }
+          nextEvent = undefined;
+          if (ready.value.done) break;
+          const event = ready.value.value;
           if (event.execution_id) executionId = event.execution_id;
           if (event.type === "run_started") {
             startedAt = event.timestamp_ms ?? startedAt;
@@ -217,8 +259,12 @@ export function chatAdapter(
             else content.push({ type: "text", text: event.text ?? "" });
             step = event.step;
             yield update();
-          } else if (event.type === "tool_started") {
-            content.push({
+          } else if (event.type === "tool_queued" || event.type === "tool_started") {
+            const existing = content.findIndex(
+              (part) => part.type === "tool-call" && part.toolCallId === event.call_id,
+            );
+            const previous = content[existing];
+            const tool: ThreadAssistantMessagePart = {
               type: "tool-call",
               toolCallId: event.call_id!,
               toolName: event.name!,
@@ -229,7 +275,16 @@ export function chatAdapter(
                   ...(batch !== undefined ? { batch } : {}),
                   activity: event.activity ?? "tool",
                   summary: event.summary ?? event.name ?? "Used tool",
-                  startedAt: event.timestamp_ms ?? Date.now(),
+                  ...(previous?.type === "tool-call" ? previous.providerMetadata?.kyler : {}),
+                  state:
+                    event.type === "tool_queued"
+                      ? approvalStates.get(event.call_id!) === "pending"
+                        ? "approval"
+                        : "queued"
+                      : "running",
+                  ...(event.type === "tool_started"
+                    ? { startedAt: event.timestamp_ms ?? Date.now() }
+                    : {}),
                   ...(event.source?.kind === "skill"
                     ? { sourceLabel: `Skill · ${event.source.name ?? ""}` }
                     : event.source?.kind === "mcp"
@@ -237,7 +292,14 @@ export function chatAdapter(
                       : {}),
                 },
               },
-            });
+            };
+            if (existing < 0) content.push(tool);
+            else if (
+              previous?.type === "tool-call" &&
+              previous.result === undefined &&
+              event.type === "tool_started"
+            )
+              content[existing] = tool;
             yield update();
           } else if (event.type === "tool_finished") {
             const index = content.findIndex(
@@ -251,6 +313,7 @@ export function chatAdapter(
                   ...part.providerMetadata,
                   kyler: {
                     ...part.providerMetadata?.kyler,
+                    state: "finished",
                     finishedAt: event.timestamp_ms ?? Date.now(),
                   },
                 },
@@ -268,22 +331,32 @@ export function chatAdapter(
                 part.toolName === "update_plan" &&
                 ["success", "succeeded", "completed"].includes(event.status ?? "")
               ) {
-                const details = await api<{
-                  name: string;
-                  status: string;
-                  arguments: typeof part.args;
-                }>(`sessions/${session}/tool-calls/${encodeURIComponent(part.toolCallId)}`, {
-                  signal: abortSignal,
-                }).catch(() => null);
-                if (details?.name === "update_plan" && details.status === "success") {
-                  const current = content[index];
-                  if (current.type === "tool-call")
-                    content[index] = {
-                      ...current,
-                      args: details.arguments,
-                      argsText: JSON.stringify(details.arguments),
-                    };
-                }
+                latestPlan = part.toolCallId;
+                const id = part.toolCallId;
+                const task = api<{ name: string; status: string; arguments: typeof part.args }>(
+                  `sessions/${session}/tool-calls/${encodeURIComponent(id)}`,
+                  { signal: AbortSignal.any([detailsSignal, AbortSignal.timeout(10000)]) },
+                )
+                  .catch(() => null)
+                  .then((details) => ({
+                    id,
+                    apply: () => {
+                      if (
+                        latestPlan !== id ||
+                        details?.name !== "update_plan" ||
+                        details.status !== "success"
+                      )
+                        return;
+                      const current = content[index];
+                      if (current?.type === "tool-call" && current.toolCallId === id)
+                        content[index] = {
+                          ...current,
+                          args: details.arguments,
+                          argsText: JSON.stringify(details.arguments),
+                        };
+                    },
+                  }));
+                hydrations.set(id, task);
               }
               yield update();
             }
@@ -295,7 +368,24 @@ export function chatAdapter(
             lifecycle?.onQuestion?.(event.question);
             yield update();
           } else if (event.type === "approval_updated" && event.approval) {
-            onApproval(event.approval);
+            const approval = event.approval;
+            if (approval.tool_call_id) approvalStates.set(approval.tool_call_id, approval.status);
+            const index = content.findIndex(
+              (part) => part.type === "tool-call" && part.toolCallId === approval.tool_call_id,
+            );
+            const part = content[index];
+            if (part?.type === "tool-call" && part.result === undefined)
+              content[index] = {
+                ...part,
+                providerMetadata: {
+                  ...part.providerMetadata,
+                  kyler: {
+                    ...part.providerMetadata?.kyler,
+                    state: approval.status === "pending" ? "approval" : "queued",
+                  },
+                },
+              };
+            onApproval(approval);
             yield update();
           } else if (event.type === "run_completed") {
             finishedAt = event.timestamp_ms ?? Date.now();
@@ -321,11 +411,13 @@ export function chatAdapter(
               else if (tail?.type !== "text" || tail.text !== output)
                 content.push({ type: "text", text: output });
             }
+            settleTools(false);
             yield { ...update(), status: { type: "complete", reason: "stop" } };
             break;
           } else if (event.type === "run_failed") {
             finishedAt = event.timestamp_ms ?? Date.now();
             terminal = true;
+            settleTools(false);
             yield update();
             throw new Error(
               typeof event.error === "string"
@@ -335,11 +427,15 @@ export function chatAdapter(
           } else if (event.type === "run_cancelled") {
             finishedAt = event.timestamp_ms ?? Date.now();
             terminal = true;
+            settleTools(true);
             yield { ...update(), status: { type: "incomplete", reason: "cancelled" } };
             break;
           }
         }
       } finally {
+        detailsController.abort();
+        hydrations.clear();
+        await closeEvents?.();
         if (!terminal) await cancel();
         if (typeof localStorage !== "undefined") localStorage.removeItem(runStorageKey(session));
       }

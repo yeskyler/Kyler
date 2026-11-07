@@ -19,6 +19,7 @@ export type KylerEvent = {
   question?: QuestionRecord;
 };
 export type Approval = {
+  tool_call_id?: string;
   id: string;
   digest: string;
   tool: string;

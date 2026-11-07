@@ -576,3 +576,87 @@ async fn provider_reasoning_streams_and_persists_without_becoming_answer_or_requ
         assert!(requests[0].get(key).is_none());
     }
 }
+
+#[tokio::test]
+async fn tool_batch_is_queued_before_first_tool_finishes_and_execution_stays_serial() {
+    struct Gate {
+        calls: Arc<AtomicUsize>,
+        release: Arc<tokio::sync::Notify>,
+    }
+    #[async_trait]
+    impl Tool for Gate {
+        fn name(&self) -> &str {
+            "gate"
+        }
+        fn description(&self) -> &str {
+            "Local batch fixture"
+        }
+        fn parameters(&self) -> Value {
+            json!({"type":"object","properties":{}})
+        }
+        async fn execute(&self, _: &str, _: &mut ToolContext<'_>) -> anyhow::Result<String> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.release.notified().await;
+            }
+            Ok("done".into())
+        }
+    }
+    let calls = Arc::new(AtomicUsize::new(0));
+    let release = Arc::new(tokio::sync::Notify::new());
+    let tools = ToolBox::from([(
+        "gate".into(),
+        Arc::new(Gate {
+            calls: calls.clone(),
+            release: release.clone(),
+        }) as Arc<dyn Tool>,
+    )]);
+    let (url, server) = fixture(vec![
+        vec![chunk(
+            json!({"tool_calls":[
+                {"index":0,"id":"a","type":"function","function":{"name":"gate","arguments":"{}"}},
+                {"index":1,"id":"b","type":"function","function":{"name":"gate","arguments":"{}"}}
+            ]}),
+            json!("tool_calls"),
+        )],
+        answer("Done"),
+    ])
+    .await;
+    let mut stream = agent(url, tools).run_stream("batch").await.unwrap();
+    let mut order = Vec::new();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while let Some(event) = stream.next().await {
+            match event {
+                AgentStreamEvent::ToolQueued { call_id, .. } => {
+                    order.push(format!("queued:{call_id}"))
+                }
+                AgentStreamEvent::ToolStarted { call_id, .. } => {
+                    order.push(format!("started:{call_id}"));
+                    if call_id == "a" {
+                        assert_eq!(order, ["queued:a", "queued:b", "started:a"]);
+                        assert!(calls.load(Ordering::SeqCst) <= 1);
+                        release.notify_one();
+                    }
+                }
+                AgentStreamEvent::ToolFinished { call_id, .. } => {
+                    order.push(format!("finished:{call_id}"))
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
+    stream.finish().await.unwrap();
+    assert_eq!(
+        order,
+        [
+            "queued:a",
+            "queued:b",
+            "started:a",
+            "finished:a",
+            "started:b",
+            "finished:b"
+        ]
+    );
+    server.await.unwrap();
+}

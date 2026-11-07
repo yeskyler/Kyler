@@ -16,6 +16,7 @@ impl State {
                     return;
                 }
                 self.cursor = event.seq;
+                let queued = matches!(&event.payload, EventPayload::ToolQueued { .. });
                 match event.payload {
                     EventPayload::QuestionUpdated { question } => {
                         self.finish_assistant();
@@ -25,6 +26,9 @@ impl State {
                     EventPayload::ApprovalUpdated { approval } => {
                         if approval.status == ApprovalStatus::Pending {
                             self.finish_assistant();
+                        }
+                        if let Some(Entry::Tool { status, .. }) = self.entries.iter_mut().rev().find(|entry| matches!(entry, Entry::Tool { id, .. } if id == &approval.tool_call_id)) {
+                            if approval.status == ApprovalStatus::Pending { *status = "pending".into(); }
                         }
                         self.update_approval(approval);
                     }
@@ -71,7 +75,14 @@ impl State {
                             self.entries.push(Entry::Assistant(cell));
                         }
                     }
-                    EventPayload::ToolStarted {
+                    EventPayload::ToolQueued {
+                        call_id,
+                        name,
+                        activity,
+                        source,
+                        summary,
+                    }
+                    | EventPayload::ToolStarted {
                         call_id,
                         name,
                         activity,
@@ -79,10 +90,31 @@ impl State {
                         summary,
                     } => {
                         self.finish_assistant();
+                        if let Some(Entry::Tool {
+                            status, started, ..
+                        }) =
+                            self.entries.iter_mut().rev().find(
+                                |entry| matches!(entry, Entry::Tool { id, .. } if id == &call_id),
+                            )
+                        {
+                            if !queued {
+                                *status = "running".into();
+                                *started = Instant::now();
+                            }
+                            return;
+                        }
+                        let waiting = queued && self.entries.iter().any(|entry| matches!(entry, Entry::Approval { record, .. } if record.tool_call_id == call_id && record.status == ApprovalStatus::Pending));
                         self.entries.push(Entry::Tool {
                             id: call_id,
                             name,
-                            status: "running".into(),
+                            status: if waiting {
+                                "pending"
+                            } else if queued {
+                                "queued"
+                            } else {
+                                "running"
+                            }
+                            .into(),
                             started: Instant::now(),
                             seconds: None,
                             activity: Some(activity),
@@ -113,10 +145,11 @@ impl State {
                             .rev()
                             .find(|e| matches!(e,Entry::Tool {id,..} if id==&call_id))
                         {
+                            let executed = state == "running";
                             *state = status;
                             *tool_error = error;
                             *output_bytes = Some(bytes);
-                            *seconds = Some(started.elapsed().as_secs_f64());
+                            *seconds = executed.then(|| started.elapsed().as_secs_f64());
                         } else {
                             self.entries.push(Entry::Tool {
                                 id: call_id,
@@ -175,6 +208,23 @@ impl State {
                         let mut cell = AgentMessageCell::complete(answer);
                         cell.final_separator = after_activity;
                         self.entries.push(Entry::Assistant(cell));
+                    }
+                }
+                for entry in self
+                    .entries
+                    .iter_mut()
+                    .rev()
+                    .take_while(|entry| !matches!(entry, Entry::RunTiming { .. }))
+                {
+                    if let Entry::Tool { status, .. } = entry {
+                        if matches!(status.as_str(), "running" | "queued" | "pending") {
+                            *status = if result.status == RunStatus::Cancelled {
+                                "cancelled"
+                            } else {
+                                "unknown"
+                            }
+                            .into();
+                        }
                     }
                 }
                 self.finish_assistant();

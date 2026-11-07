@@ -391,6 +391,7 @@ impl State {
         let mut calls = HashMap::new();
         let mut last_assistant = HashMap::new();
         let mut with_tools = HashSet::new();
+        let mut cancelled_calls = HashSet::new();
         let executions = executions
             .into_iter()
             .map(|execution| (execution.execution_id.clone(), execution))
@@ -445,6 +446,15 @@ impl State {
                         ..
                     } => {
                         with_tools.insert(event.execution_id.clone());
+                        if executions
+                            .get(&event.execution_id)
+                            .is_some_and(|execution| execution.status == "cancelled")
+                            && presentation
+                                .as_ref()
+                                .is_some_and(|metadata| metadata.finished_at.is_none())
+                        {
+                            cancelled_calls.insert((event.execution_id.clone(), call_id.clone()));
+                        }
                         calls.insert(
                             (event.execution_id.clone(), call_id.clone()),
                             self.entries.len(),
@@ -456,7 +466,19 @@ impl State {
                                 .get(&event.execution_id)
                                 .is_some_and(|execution| execution.status == "running")
                             {
-                                "running"
+                                if presentation
+                                    .as_ref()
+                                    .is_some_and(|metadata| metadata.started_at.is_none())
+                                {
+                                    "queued"
+                                } else {
+                                    "running"
+                                }
+                            } else if executions
+                                .get(&event.execution_id)
+                                .is_some_and(|execution| execution.status == "cancelled")
+                            {
+                                "cancelled"
                             } else {
                                 "unknown"
                             }
@@ -494,9 +516,15 @@ impl State {
                                 ..
                             } = &mut self.entries[index]
                             {
-                                *old = status.clone();
+                                let cancelled =
+                                    cancelled_calls.contains(&key) && status != "success";
+                                *old = if cancelled {
+                                    "cancelled".into()
+                                } else {
+                                    status.clone()
+                                };
                                 *bytes = Some(output_bytes);
-                                *error = (status != "success").then(|| {
+                                *error = (status != "success" && !cancelled).then(|| {
                                     output.lines().next().unwrap_or("Tool failed").to_owned()
                                 });
                             }

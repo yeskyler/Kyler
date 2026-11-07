@@ -829,6 +829,16 @@ async fn tool_details_are_available_separately_without_putting_arguments_into_ss
             .contains("PRIVATE_TOOL_RESULT")
     );
     let events = h.events(&run.run_id, 0).await;
+    let queued = events.iter().position(|event| matches!(&event.payload, EventPayload::ToolQueued { call_id, .. } if call_id == "echo-call")).unwrap();
+    let started = events.iter().position(|event| matches!(&event.payload, EventPayload::ToolStarted { call_id, .. } if call_id == "echo-call")).unwrap();
+    let finished = events.iter().position(|event| matches!(&event.payload, EventPayload::ToolFinished { call_id, .. } if call_id == "echo-call")).unwrap();
+    assert!(queued < started && started < finished);
+    assert!(
+        serde_json::to_value(&events[queued].payload)
+            .unwrap()
+            .get("arguments")
+            .is_none()
+    );
     assert!(
         !serde_json::to_string(&events)
             .unwrap()
