@@ -175,6 +175,9 @@ pub(super) fn extract(info: &AttachmentInfo, bytes: &[u8]) -> Result<Extracted> 
                             text.push_str(&quick_xml::escape::unescape(&encoded)?);
                         }
                     }
+                    quick_xml::events::Event::Empty(value) if value.name().as_ref() == b"w:tab" => {
+                        text.push('\t')
+                    }
                     quick_xml::events::Event::End(value) if value.name().as_ref() == b"w:p" => {
                         text.push('\n')
                     }

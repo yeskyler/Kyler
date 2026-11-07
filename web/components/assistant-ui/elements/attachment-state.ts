@@ -36,6 +36,12 @@ export function useAttachmentState() {
   );
   const isUploading = uploadState === "uploading";
   const isError = uploadState === "error";
+  const isReady = useAuiState(
+    (s) =>
+      s.attachment.status.type === "complete" ||
+      (s.attachment.status.type === "requires-action" &&
+        s.attachment.status.reason === "composer-send"),
+  );
 
   const errorMessage = useAuiState((s) =>
     s.attachment.status.type === "incomplete" && s.attachment.status.reason === "error"
@@ -51,6 +57,7 @@ export function useAttachmentState() {
     typeLabel,
     isUploading,
     isError,
+    isReady,
     errorMessage,
   };
 }
