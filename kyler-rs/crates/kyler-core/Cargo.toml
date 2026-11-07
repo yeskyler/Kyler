@@ -1,0 +1,53 @@
+[package]
+name = "kyler-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pulldown-cmark.workspace = true
+percent-encoding.workspace = true
+# local crates
+kyler-protocol.workspace = true
+kyler-config.workspace = true
+
+# external crates
+anyhow.workspace = true
+serde-saphyr.workspace = true
+sha2.workspace = true
+libc.workspace = true
+async-openai.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+schemars.workspace = true
+async-stream.workspace = true
+futures.workspace = true
+backon.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+base64.workspace = true
+tiktoken-rs.workspace = true
+csv.workspace = true
+zip.workspace = true
+rmcp.workspace = true
+
+mxc-sdk.workspace = true
+tempfile.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+pdf-extract = "0.10"
+quick-xml = "0.39"
+url.workspace = true
+calamine = "0.35"
+
+[[bin]]
+name = "kyler-tool-worker"
+path = "src/bin/tool_worker.rs"
+
+[dev-dependencies]
+kyler-logging.workspace = true
+axum.workspace = true

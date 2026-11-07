@@ -1,0 +1,157 @@
+[llm]
+base_url = "https://api.siliconflow.cn/v1"
+model = "deepseek-ai/DeepSeek-V4.1-Flash"
+# Supply KYLER_LLM_API_KEY or OPENAI_API_KEY; do not commit secrets here.
+
+[llm.capabilities]
+images = true
+
+[agent]
+max_steps = 50
+tool_output_max_bytes = 8192
+# additional_instructions = "Application-specific instructions for Kyler."
+
+[context]
+context_tokens = 128000
+window_ratio = 0.6
+trigger_ratio = 0.8
+output_tokens = 8192
+safety_tokens = 1024
+summary_tokens = 4096
+
+[workspace]
+default_directory = "workspace"
+
+[session]
+enabled = false
+directory = "sessions"
+
+[subagent]
+# Enables general delegation and read-only Review agents.
+enabled = false
+# Retains child sessions, validated review reports and diagnostic rollouts.
+persist_sessions = false
+# Shared running limit; additional tasks wait in the queue (maximum 32).
+max_concurrent_tasks = 32
+# Cumulative creation limit per parent execution, including finished tasks (maximum 64).
+max_tasks_per_execution = 64
+max_steps = 25
+
+[logging]
+filter = "info"
+format = "compact"
+ansi = false
+
+[server]
+# Human approval waits have their own timeout and do not consume active run time.
+approval_timeout_seconds = 300
+bind = "127.0.0.1:30001"
+# Supply KYLER_SERVER_TOKEN when listening on a non-loopback address.
+allowed_origins = []
+max_concurrent_runs = 8
+max_retained_runs = 128
+max_subscribers_per_run = 16
+max_request_bytes = 65536
+run_timeout_seconds = 600
+event_buffer_max_events = 2048
+event_buffer_max_bytes = 8388608
+completed_run_retention_seconds = 1800
+shutdown_grace_seconds = 30
+
+[client]
+server_url = "http://127.0.0.1:30001"
+# Supply KYLER_CLIENT_TOKEN (or KYLER_SERVER_TOKEN) for authenticated servers.
+connect_timeout_seconds = 10
+request_timeout_seconds = 30
+stream_idle_timeout_seconds = 60
+reconnect_max_attempts = 5
+reconnect_delay_ms = 500
+cancel_timeout_seconds = 30
+max_event_bytes = 4194304
+max_response_bytes = 16777216
+
+# MCP connections are scoped to each session workspace. Connections can be managed in /mcp.
+# Local processes follow the configured sandbox and require sandbox.allow_commands=true.
+# command must be an absolute executable path; args must reference files readable in the sandbox.
+# [mcp.servers.expense]
+# transport = "stdio"
+# command = "/absolute/path/expense_mcp_server"
+# args = []
+# auto_connect = true
+# activity = "execute"
+# [mcp.servers.expense.env]
+# API_KEY = "EXPENSE_API_KEY" # Environment variable reference, never a literal secret.
+
+# Remote HTTP requires serve --allow-network. Host proxy policy is preserved.
+# [mcp.servers.docs]
+# transport = "streamable_http"
+# url = "https://example.com/mcp"
+# bearer_token_env = "DOCS_MCP_TOKEN"
+# auto_connect = true
+# activity = "search"
+# connect_timeout_seconds = 10
+# call_timeout_seconds = 60
+
+[skills]
+enabled = true
+user_directory = "~/.kyler/skills"
+project_directory = ".kyler/skills"
+state_file = "~/.kyler/skills-state.json"
+max_instruction_bytes = 32768
+max_resource_bytes = 131072
+catalog_token_budget = 4096
+
+# Optional named profiles for /model. When profiles are present, they replace [llm].
+# /model: Enter selects for the next task, r reloads this file, d follows the default.
+# api_key_env references the process environment; installation can save api_key directly.
+# Existing [llm] settings appear as a single "default" profile when this section is absent.
+# [models]
+# default = "flash"
+# [models.providers.siliconflow]
+# base_url = "https://api.siliconflow.cn/v1"
+# api_key_env = "SILICONFLOW_API_KEY"
+# [models.profiles.flash]
+# provider = "siliconflow"
+# model = "deepseek-ai/DeepSeek-V4.1-Flash"
+# context_tokens = 128000
+# output_tokens = 8192
+# output_token_parameter = "max_tokens"
+# [models.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+# [models.profiles.openai]
+# provider = "openai"
+# model = "YOUR_MODEL_ID"
+# context_tokens = 128000 # Set this to the deployed model's actual capacity.
+# output_tokens = 8192
+# output_token_parameter = "max_completion_tokens"
+
+[sandbox]
+mode = "workspace-write"
+network_access = true
+allow_commands = true
+# Additional relative roots resolve from the configuration directory.
+additional_read_roots = []
+additional_write_roots = []
+# Relative protected paths resolve from each session workspace.
+protected_paths = []
+# Set true only when the service is already inside an operator-managed sandbox.
+external_sandbox_confirmed = false
+
+[approval]
+policy = "on-request"
+reviewer = "user"
+
+[approval.reject]
+sandbox_escalation = true
+tool_rules = true
+mcp_elicitation = true
+
+# Exact tool names. Rules do not override sandbox restrictions.
+# [approval.rules]
+# apply_patch = "ask"
+
+# Enabled by the complete-bundle installer. Existing backend-only installs stay valid.
+[web]
+enabled = false
+bind = "127.0.0.1:30002"

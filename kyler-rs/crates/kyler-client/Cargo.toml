@@ -1,0 +1,19 @@
+[package]
+name = "kyler-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kyler-config.workspace = true
+kyler-protocol.workspace = true
+reqwest = { workspace = true, features = ["stream", "query"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+async-stream.workspace = true

@@ -1,0 +1,16 @@
+[dataset]
+directory = "../datasets/GAIA/2023"
+split = "validation"
+
+[run]
+concurrency = 1
+max_steps = 50
+timeout_seconds = 600
+results_directory = "../results"
+
+[agent]
+# Opt in only to trusted, explicitly configured connectors. Connector services
+# enforce their own access boundaries and may have access outside the local sandbox.
+enable_mcp = false
+load_user_skills = false
+enable_subagents = false
