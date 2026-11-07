@@ -69,18 +69,17 @@ git clone https://github.com/yeskyler/Kyler.git
 cd Kyler
 ```
 
-Configure and start the backend. `cargo run` builds it automatically:
+Configure the backend on first use, then start it. `cargo run` builds it automatically:
 
 ```sh
-export KYLER_CONFIG=~/.kyler-dev/config.toml
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```
 
-Start Web in a second terminal from the repository root:
+Both services use `~/.kyler/config.toml` by default. Skip `configure` if it is already
+configured. Start Web in a second terminal from the repository root:
 
 ```sh
-export KYLER_CONFIG=~/.kyler-dev/config.toml
 cd web
 npm ci
 npm run dev -- --hostname 127.0.0.1 --port 30002
@@ -88,12 +87,6 @@ npm run dev -- --hostname 127.0.0.1 --port 30002
 
 Open **http://127.0.0.1:30002**. Development and installed services must use separate
 ports when running together.
-
-To build every workspace member without starting a service:
-
-```sh
-cargo build --manifest-path kyler-rs/Cargo.toml --workspace
-```
 
 ## Documentation
 

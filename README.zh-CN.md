@@ -68,30 +68,23 @@ git clone https://github.com/yeskyler/Kyler.git
 cd Kyler
 ```
 
-配置并启动后端，`cargo run` 会自动完成所需的编译：
+首次使用时配置后端，然后启动；`cargo run` 会自动完成所需的编译：
 
 ```sh
-export KYLER_CONFIG=~/.kyler-dev/config.toml
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```
 
+前后端默认使用 `~/.kyler/config.toml`。已有有效配置时，可以跳过 `configure`。
 在另一个终端中，从仓库根目录启动 Web：
 
 ```sh
-export KYLER_CONFIG=~/.kyler-dev/config.toml
 cd web
 npm ci
 npm run dev -- --hostname 127.0.0.1 --port 30002
 ```
 
 打开 **http://127.0.0.1:30002**。开发服务与已安装的服务同时运行时，应使用不同端口。
-
-如需只编译整个工作区而不启动服务：
-
-```sh
-cargo build --manifest-path kyler-rs/Cargo.toml --workspace
-```
 
 ## 文档导航
 
