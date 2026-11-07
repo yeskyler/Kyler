@@ -148,7 +148,7 @@ fi
 if [ ! -e "$config_path" ]; then
     cat > "$config_path" <<'CONFIG'
 [llm]
-model = "deepseek-ai/DeepSeek-V4.1-Flash"
+model = "deepseek-ai/DeepSeek-V4-Flash"
 base_url = "https://api.siliconflow.cn/v1"
 # Supply credentials during setup or through the process environment.
 [llm.capabilities]
@@ -245,6 +245,9 @@ if [ "$start_server" = true ]; then
         if [ "$complete" = true ]; then rollback || fail 'Automatic recovery needs attention; inspect service status and logs.'; fi
         fail 'Services could not start. Check kyler service status, ~/.kyler/logs/server.log and ~/.kyler/logs/web.log.'
     fi
+    printf '\nKyler · Service status and management\n\n'
     installed_service service status
-else printf 'Services not started. Start: kyler service start\n'; fi
-printf '\nRun in your project:\n  kyler tui\nStop services: kyler service stop\n'
+else printf '\nKyler · Service status and management\n\nServices not started.\n'; fi
+printf '\nConfiguration: %s\n' "$config_path"
+printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n'
+printf '\nRun in your project:\n  kyler tui\n'

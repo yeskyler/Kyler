@@ -34,7 +34,7 @@ workspace-relative; extra access roots follow configuration path resolution.
 
 | Section | Purpose | Template/setup behavior |
 | --- | --- | --- |
-| `llm` | Model, API base URL, credentials, capabilities | Setup proposes `deepseek-ai/DeepSeek-V4.1-Flash` |
+| `llm` | Model, API base URL, credentials, capabilities | Setup proposes `deepseek-ai/DeepSeek-V4-Flash` |
 | `models` | Named provider/model profiles | When configured, replaces the legacy single `llm` profile |
 | `agent` | Step limit and tool output budget | 50 steps; 8192-byte tool model-view budget |
 | `context` | Window, compaction, output reservation | 128000 tokens; window ratio 0.6; trigger ratio 0.8 |
