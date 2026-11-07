@@ -75,18 +75,6 @@ The frontend reads the backend connection from server-side configuration. If
 port 30002 is occupied by the installed Web service, use another development port.
 Do not run destructive tests against a normal user's workspace or session store.
 
-## Continuous integration
-
-The [CI workflow](../.github/workflows/ci.yml) runs for pushes and pull requests
-to `dev` and `main`, and can be started manually. Rust formatting, workspace
-checks/tests, and isolated installer/publisher tests run on Linux and macOS. Web
-lint, tests, and a production build run on Linux with Node.js 24. Tests use local
-fixtures; no model credentials or live benchmark runs are required.
-
-The Release workflow calls the same checks before building release bundles.
-Branch protection must be configured separately in GitHub; repository plans may
-restrict its availability for private repositories.
-
 ## Configuration and local execution
 
 For first-time backend setup from a checkout:
