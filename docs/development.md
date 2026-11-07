@@ -15,7 +15,9 @@ The Rust workspace is inside `kyler-rs/`; the repository root has no Cargo manif
 
 On macOS, install command-line build tools with `xcode-select --install`.
 On Ubuntu/Debian, the usual starting dependencies are `build-essential`, `pkg-config`,
-and `libssl-dev`; install any additional native libraries reported by the build.
+and `libssl-dev`; native Linux sandbox tests also need `bubblewrap` and a host
+that permits its user namespaces. Install any additional native libraries reported
+by the build.
 Install Python through your operating system or the official Python distribution.
 Verify the development tools before building:
 

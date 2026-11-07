@@ -81,56 +81,11 @@ archive checksums, platform/version metadata, source revision, project license,
 and matching installer. `--artifacts PATH` selects another directory. Dry-run is
 local only: no GitHub authentication, tag creation, push, or Release upload occurs.
 
-## 4. Publish automatically with GitHub Actions
+## 4. Publish local bundles
 
-The repository's [Release workflow](../.github/workflows/release.yml) triggers only
-for version tags (`v*` with a numeric prefix) and manual requests for an existing
-tag. It does not run on ordinary branch pushes or pull requests.
-
-After updating version metadata and the changelog, commit and push the source:
-
-```sh
-git tag -a v0.1.0 -m "Kyler 0.1.0"
-git push origin v0.1.0
-```
-
-The tag must match `[workspace.package].version`; use a fresh matching version
-for subsequent releases. Watch the repository's Actions tab for progress.
-
-The workflow validates the tag and scripts, then runs four native builds:
-
-| Runner | Archive target |
-| --- | --- |
-| `macos-15` | `aarch64-apple-darwin` |
-| `macos-15-intel` | `x86_64-apple-darwin` |
-| `ubuntu-24.04` | `x86_64-unknown-linux-gnu` |
-| `ubuntu-24.04-arm` | `aarch64-unknown-linux-gnu` |
-
-Each runner builds Rust and Web and bundles a matching native Node.js runtime.
-Only when every build succeeds does a separate publishing job download the assets,
-validate each checksum and build revision, merge the checksum manifests, require all
-four targets, and call the independent publisher. There is no last-writer-wins
-checksum upload: all platforms are published together in a single Release.
-
-Build and validation jobs have read-only repository access. Only the publishing job
-has `contents: write` and receives the built-in `GITHUB_TOKEN` as `GH_TOKEN`.
-No personal access token or model key is needed. Actions are pinned to verified
-commit hashes. The publisher requires the existing remote tag and will not recreate
-it if it was deleted during the build.
-
-To retry infrastructure failures, use Actions' rerun controls or manually run the
-workflow with the same existing tag. Already-created Releases, including drafts,
-are rejected instead of overwritten. Inspect a partial draft before recovery.
-Artifact uploads are retained for seven days; published Release assets remain separate.
-
-## 5. Publish local bundles instead
-
-This is an alternative to the tag-triggered workflow, not an extra required step.
-Do not run both publishers for the same version concurrently. The local command
-creates and pushes a tag when needed; its Release upload happens in the same local
-process. Tags pushed with your account can also trigger the workflow, so for local
-publishing disable the Release workflow in GitHub Actions first. Prefer the tag
-workflow for normal multi-platform releases.
+The local publisher creates and pushes a version tag when needed, then uploads
+the prepared bundles to GitHub in the same process. Build and validate all intended
+platform bundles before publishing.
 
 ```sh
 gh auth login

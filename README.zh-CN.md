@@ -6,7 +6,6 @@
   <h3>面向研究、创作与任务执行的通用 AI 助手。</h3>
   <p>
     <a href="https://github.com/yeskyler/Kyler/releases"><img src="https://img.shields.io/github/v/release/yeskyler/Kyler?style=flat-square&amp;color=3b82f6" alt="Release"></a>
-    <a href="https://github.com/yeskyler/Kyler/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/yeskyler/Kyler/release.yml?style=flat-square&amp;label=release%20build" alt="Release build"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/yeskyler/Kyler?style=flat-square&amp;color=22c55e" alt="License"></a>
     <a href="https://github.com/yeskyler/Kyler/stargazers"><img src="https://img.shields.io/github/stars/yeskyler/Kyler?style=flat-square&amp;color=eab308" alt="GitHub stars"></a>
   </p>
