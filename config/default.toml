@@ -1,6 +1,6 @@
 [llm]
 base_url = "https://api.siliconflow.cn/v1"
-model = "deepseek-ai/DeepSeek-V4.1-Flash"
+model = "deepseek-ai/DeepSeek-V4-Flash"
 # Supply KYLER_LLM_API_KEY or OPENAI_API_KEY; do not commit secrets here.
 
 [llm.capabilities]
@@ -112,7 +112,7 @@ catalog_token_budget = 4096
 # api_key_env = "SILICONFLOW_API_KEY"
 # [models.profiles.flash]
 # provider = "siliconflow"
-# model = "deepseek-ai/DeepSeek-V4.1-Flash"
+# model = "deepseek-ai/DeepSeek-V4-Flash"
 # context_tokens = 128000
 # output_tokens = 8192
 # output_token_parameter = "max_tokens"

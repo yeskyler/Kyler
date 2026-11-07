@@ -26,14 +26,17 @@ an existing local archive is also supported below.
 sh scripts/install.sh --bundle ./dist/kyler-v0.1.0-aarch64-apple-darwin.tar.gz --modify-path
 ```
 
-Setup asks for each value in order. Enter keeps the current value; credentials
-are hidden. Esc cancels setup before replacing an existing installation.
+Setup proceeds automatically through model configuration, service addresses, and
+service status/management. It asks for `OPENAI_BASE_URL` (an OpenAI-compatible Chat
+Completions API), a hidden `OPENAI_API_KEY`, and the model ID, followed by the backend
+and Web listening addresses. Enter keeps existing values; Esc cancels setup before
+replacing an existing installation. No model request is sent during setup.
 
 | Setting | Default |
 | --- | --- |
-| Model | `deepseek-ai/DeepSeek-V4.1-Flash` |
-| Model API URL | `https://api.siliconflow.cn/v1` |
-| Model API key | Required |
+| OPENAI_BASE_URL | `https://api.siliconflow.cn/v1` |
+| OPENAI_API_KEY | Required; input is hidden |
+| Model | `deepseek-ai/DeepSeek-V4-Flash` |
 | Backend listen address | `127.0.0.1:30001` |
 | Backend connection URL | Derived from the backend listen address |
 | Web listen address | `127.0.0.1:30002` |
@@ -41,9 +44,9 @@ are hidden. Esc cancels setup before replacing an existing installation.
 Both listening addresses are configurable, including the IP and port. Examples:
 `127.0.0.1:31001`, `0.0.0.0:31002`, `[::1]:31002`. A listen address must be an IP
 on this machine (or a wildcard); it is not a public domain or HTTPS URL.
-For a wildcard backend address, setup suggests a loopback connection URL rather
-than trying to connect to `0.0.0.0`. The connection URL can also be changed to an
-HTTP/HTTPS backend endpoint; a custom endpoint can have its own access token.
+Setup derives the Web-to-backend connection URL from the backend listening address,
+using loopback for wildcard addresses such as `0.0.0.0`. For a separately hosted
+backend, edit `[client].server_url` and its access token in the configuration file.
 
 After installation, open **http://127.0.0.1:30002**, or the Web address you chose.
 Both services start in the background by default. In the current terminal:

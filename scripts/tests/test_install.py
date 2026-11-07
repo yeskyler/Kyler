@@ -209,13 +209,18 @@ class InstallTests(unittest.TestCase):
             if installed.exists():
                 subprocess.run([str(installed), "service", "stop"], env=environment, capture_output=True, timeout=15)
 
-    def interactive_install(self, replies, expected=0, piped=False, redirected=False):
+    def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None):
         replies = list(replies)
         if expected == 0:
             with socket.socket() as listener:
                 listener.bind(("127.0.0.1", 0))
                 address = "127.0.0.1:" + str(listener.getsockname()[1])
-            replies += [(b"[4] Backend address", (address + "\n").encode()), (b"[5] Backend URL", b"\n")]
+            replies += [(b"[1] Backend address", (address + "\n").encode())]
+            if bundle is not None:
+                with socket.socket() as listener:
+                    listener.bind(("127.0.0.1", 0))
+                    web_address = "127.0.0.1:" + str(listener.getsockname()[1])
+                replies += [(b"[2] Web address", (web_address + "\n").encode())]
         import pty
         import select
         import termios
@@ -238,6 +243,8 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(actual, expected_attributes)
 
         command = ["sh", str(INSTALLER), "--local", str(binary), "--no-start"]
+        if bundle is not None:
+            command = ["sh", str(INSTALLER), "--bundle", str(bundle)]
         if piped:
             command = ["sh", "-c", 'cat "$1" | sh -s -- --local "$2" --no-start', "installer-pipe", str(INSTALLER), str(binary)]
         elif redirected:
@@ -263,7 +270,7 @@ class InstallTests(unittest.TestCase):
                     if select.select([master], [], [], 0.1)[0]:
                         output += os.read(master, 65536)
                 cursor = output.index(marker, cursor) + len(marker)
-                if (piped or redirected) and marker == b"[4] Backend address":
+                if (piped or redirected) and marker == b"[1] Backend address":
                     assert_terminal_restored()
                 if marker.startswith(b"["):
                     step = int(marker.split(b"]", 1)[0][1:])
@@ -299,9 +306,9 @@ class InstallTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_interactive_install_hides_key_and_restores_terminal(self):
         output = self.interactive_install([
-            (b"[1] Model [", b"pty-model\n"),
-            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[3] API key", b"PTY_SECRET_TEST_KEY\r"),
+            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[2] OPENAI_API_KEY", b"PTY_SECRET_TEST_KEY\r"),
+            (b"[3] Model [", b"pty-model\n"),
         ])
         self.assertNotIn(b"PTY_SECRET_TEST_KEY", output)
         self.assertNotIn(b"\x1b[?1049h", output)
@@ -310,15 +317,15 @@ class InstallTests(unittest.TestCase):
         config = (self.home / ".kyler/config.toml").read_text()
         self.assertIn("PTY_SECRET_TEST_KEY", config)
         self.assertNotIn("tools.tavily", config)
-        for marker in [b"[1] Model", b"[2] API URL", b"[3] API key", b"kyler tui", b"kyler service stop"]:
+        for marker in [b"[1] OPENAI_BASE_URL", b"[2] OPENAI_API_KEY", b"[3] Model", b"kyler tui", b"kyler service stop"]:
             self.assertIn(marker, output)
 
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_piped_installer_reads_hidden_key_from_controlling_terminal(self):
         output = self.interactive_install([
-            (b"[1] Model [", b"pipe-model\n"),
-            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[3] API key", b"PIPE_SECRET_TEST_KEY\r"),
+            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[2] OPENAI_API_KEY", b"PIPE_SECRET_TEST_KEY\r"),
+            (b"[3] Model [", b"pipe-model\n"),
         ], piped=True)
         self.assertNotIn(b"PIPE_SECRET_TEST_KEY", output)
         self.assertIn("PIPE_SECRET_TEST_KEY", (self.home / ".kyler/config.toml").read_text())
@@ -326,9 +333,9 @@ class InstallTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_dev_tty_input_does_not_require_event_reader_initialization(self):
         output = self.interactive_install([
-            (b"[1] Model [", b"tty-model\n"),
-            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[3] API key", b"TTY_SECRET_TEST_KEY\r"),
+            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[2] OPENAI_API_KEY", b"TTY_SECRET_TEST_KEY\r"),
+            (b"[3] Model [", b"tty-model\n"),
         ], redirected=True)
         self.assertNotIn(b"TTY_SECRET_TEST_KEY", output)
         self.assertIn("TTY_SECRET_TEST_KEY", (self.home / ".kyler/config.toml").read_text())
@@ -336,13 +343,13 @@ class InstallTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_setup_retries_invalid_input_without_extra_configuration_steps(self):
         output = self.interactive_install([
-            (b"[1] Model [", b"  pty-model  \n"),
-            (b"[2] API URL [", b"not-a-url\n"),
-            (b"[2] API URL [", b"https://example.com/v1/chat/completions\n"),
-            (b"[2] API URL [", b"  http://127.0.0.1:1/v1/  \n"),
-            (b"[3] API key", b"\r"),
-            (b"[3] API key", b"\x1b[200~first\nsecond\x1b[201~\r"),
-            (b"[3] API key", b"\x1b[200~  RETRY_SECRET_KEY\n\x1b[201~\r"),
+            (b"[1] OPENAI_BASE_URL [", b"not-a-url\n"),
+            (b"[1] OPENAI_BASE_URL [", b"https://example.com/v1/chat/completions\n"),
+            (b"[1] OPENAI_BASE_URL [", b"  http://127.0.0.1:1/v1/  \n"),
+            (b"[2] OPENAI_API_KEY", b"\r"),
+            (b"[2] OPENAI_API_KEY", b"\x1b[200~first\nsecond\x1b[201~\r"),
+            (b"[2] OPENAI_API_KEY", b"\x1b[200~  RETRY_SECRET_KEY\n\x1b[201~\r"),
+            (b"[3] Model [", b"  pty-model  \n"),
         ])
         self.assertNotIn(b"RETRY_SECRET_KEY", output)
         self.assertNotIn(b"first", output)
@@ -352,7 +359,7 @@ class InstallTests(unittest.TestCase):
         self.assertIn('base_url = "http://127.0.0.1:1/v1"', config)
         self.assertIn('api_key = "RETRY_SECRET_KEY"', config)
         self.assertNotIn('tools.tavily', config)
-        self.assertNotIn(b"[6]", output)
+        self.assertNotIn(b"Backend URL", output)
 
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_setup_cancellation_keeps_existing_config_and_binary(self):
@@ -363,9 +370,8 @@ class InstallTests(unittest.TestCase):
         installed = self.home / ".local/bin/kyler"
         binary_before = installed.read_bytes()
         output = self.interactive_install([
-            (b"[1] Model [", b"\n"),
-            (b"[2] API URL [", b"\n"),
-            (b"[3] API key", b"\x1b"),
+            (b"[1] OPENAI_BASE_URL [", b"\n"),
+            (b"[2] OPENAI_API_KEY", b"\x1b"),
         ], expected=130)
         self.assertEqual(config.read_bytes(), before)
         self.assertEqual(installed.read_bytes(), binary_before)
@@ -378,9 +384,9 @@ class InstallTests(unittest.TestCase):
         config = self.home / ".kyler/config.toml"
         config.write_text('[llm]\nmodel="kept-model"\nbase_url="https://example.com/v1"\napi_key="KEPT_MODEL_KEY"\n[tools.tavily]\nenabled=true\napi_key="KEPT_SEARCH_KEY"\n[context]\ncontext_tokens=64000\n')
         output = self.interactive_install([
-            (b"[1] Model [", b"\n"),
-            (b"[2] API URL [", b"\n"),
-            (b"[3] API key", b"\r"),
+            (b"[1] OPENAI_BASE_URL [", b"\n"),
+            (b"[2] OPENAI_API_KEY", b"\r"),
+            (b"[3] Model [", b"\n"),
         ])
         self.assertNotIn(b"KEPT_MODEL_KEY", output)
         self.assertNotIn(b"KEPT_SEARCH_KEY", output)
@@ -396,14 +402,14 @@ class InstallTests(unittest.TestCase):
         config = self.home / ".kyler/config.toml"
         config.write_text('[llm]\nmodel="kept-model"\nbase_url="https://example.com/v1"\napi_key="invalid saved key"\n')
         output = self.interactive_install([
-            (b"[1] Model [", b"\n"),
-            (b"[2] API URL [", b"\n"),
-            (b"[3] API key", b"\r"),
-            (b"[3] API key", b"REPLACEMENT_TEST_KEY\r"),
+            (b"[1] OPENAI_BASE_URL [", b"\n"),
+            (b"[2] OPENAI_API_KEY", b"\r"),
+            (b"[2] OPENAI_API_KEY", b"REPLACEMENT_TEST_KEY\r"),
+            (b"[3] Model [", b"\n"),
         ])
         self.assertIn(b"Saved key is invalid", output)
-        self.assertEqual(output.count(b"[3] API key"), 2)
-        self.assertNotIn(b"[6]", output)
+        self.assertEqual(output.count(b"[2] OPENAI_API_KEY"), 2)
+        self.assertNotIn(b"Backend URL", output)
         self.assertNotIn(b"invalid saved key", output)
         self.assertNotIn(b"REPLACEMENT_TEST_KEY", output)
         self.assertIn('api_key = "REPLACEMENT_TEST_KEY"', config.read_text())
@@ -523,6 +529,33 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)));
         self.assertEqual(stat.S_IMODE((self.home / ".kyler/web.json").stat().st_mode), 0o600)
         self.assertFalse(self.status("stop")["running"])
         self.assertFalse(self.status("status")["web"]["running"])
+
+    @unittest.skipUnless(os.name == "posix", "requires PTY")
+    def test_interactive_bundle_uses_three_stages_and_starts_services(self):
+        self.env.pop("KYLER_SERVER_BIND")
+        self.env.pop("KYLER_WEB_BIND")
+        output = InstallTests.interactive_install(self, [
+            (b"[1] OPENAI_BASE_URL [https://api.siliconflow.cn/v1]", b"\n"),
+            (b"[2] OPENAI_API_KEY", b"WIZARD_TEST_KEY\r"),
+            (b"[3] Model [deepseek-ai/DeepSeek-V4-Flash]", b"\n"),
+        ], bundle=self.bundle("interactive"))
+        titles = [b"Configure model", b"Configure service addresses", b"Service status and management"]
+        self.assertEqual([output.index(title) for title in titles], sorted(output.index(title) for title in titles))
+        self.assertIn(b"OpenAI-compatible Chat Completions API", output)
+        self.assertNotIn(b"WIZARD_TEST_KEY", output)
+        self.assertNotIn(b"Backend URL", output)
+        self.assertNotIn(b"next page", output.lower())
+        self.assertIn(b"kyler service status", output)
+        self.assertIn(b"kyler service start --restart", output)
+        config = (self.home / ".kyler/config.toml").read_text()
+        self.assertIn('model = "deepseek-ai/DeepSeek-V4-Flash"', config)
+        self.assertIn('base_url = "https://api.siliconflow.cn/v1"', config)
+        state = self.status("status")
+        self.assertTrue(state["backend"]["running"])
+        self.assertTrue(state["web"]["running"])
+        self.assertIn(state["backend"]["url"].encode(), output)
+        self.assertIn(state["web"]["url"].encode(), output)
+        self.assertIn('server_url = "' + state["backend"]["url"] + '"', config)
 
     def test_corrupt_bundle_is_rejected_before_installation(self):
         bundle = self.bundle("corrupt")

@@ -48,7 +48,7 @@ pub fn configure(
         )
     })?;
     if config.models.providers.is_empty() && config.llm.model.is_empty() {
-        config.llm.model = "deepseek-ai/DeepSeek-V4.1-Flash".into();
+        config.llm.model = "deepseek-ai/DeepSeek-V4-Flash".into();
         if config.llm.base_url.is_empty() {
             config.llm.base_url = "https://api.siliconflow.cn/v1".into();
         }
@@ -71,21 +71,24 @@ pub fn configure(
         config.web.enabled = true;
     }
     if interactive {
-        eprintln!("Kyler setup · Enter keeps current values.");
         let mut prompts = Prompts::default();
+        prompts.section("Configure model");
+        eprintln!("Enter keeps current values. API keys are hidden.");
+        eprintln!("OPENAI_BASE_URL must use an OpenAI-compatible Chat Completions API.");
         if config.models.providers.is_empty() {
+            config.llm.base_url = prompts.api_url("OPENAI_BASE_URL", &config.llm.base_url)?;
+            config.llm.api_key = prompts.key("OPENAI_API_KEY", &config.llm.api_key, false)?;
             config.llm.model = prompts.model(&config.llm.model)?;
-            config.llm.base_url = prompts.api_url("API URL", &config.llm.base_url)?;
-            config.llm.api_key = prompts.key("API key", &config.llm.api_key, false)?;
         } else {
             for (name, provider) in &mut config.models.providers {
                 provider.base_url =
-                    prompts.api_url(&format!("{name} API URL"), &provider.base_url)?;
+                    prompts.api_url(&format!("{name} OPENAI_BASE_URL"), &provider.base_url)?;
                 provider.api_key =
-                    prompts.key(&format!("{name} API key"), &provider.api_key, false)?;
+                    prompts.key(&format!("{name} OPENAI_API_KEY"), &provider.api_key, false)?;
             }
         }
         if addresses || enable_web || config.web.enabled {
+            prompts.section("Configure service addresses");
             loop {
                 config.server.bind = prompts.address("Backend address", config.server.bind)?;
                 if address_available(config.server.bind)
@@ -97,17 +100,10 @@ pub fn configure(
                 eprintln!(
                     "Backend address is unavailable. Choose another address or stop its owner."
                 );
+                prompts.repeat_last();
             }
-            let default_url = if automatic_connection {
-                kyler_config::web::connect_url(config.server.bind)
-            } else {
-                config.client.server_url.clone()
-            };
-            config.client.server_url = prompts.api_url("Backend URL", &default_url)?;
-            if !kyler_config::web::is_local_backend(config.server.bind, &config.client.server_url) {
-                config.client.access_token =
-                    prompts.key("Backend access token", &config.client.access_token, true)?;
-            }
+            config.client.server_url = kyler_config::web::connect_url(config.server.bind);
+            config.client.access_token = config.server.access_token.clone();
             if config.web.enabled {
                 loop {
                     config.web.bind = prompts.address("Web address", config.web.bind)?;
@@ -121,6 +117,7 @@ pub fn configure(
                     eprintln!(
                         "Backend and Web addresses conflict. Choose a different address or port."
                     );
+                    prompts.repeat_last();
                 }
                 if !config.web.bind.ip().is_loopback() || !config.web.access_token.is_empty() {
                     config.web.access_token =

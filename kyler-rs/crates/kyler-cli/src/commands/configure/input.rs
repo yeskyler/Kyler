@@ -17,6 +17,13 @@ pub(super) struct Prompts {
     completed: usize,
 }
 impl Prompts {
+    pub fn section(&mut self, title: &str) {
+        self.completed = 0;
+        eprintln!("\nKyler · {title}\n");
+    }
+    pub fn repeat_last(&mut self) {
+        self.completed = self.completed.saturating_sub(1);
+    }
     fn step<T>(&mut self, label: &str, read: impl FnOnce(&str) -> Result<T>) -> Result<T> {
         let label = format!("[{}] {label}", self.completed + 1);
         let value = read(&label)?;
@@ -97,7 +104,7 @@ fn model(label: &str, default: &str) -> Result<String> {
         if !value.is_empty() && !value.chars().any(char::is_control) {
             return Ok(value);
         }
-        eprintln!("Enter a model ID, such as deepseek-ai/DeepSeek-V4.1-Flash.");
+        eprintln!("Enter a model ID, such as deepseek-ai/DeepSeek-V4-Flash.");
     }
 }
 
@@ -143,7 +150,7 @@ fn normalize_key(value: &str) -> std::result::Result<&str, &'static str> {
 
 fn key(label: &str, existing: &SecretString, optional: bool) -> Result<SecretString> {
     let hint = if !existing.is_empty() {
-        "hidden; Enter keeps"
+        "configured; hidden; Enter keeps"
     } else if optional {
         "hidden; Enter skips"
     } else {
