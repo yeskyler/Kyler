@@ -30,8 +30,7 @@ through OpenAI-compatible Chat Completions endpoints.
 </p>
 
 ## Demo
-
-[Watch the demo](demo/example.mov)
+https://github.com/user-attachments/assets/a3c30faf-fc88-4414-9916-643834cd35ea
 
 ## Capabilities
 
