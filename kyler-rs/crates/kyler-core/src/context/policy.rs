@@ -11,7 +11,7 @@ pub struct ContextPolicy {
     pub trigger_ratio: f64,
     pub output_tokens: u32,
     pub safety_tokens: usize,
-    /// Conservative byte estimate budget for the stored summary.
+    /// Token budget for the stored summary.
     pub summary_tokens: usize,
 }
 impl Default for ContextPolicy {

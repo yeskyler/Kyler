@@ -754,20 +754,16 @@ async fn child_runtime_inherits_parent_model_snapshot_after_registry_reload() {
 #[tokio::test]
 async fn switching_to_smaller_model_compacts_history_before_request_and_updates_summary_model() {
     // The large result fits the first model, but must be summarized for the second.
-    let (url, requests, fixture) = server(vec![
-        json!({"role":"assistant","content":"history ".repeat(3500)}),
-        json!({"role":"assistant","content":"Retained facts"}),
-        json!({"role":"assistant","content":"Retained facts, merged"}),
-        json!({"role":"assistant","content":"Retained facts, merged again"}),
-        json!({"role":"assistant","content":"final answer"}),
-    ])
-    .await;
+    let mut responses = vec![json!({"role":"assistant","content":"history ".repeat(35000)})];
+    // The larger token-counted fixture can require several bounded summary chunks.
+    responses.extend((0..32).map(|_| json!({"role":"assistant","content":"Retained facts"})));
+    let (url, requests, fixture) = server(responses).await;
     let mut config = kyler_config::AppConfig::default();
     config.llm.base_url = url;
     config.llm.api_key = kyler_config::SecretString::new("fixture");
     config.llm.model = "large".into();
     config.skills.enabled = false;
-    // Keep the fixed prompt plus worst-case summary inside this byte-counted 32k fixture.
+    // Keep the fixed prompt plus worst-case summary inside this 32k fixture.
     config.context.summary_tokens = 2048;
     let agent = Agent::from_config_with_tools(&config, Arc::new(ToolBox::new()))
         .await
@@ -843,7 +839,7 @@ async fn switching_to_smaller_model_compacts_history_before_request_and_updates_
             .unwrap()
             .contains("PINNED_CURRENT_QUESTION")
     );
-    assert!(serde_json::to_vec(last).unwrap().len() < 25600);
+    assert!(inspected.estimated_input_tokens <= inspected.budget.input_limit);
     assert!(requests.iter().skip(1).all(|r| r["model"] == "small"
         && r.get("max_tokens").is_none()
         && r["max_completion_tokens"].as_u64().unwrap() <= 2048));
@@ -1111,7 +1107,7 @@ async fn compaction_failure_records_terminal_status_without_losing_history() {
     agent.context_policy.safety_tokens = 1024;
     let mut session = Session::new();
     session
-        .begin_execution(&"fixed question ".repeat(10000))
+        .begin_execution(&"fixed question ".repeat(20000))
         .unwrap();
     let client = Client::with_config(
         OpenAIConfig::new()
@@ -1177,7 +1173,7 @@ async fn compaction_cancellation_is_checkpointed_before_execution_finishes() {
         session.author.clone(),
         vec![ContentItem::Message {
             role: crate::context::Role::Assistant,
-            content: "history ".repeat(12000),
+            content: "history ".repeat(30000),
         }],
     ));
     session.begin_execution("Current pinned question").unwrap();
