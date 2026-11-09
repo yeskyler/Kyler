@@ -182,6 +182,7 @@ async fn final_response_files_are_retained_authorized_replayed_and_deleted_with_
         workspace_root: h.root.path().join("other-workspace"),
         working_directory: h.root.path().join("other-workspace"),
         sandbox_policy_id: "isolated".into(),
+        workspace_mode: Default::default(),
     });
     h.store.save(&mut isolated).await.unwrap();
     let separate: WorkspaceFiles = h

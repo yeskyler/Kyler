@@ -132,10 +132,26 @@ separate from the repository's [AGENTS.md](../AGENTS.md). See
 [configuration](configuration.md), [development](development.md), and [security
 guidance](../SECURITY.md).
 
+## Project execution in Web and TUI
+
+New Web and TUI sessions request `workspace_mode: "project"`. TUI executes tools in
+the terminal's current directory. Web executes tools in the selected project directory,
+or the server-configured default workspace when no project is selected. The server
+validates that directory against its allowed roots and restores the host sandbox policy
+before each run. Chat history, context,
+approvals, process ownership, attachments, and artifact snapshots retain their session
+identity. Sessions in the same project share project files, so simultaneous edits can
+conflict. Project memory retains its existing project scope.
+
+The execution mode is persisted with the session environment and inherited by child
+agents. Resuming a session keeps its saved directory and mode. Existing private sessions
+are not migrated or copied into a project. Other API clients retain the isolated default
+unless they explicitly request project execution.
+
 ## Private session execution
 
-The workspace selected by a client is a project grouping, not a shared execution root.
-Each managed session receives a private directory under
+Legacy isolated sessions and API clients using the isolated mode treat the selected
+workspace as a project grouping. Each isolated session receives a private directory under
 `<session.directory>/_execution/<session-id>/workspace/`. Its serialized environment
 stores the grouping in `project_root`, while `workspace_root` and `working_directory`
 both identify the private execution directory. Public session summaries continue to

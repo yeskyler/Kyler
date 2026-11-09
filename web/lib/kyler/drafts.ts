@@ -4,7 +4,11 @@ import type { Session } from "./types.ts";
 export function createDraftSession(workspace?: string | null) {
   return api<Session>("sessions", {
     method: "POST",
-    body: JSON.stringify({ draft: true, ...(workspace ? { workspace_root: workspace } : {}) }),
+    body: JSON.stringify({
+      draft: true,
+      workspace_mode: "project",
+      ...(workspace ? { workspace_root: workspace } : {}),
+    }),
   });
 }
 

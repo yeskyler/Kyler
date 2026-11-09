@@ -21,6 +21,11 @@ pub struct SessionEnvironment {
     /// Optional project grouping; it does not grant filesystem access.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_root: Option<PathBuf>,
+    #[serde(
+        default,
+        skip_serializing_if = "kyler_protocol::api::session::WorkspaceMode::is_isolated"
+    )]
+    pub workspace_mode: kyler_protocol::api::session::WorkspaceMode,
     pub workspace_root: PathBuf,
     pub working_directory: PathBuf,
     pub sandbox_policy_id: String,
@@ -106,6 +111,7 @@ impl ExecutionEnvironment {
         Ok(Self {
             snapshot: SessionEnvironment {
                 project_root: None,
+                workspace_mode: Default::default(),
                 workspace_root: workspace,
                 working_directory: cwd,
                 sandbox_policy_id: policy.id.clone(),
@@ -118,6 +124,20 @@ impl ExecutionEnvironment {
         })
     }
     /// Rebind execution to a private directory. Project identity never becomes a readable root.
+    /// Keep execution in the host-authorized project instead of a private copy.
+    pub fn project_workspace(mut self) -> Result<Self> {
+        ensure!(
+            self.snapshot.project_root.is_none(),
+            "an isolated workspace cannot become a project workspace"
+        );
+        ensure!(
+            self.snapshot.workspace_root == self.snapshot.working_directory,
+            "project workspace must execute at its root"
+        );
+        self.snapshot.workspace_mode = kyler_protocol::api::session::WorkspaceMode::Project;
+        Ok(self)
+    }
+
     pub fn isolated_session(&self, directory: &Path, project: &Path) -> Result<Self> {
         let root = directory.canonicalize()?;
         let project = project.canonicalize()?;

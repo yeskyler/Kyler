@@ -54,6 +54,30 @@ impl RunManager {
             }
             return Ok(None);
         };
+        if snapshot.workspace_mode == kyler_protocol::api::session::WorkspaceMode::Project {
+            if snapshot.project_root.is_some() {
+                return Err(ApiError::bad("Project workspace identity mismatch."));
+            }
+            if let Some(factory) = &self.workspaces {
+                return factory
+                    .restore(snapshot)
+                    .map(Some)
+                    .map_err(|_| ApiError::bad("The saved project or sandbox policy changed."));
+            }
+            let environment = self
+                .agent
+                .execution_environment()
+                .ok_or_else(|| ApiError::bad("Session execution environment is unavailable."))?;
+            let project = environment
+                .as_ref()
+                .clone()
+                .project_workspace()
+                .map_err(ApiError::storage)?;
+            if project.session_environment() != snapshot {
+                return Err(ApiError::bad("Session project identity changed."));
+            }
+            return Ok(Some(Arc::new(project)));
+        }
         let owner = session
             .parent
             .as_ref()

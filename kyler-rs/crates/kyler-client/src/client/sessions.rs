@@ -9,7 +9,7 @@ use reqwest::Method;
 use kyler_protocol::api::{
     SessionUsage,
     history::{HistoryContent, HistoryEvent, HistoryPage},
-    session::{CreateSessionRequest, MessagePage, SessionPage, SessionSummary},
+    session::{CreateSessionRequest, MessagePage, SessionPage, SessionSummary, WorkspaceMode},
 };
 
 impl Client {
@@ -19,6 +19,18 @@ impl Client {
             .await
     }
     pub async fn create_session_in(&self, workspace: &Path) -> Result<SessionSummary> {
+        self.create_session_with_mode(workspace, WorkspaceMode::Isolated)
+            .await
+    }
+    pub async fn create_project_session_in(&self, workspace: &Path) -> Result<SessionSummary> {
+        self.create_session_with_mode(workspace, WorkspaceMode::Project)
+            .await
+    }
+    async fn create_session_with_mode(
+        &self,
+        workspace: &Path,
+        workspace_mode: WorkspaceMode,
+    ) -> Result<SessionSummary> {
         if !workspace.is_absolute() {
             return Err(Error::invalid("Workspace must be an absolute path."));
         }
@@ -30,6 +42,7 @@ impl Client {
                 .json(&CreateSessionRequest {
                     workspace_root: Some(path.into()),
                     draft: false,
+                    workspace_mode,
                 }),
         )
         .await

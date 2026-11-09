@@ -391,6 +391,8 @@ test("workspace selection rejects relative paths and unknown fields before forwa
     { workspace_root: "../outside" },
     { workspace_root: 12 },
     { workspace_root: "/project", privileged: true },
+    { workspace_root: "/project", workspace_mode: "unrestricted" },
+    { workspace_mode: 1 },
   ]) {
     const response = await proxyRequest(
       new Request("http://localhost:3002/api/kyler/sessions", {
@@ -648,13 +650,14 @@ test("draft creation forwards its hidden history flag without adding arbitrary f
     assert.deepEqual(JSON.parse(new TextDecoder().decode(init.body as Uint8Array)), {
       workspace_root: "/project",
       draft: true,
+      workspace_mode: "project",
     });
     return Response.json({ session_id: "draft", draft: true }, { status: 201 });
   });
   const response = await proxyRequest(
     new Request("http://localhost:3002/api/kyler/sessions", {
       method: "POST",
-      body: JSON.stringify({ workspace_root: "/project", draft: true }),
+      body: JSON.stringify({ workspace_root: "/project", draft: true, workspace_mode: "project" }),
     }),
     ["sessions"],
   );
