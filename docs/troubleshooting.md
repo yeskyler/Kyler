@@ -21,7 +21,7 @@ If `kyler` is not on PATH after installation:
 export PATH=~/.local/bin:"$PATH"
 ```
 
-`--modify-path` configures new terminals. Rust commands run from `kyler-rs/` or use an
+Installation automatically configures PATH for new terminals. Rust commands run from `kyler-rs/` or use an
 explicit manifest:
 
 ```sh
@@ -72,8 +72,8 @@ remote access.
 
 ## Web missing, stale, or disconnected
 
-A backend-only `--local` install does not contain Web. Use a complete bundle. For a
-managed complete installation, use `kyler service start --restart` after configuration
+Install a complete bundle to obtain the backend, Web UI, and Node.js runtime. For a
+managed installation, use `kyler service start --restart` after configuration
 changes. For manual Next.js production serving, run `npm run build` from `web/` after
 source changes; `npm run start` serves the existing build.
 

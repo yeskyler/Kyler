@@ -3,6 +3,7 @@ import os
 import json
 import hashlib
 import shutil
+import shlex
 import socket
 import queue
 import threading
@@ -17,6 +18,39 @@ import urllib.request
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = WORKSPACE_ROOT / "scripts/install.sh"
 KYLER_BINARY = WORKSPACE_ROOT / "kyler-rs/target/debug/kyler"
+
+
+WEB_FIXTURE = '''const http = require('node:http');
+const server = http.createServer((req, res) => {
+  if (req.url === '/api/service/identity') {
+    if (req.headers.authorization !== 'Bearer ' + process.env.KYLER_WEB_SERVICE_SECRET) {
+      res.writeHead(401); return res.end();
+    }
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ instance_id: process.env.KYLER_WEB_INSTANCE_ID, pid: process.pid }));
+  }
+  res.end('bundle fixture');
+});
+server.listen(Number(process.env.PORT), process.env.HOSTNAME);
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+'''
+
+
+def local_bundle(root, binary):
+    bundle = Path(tempfile.mkdtemp(prefix="source bundle ", dir=root))
+    for folder in ("bin", "runtime", "web"):
+        (bundle / folder).mkdir()
+    if binary.is_file():
+        shutil.copy2(binary, bundle / "bin/kyler")
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("Node.js is required for installer tests")
+    runtime = bundle / "runtime/node"
+    runtime.write_text("#!/bin/sh\nexec " + shlex.quote(node) + ' "$@"\n')
+    runtime.chmod(0o755)
+    (bundle / "web/server.js").write_text(WEB_FIXTURE)
+    BundleTests.manifest(bundle)
+    return bundle
 
 
 class InstallTests(unittest.TestCase):
@@ -34,7 +68,7 @@ class InstallTests(unittest.TestCase):
 
     def install(self, *args, success=True):
         result = subprocess.run(
-            ["sh", str(INSTALLER), "--local", str(self.source), "--no-start", "--no-configure", *args],
+            ["sh", str(INSTALLER), "--bundle", str(local_bundle(self.root, self.source)), "--no-start", "--no-configure", *args],
             env=self.env, capture_output=True, text=True, timeout=10,
         )
         if success:
@@ -43,7 +77,7 @@ class InstallTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
         return result
 
-    def test_first_install_creates_private_config_without_editing_shell(self):
+    def test_first_install_creates_private_config_and_configures_path(self):
         result = self.install()
         binary = self.home / ".local/bin/kyler"
         config = self.home / ".kyler/config.toml"
@@ -53,14 +87,14 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(config.parent.stat().st_mode), 0o700)
         self.assertIn("enabled = true", config.read_text())
         self.assertNotIn("api_key =", "\n".join(line for line in config.read_text().splitlines() if not line.startswith("#")))
-        self.assertFalse((self.home / ".zshrc").exists())
+        self.assertTrue((self.home / ".zshrc").is_file())
         self.assertFalse((self.home / ".kyler/sessions").exists())
         self.assertIn('export PATH="$HOME/.local/bin:$PATH"', result.stdout)
         self.assertFalse(list(binary.parent.glob(".kyler-install.*")))
         self.assertFalse(list(config.parent.glob(".config-install.*")))
 
     def test_upgrade_preserves_config_credentials_sessions_and_adds_path_once(self):
-        self.install("--modify-path")
+        self.install()
         config = self.home / ".kyler/config.toml"
         config.write_text("# custom config\n[llm]\napi_key='PRIVATE_TEST_KEY'\n")
         secret = self.home / ".kyler/.env"
@@ -70,7 +104,7 @@ class InstallTests(unittest.TestCase):
         session.write_text("history\n")
         before = [path.read_bytes() for path in (config, secret, session)]
         self.source.write_text('#!/bin/sh\nprintf "kyler 0.2.0\\n"\n')
-        result = self.install("--modify-path")
+        result = self.install()
         self.assertEqual(before, [path.read_bytes() for path in (config, secret, session)])
         self.assertNotIn("PRIVATE_TEST_KEY", result.stdout + result.stderr)
         self.assertEqual((self.home / ".local/bin/kyler").read_bytes(), self.source.read_bytes())
@@ -106,8 +140,21 @@ class InstallTests(unittest.TestCase):
         self.source.write_text("unused")
         self.install("--unknown", success=False)
         self.assertFalse((self.home / ".local").exists())
-        result = subprocess.run(["sh", str(INSTALLER), "--local"], env=self.env, capture_output=True)
+        result = subprocess.run(["sh", str(INSTALLER), "--bundle"], env=self.env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
+
+    def test_help_is_concise_and_removed_options_are_rejected(self):
+        result = subprocess.run(["sh", str(INSTALLER), "--help"], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        for option in ("--bundle", "--version", "--help"):
+            self.assertIn(option, result.stdout)
+        for option in ("--local", "--modify-path", "--no-start", "--no-configure", "--non-interactive"):
+            self.assertNotIn(option, result.stdout)
+        for option in ("--local", "--modify-path"):
+            result = subprocess.run(["sh", str(INSTALLER), option], env=self.env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Unknown argument", result.stderr)
+        self.assertFalse((self.home / ".local").exists())
 
     def test_config_directory_collision_fails_before_replacing_binary(self):
         self.install()
@@ -182,7 +229,8 @@ class InstallTests(unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         environment.update(KYLER_LLM_MODEL="installer-model", KYLER_LLM_BASE_URL="http://127.0.0.1:1/v1", KYLER_LLM_API_KEY="INSTALLER_TEST_KEY", KYLER_SERVER_BIND="127.0.0.1:" + str(port))
-        command = ["sh", str(INSTALLER), "--local", str(binary), "--non-interactive"]
+        command = ["sh", str(INSTALLER), "--bundle", str(local_bundle(self.root, binary)), "--non-interactive"]
+        environment["KYLER_WEB_BIND"] = BundleTests.free_address()
         try:
             first_instance = None
             for _ in range(2):
@@ -210,6 +258,9 @@ class InstallTests(unittest.TestCase):
                 subprocess.run([str(installed), "service", "stop"], env=environment, capture_output=True, timeout=15)
 
     def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None):
+        start_services = bundle is not None
+        if bundle is None:
+            bundle = local_bundle(self.root, KYLER_BINARY)
         replies = list(replies)
         if expected == 0:
             with socket.socket() as listener:
@@ -242,13 +293,13 @@ class InstallTests(unittest.TestCase):
             expected_attributes[3] &= ~pending
             self.assertEqual(actual, expected_attributes)
 
-        command = ["sh", str(INSTALLER), "--local", str(binary), "--no-start"]
-        if bundle is not None:
-            command = ["sh", str(INSTALLER), "--bundle", str(bundle)]
+        command = ["sh", str(INSTALLER), "--bundle", str(bundle)]
+        if not start_services:
+            command += ["--no-start"]
         if piped:
-            command = ["sh", "-c", 'cat "$1" | sh -s -- --local "$2" --no-start', "installer-pipe", str(INSTALLER), str(binary)]
+            command = ["sh", "-c", 'cat "$1" | sh -s -- --bundle "$2" --no-start', "installer-pipe", str(INSTALLER), str(bundle)]
         elif redirected:
-            command = ["sh", "-c", 'sh "$1" --local "$2" --no-start </dev/tty', "installer-tty", str(INSTALLER), str(binary)]
+            command = ["sh", "-c", 'sh "$1" --bundle "$2" --no-start </dev/tty', "installer-tty", str(INSTALLER), str(bundle)]
 
         def controlling_terminal():
             os.setsid()
@@ -415,9 +466,9 @@ class InstallTests(unittest.TestCase):
         self.assertIn('api_key = "REPLACEMENT_TEST_KEY"', config.read_text())
 
     def test_server_start_failure_shows_reason_and_recovery_commands(self):
-        self.source.write_text("#!/bin/sh\ncase \"$*\" in\n*--version*) echo 'kyler 0.1.0' ;;\n*) echo 'Server address is in use.' >&2; exit 2 ;;\nesac\n")
+        self.source.write_text("#!/bin/sh\ncase \"$*\" in\n*--version*) echo 'kyler 0.1.0' ;;\n*service*stop*) exit 0 ;;\n*configure*) exit 0 ;;\n*) echo 'Server address is in use.' >&2; exit 2 ;;\nesac\n")
         result = subprocess.run(
-            ["sh", str(INSTALLER), "--local", str(self.source), "--no-configure"],
+            ["sh", str(INSTALLER), "--bundle", str(local_bundle(self.root, self.source)), "--no-configure"],
             env=self.env, capture_output=True, text=True, timeout=10,
         )
         self.assertNotEqual(result.returncode, 0)
@@ -427,10 +478,10 @@ class InstallTests(unittest.TestCase):
 
     def test_bash_and_unknown_shell_startup_files(self):
         self.env["SHELL"] = "/bin/bash"
-        self.install("--modify-path")
+        self.install()
         self.assertTrue((self.home / ".bashrc").is_file())
         self.env["SHELL"] = "/bin/sh"
-        self.install("--modify-path")
+        self.install()
         self.assertTrue((self.home / ".profile").is_file())
 
 
@@ -465,20 +516,7 @@ class BundleTests(unittest.TestCase):
             (bundle / folder).mkdir(parents=True)
         shutil.copy2(KYLER_BINARY, bundle / "bin/kyler")
         shutil.copy2(shutil.which("node"), bundle / "runtime/node")
-        script = '''const http = require('node:http');
-const server = http.createServer((req, res) => {
-  if (req.url === '/api/service/identity') {
-    if (req.headers.authorization !== 'Bearer ' + process.env.KYLER_WEB_SERVICE_SECRET) {
-      res.writeHead(401); return res.end();
-    }
-    res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify({ instance_id: process.env.KYLER_WEB_INSTANCE_ID, pid: process.pid }));
-  }
-  res.end('bundle fixture');
-});
-server.listen(Number(process.env.PORT), process.env.HOSTNAME);
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
-'''
+        script = WEB_FIXTURE
         (bundle / "web/server.js").write_text("process.exit(42);" if broken else script)
         self.manifest(bundle)
         return bundle

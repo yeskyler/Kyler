@@ -98,6 +98,7 @@ Build the CLI before running installer tests so integration cases are not skippe
 cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
 python3 scripts/tests/test_install.py
 python3 scripts/tests/test_release.py
+python3 scripts/tests/test_package.py
 sh -n scripts/install.sh scripts/package.sh scripts/release.sh
 ```
 
