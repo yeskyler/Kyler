@@ -790,6 +790,25 @@ async fn switching_to_smaller_model_compacts_history_before_request_and_updates_
         .await
         .unwrap();
     assert!(session.memory.compression_count > 0);
+    use kyler_protocol::api::compaction::CompactionStatus;
+    let compactions = session
+        .events
+        .iter()
+        .flat_map(|event| &event.content)
+        .filter_map(|item| {
+            if let ContentItem::ContextCompaction { compaction } = item {
+                Some(compaction)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(compactions.len(), 2);
+    assert_eq!(compactions[0].id, compactions[1].id);
+    assert_eq!(compactions[0].status, CompactionStatus::Running);
+    assert_eq!(compactions[1].status, CompactionStatus::Completed);
+    let compaction_id = compactions[0].id.clone();
+
     let compacted = session.memory.last_compaction.as_ref().unwrap();
     assert!(compacted.before_tokens > compacted.after_tokens);
     let inspected = session.memory.last_request.as_ref().unwrap();
@@ -810,6 +829,11 @@ async fn switching_to_smaller_model_compacts_history_before_request_and_updates_
     );
 
     let requests = requests.lock().await;
+    assert!(
+        !serde_json::to_string(&*requests)
+            .unwrap()
+            .contains(&compaction_id)
+    );
     assert_eq!(requests[0]["model"], "large");
     let last = requests.last().unwrap();
     assert_eq!(last["model"], "small");
@@ -1074,4 +1098,118 @@ async fn live_permissions_bind_worker_filesystems_and_model_environment_to_host_
         assert_eq!(environment["allow_commands"], writable);
     }
     task.await.unwrap();
+}
+
+#[tokio::test]
+async fn compaction_failure_records_terminal_status_without_losing_history() {
+    use async_openai::{Client, config::OpenAIConfig};
+    use kyler_protocol::api::compaction::CompactionStatus;
+    let mut agent = agent("http://127.0.0.1:1/v1".into());
+    agent.context_policy.context_tokens = 32000;
+    agent.context_policy.output_tokens = 1024;
+    agent.context_policy.summary_tokens = 1024;
+    agent.context_policy.safety_tokens = 1024;
+    let mut session = Session::new();
+    session
+        .begin_execution(&"fixed question ".repeat(10000))
+        .unwrap();
+    let client = Client::with_config(
+        OpenAIConfig::new()
+            .with_api_base("http://127.0.0.1:1/v1")
+            .with_api_key("fixture"),
+    );
+    assert!(
+        agent
+            .prepare_messages(&mut session, &[], &client, None)
+            .await
+            .is_err()
+    );
+    let records = session
+        .events
+        .iter()
+        .flat_map(|event| &event.content)
+        .filter_map(|item| {
+            if let ContentItem::ContextCompaction { compaction } = item {
+                Some(compaction)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].status, CompactionStatus::Running);
+    assert_eq!(records[1].status, CompactionStatus::Failed);
+    assert_eq!(session.memory.compression_count, 0);
+    assert!(session.memory.summary.is_none());
+    assert!(session.events[0].content.iter().any(|item| matches!(
+        item,
+        ContentItem::Message {
+            role: crate::context::Role::User,
+            ..
+        }
+    )));
+    assert!(
+        session
+            .events
+            .iter()
+            .skip(1)
+            .all(|event| event.model_view().content.is_empty())
+    );
+}
+
+#[tokio::test]
+async fn compaction_cancellation_is_checkpointed_before_execution_finishes() {
+    use async_openai::{Client, config::OpenAIConfig};
+    use kyler_protocol::api::compaction::CompactionStatus;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let mut agent = agent(url.clone());
+    agent.context_policy.context_tokens = 32000;
+    agent.context_policy.output_tokens = 1024;
+    agent.context_policy.summary_tokens = 1024;
+    agent.context_policy.safety_tokens = 1024;
+    let root = tempfile::tempdir().unwrap();
+    let store = Arc::new(SessionStore::new(root.path()).await.unwrap());
+    agent = agent.with_session_store(store.clone());
+    let mut session = Session::new();
+    session.events.push(crate::context::Event::new(
+        "old",
+        session.author.clone(),
+        vec![ContentItem::Message {
+            role: crate::context::Role::Assistant,
+            content: "history ".repeat(12000),
+        }],
+    ));
+    session.begin_execution("Current pinned question").unwrap();
+    let (stream, mut events, cancel) = super::events::compaction_test_stream();
+    let client = Client::with_config(
+        OpenAIConfig::new()
+            .with_api_base(url)
+            .with_api_key("fixture"),
+    );
+    let task = tokio::spawn(async move {
+        let result = agent
+            .prepare_messages(&mut session, &[], &client, Some(&stream))
+            .await;
+        (session, result)
+    });
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let super::events::AgentStreamEvent::ContextCompaction { compaction } = event else {
+        panic!("expected compaction start")
+    };
+    assert_eq!(compaction.status, CompactionStatus::Running);
+    cancel.send(true).unwrap();
+    let (session, result) = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(result.is_err());
+    let reloaded = store.load(&session.session_id).await.unwrap();
+    assert!(reloaded.events.iter().flat_map(|event| &event.content).any(|item| matches!(item, ContentItem::ContextCompaction { compaction } if compaction.status == CompactionStatus::Cancelled)));
+    assert_eq!(reloaded.memory.compression_count, 0);
+    assert!(reloaded.memory.summary.is_none());
+    drop(listener);
 }

@@ -1,3 +1,4 @@
+import { upsertCompaction, settleCompactions } from "./compaction.ts";
 import type { QuestionRecord } from "./questions.ts";
 import type {
   AttachmentAdapter,
@@ -173,6 +174,7 @@ export function chatAdapter(
       let closeEvents: (() => Promise<unknown>) | undefined;
       const hydrations = new Map<string, Promise<{ id: string; apply: () => void }>>();
       const settleTools = (cancelled: boolean) => {
+        settleCompactions(content, cancelled ? "cancelled" : "interrupted");
         content.forEach((part, index) => {
           if (part.type !== "tool-call" || part.result !== undefined) return;
           content[index] = {
@@ -231,6 +233,9 @@ export function chatAdapter(
           if (event.execution_id) executionId = event.execution_id;
           if (event.type === "run_started") {
             startedAt = event.timestamp_ms ?? startedAt;
+            yield update();
+          } else if (event.type === "context_compaction" && event.compaction) {
+            upsertCompaction(content, event.compaction);
             yield update();
           } else if (event.type === "step_started") {
             batch = event.step;
@@ -432,6 +437,10 @@ export function chatAdapter(
             break;
           }
         }
+      } catch (error) {
+        settleCompactions(content, abortSignal.aborted ? "cancelled" : "interrupted");
+        yield update();
+        throw error;
       } finally {
         detailsController.abort();
         hydrations.clear();

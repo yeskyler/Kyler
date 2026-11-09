@@ -108,6 +108,7 @@ impl ContextCompactor {
             let group: Vec<_> = candidate.events[a..b]
                 .iter()
                 .map(Event::model_view)
+                .filter(|event| !event.content.is_empty())
                 .collect();
             let size = self.count(&group)?;
             if window_size + size > window_budget {
@@ -148,6 +149,7 @@ impl ContextCompactor {
         let removed: Vec<_> = removed_indices
             .iter()
             .map(|&i| candidate.events[i].model_view())
+            .filter(|event| !event.content.is_empty())
             .collect();
         let history = serde_json::to_string(&removed)?;
         // Bound every summary request too. Large individual tool results are chunked as

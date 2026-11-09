@@ -40,6 +40,9 @@ import {
   groupToolCategories,
 } from "@/lib/kyler/assistant-display";
 
+import { executionSections, isCompactionPart, type Compaction } from "@/lib/kyler/compaction";
+import { CompactionSeparator } from "./compaction-separator";
+
 function ActivityTool(props: ToolCallMessagePartProps) {
   if (props.toolName === "ask_question")
     return (
@@ -349,7 +352,8 @@ export function AssistantMessage() {
   }, [running]);
   if (message.role !== "assistant") return null;
   const { process, answer } = partitionAssistantParts(message.content);
-  const rows = groupProcessParts(message.content, process);
+  const sections = executionSections(message.content, process);
+  const details = process.filter((index) => !isCompactionPart(message.content[index]));
   const toolCount = message.content.filter((part) => part.type === "tool-call").length;
   const failedTools = message.content.filter(
     (part) => part.type === "tool-call" && part.isError,
@@ -391,9 +395,9 @@ export function AssistantMessage() {
         className="mb-5"
       >
         <CollapsibleTrigger
-          disabled={!process.length}
+          disabled={!details.length}
           className="flex w-full items-center gap-2 border-b border-border/65 pb-3 text-left text-sm font-normal text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default disabled:hover:text-muted-foreground"
-          aria-label={`${label}${elapsed ? `, ${elapsed}` : ""}. ${process.length ? "Toggle execution details" : "No execution details"}`}
+          aria-label={`${label}${elapsed ? `, ${elapsed}` : ""}. ${details.length ? "Toggle execution details" : "No execution details"}`}
         >
           {running && !pendingQuestion && (
             <LoaderCircleIcon
@@ -411,30 +415,41 @@ export function AssistantMessage() {
               · {failedTools} {failedTools === 1 ? "tool failed" : "tools failed"}
             </span>
           )}
-          {!!process.length && (
+          {!!details.length && (
             <ChevronDownIcon
               aria-hidden
               className={`size-3.5 transition-transform ${open ? "rotate-180" : ""}`}
             />
           )}
         </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="space-y-4 pt-4" aria-label="Execution details">
-            {rows.map((row) =>
-              row.kind === "tool" ? (
-                <ActivityTree key={row.indices[0]} indices={row.indices} />
-              ) : message.content[row.indices[0]]?.type === "reasoning" ? (
-                <ThinkingBlock key={row.indices[0]} index={row.indices[0]} />
-              ) : (
-                <MessagePrimitive.PartByIndex
-                  key={row.indices[0]}
-                  index={row.indices[0]}
-                  components={components}
-                />
-              ),
-            )}
-          </div>
-        </CollapsibleContent>
+        {sections.map((section) => {
+          const index = section.indices[0];
+          const part = message.content[index];
+          if (section.kind === "compaction" && part.type === "data")
+            return (
+              <CompactionSeparator key={part.id ?? index} compaction={part.data as Compaction} />
+            );
+          const rows = groupProcessParts(message.content, section.indices);
+          return (
+            <CollapsibleContent key={index}>
+              <div className="space-y-4 pt-4" aria-label="Execution details">
+                {rows.map((row) =>
+                  row.kind === "tool" ? (
+                    <ActivityTree key={row.indices[0]} indices={row.indices} />
+                  ) : message.content[row.indices[0]]?.type === "reasoning" ? (
+                    <ThinkingBlock key={row.indices[0]} index={row.indices[0]} />
+                  ) : (
+                    <MessagePrimitive.PartByIndex
+                      key={row.indices[0]}
+                      index={row.indices[0]}
+                      components={components}
+                    />
+                  ),
+                )}
+              </div>
+            </CollapsibleContent>
+          );
+        })}
       </CollapsibleRoot>
       <div className="space-y-4" aria-label="Assistant response">
         {answer.map((index) => (

@@ -46,6 +46,10 @@ impl Default for EventAuthor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentItem {
+    #[serde(rename = "context_compaction")]
+    ContextCompaction {
+        compaction: kyler_protocol::api::compaction::CompactionInfo,
+    },
     #[serde(rename = "attachment")]
     Attachment { attachment: AttachmentInfo },
     #[serde(rename = "image")]
@@ -100,7 +104,12 @@ impl Event {
             content: self
                 .content
                 .iter()
-                .filter(|item| !matches!(item, ContentItem::Reasoning { .. }))
+                .filter(|item| {
+                    !matches!(
+                        item,
+                        ContentItem::Reasoning { .. } | ContentItem::ContextCompaction { .. }
+                    )
+                })
                 .map(|item| match item {
                     ContentItem::ToolResult {
                         tool_call_id,

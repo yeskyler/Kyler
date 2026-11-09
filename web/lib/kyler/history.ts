@@ -1,3 +1,4 @@
+import { upsertCompaction, settleCompactions, type Compaction } from "./compaction.ts";
 import type {
   ThreadMessageLike,
   ThreadAssistantMessagePart,
@@ -16,6 +17,7 @@ type Presentation = {
   finished_at: number | null;
 };
 export type HistoryContent =
+  | { type: "context_compaction"; compaction: Compaction }
   | { type: "message"; role: string; text: string }
   | { type: "reasoning"; text: string }
   | { type: "attachment"; attachment: AttachmentInfo }
@@ -162,6 +164,8 @@ export function historyMessages(
     }
     if (event.execution_id === recoverExecution) continue;
     for (const item of event.content) {
+      if (item.type === "context_compaction")
+        upsertCompaction(ensureAssistant(event), item.compaction);
       if (item.type === "reasoning" && item.text.trim())
         ensureAssistant(event).push({ type: "reasoning", text: item.text });
       if (item.type === "message" && item.role === "assistant")
@@ -256,6 +260,14 @@ export function historyMessages(
         };
       }
     }
+  }
+  for (const message of messages) {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+    const status = message.metadata?.custom?.historyStatus;
+    settleCompactions(
+      message.content as ThreadAssistantMessagePart[],
+      status === "cancelled" ? "cancelled" : "interrupted",
+    );
   }
   return messages;
 }

@@ -1,0 +1,92 @@
+.kyler-markdown {
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.kyler-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 1.6em 0 0.6em;
+  scroll-margin-top: 4rem;
+}
+.kyler-markdown h1 {
+  font-size: 2em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+.kyler-markdown h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.2em;
+}
+.kyler-markdown h3 {
+  font-size: 1.25em;
+}
+.kyler-markdown :is(p, ul, ol, blockquote, table, pre) {
+  margin: 0.9em 0;
+}
+.kyler-markdown ul {
+  list-style: disc;
+  padding-left: 1.7em;
+}
+.kyler-markdown ol {
+  list-style: decimal;
+  padding-left: 1.7em;
+}
+.kyler-markdown li > p {
+  margin: 0.3em 0;
+}
+.kyler-markdown blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1em;
+  color: var(--muted-foreground);
+}
+.kyler-markdown a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.kyler-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+.kyler-markdown :is(td, th) {
+  border: 1px solid var(--border);
+  padding: 0.5em 0.8em;
+}
+.kyler-markdown th {
+  background: var(--muted);
+  font-weight: 600;
+}
+.kyler-markdown :not(pre) > code {
+  background: var(--muted);
+  border-radius: 4px;
+  padding: 0.1em 0.3em;
+  font-size: 0.9em;
+}
+.kyler-markdown pre {
+  overflow: auto;
+  border-radius: 8px;
+  background: #0d1117;
+  color: #e6edf3;
+  padding: 1em;
+  white-space: pre;
+  overflow-wrap: normal;
+  font-size: 0.85em;
+}
+.kyler-markdown pre code {
+  padding: 0;
+}
+.kyler-markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1em auto;
+  border-radius: 4px;
+}
+.kyler-markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.3em 0;
+}

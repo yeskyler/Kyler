@@ -77,6 +77,7 @@ impl RunManager {
                 event=stream.next()=> {
                     let Some(event)=event else {break;};
                     match event {
+                        AgentStreamEvent::ContextCompaction { compaction } => entry.publish(EventPayload::ContextCompaction { compaction }),
                         AgentStreamEvent::Started {execution_id,..}=> {
                             {let mut data=entry.inner.lock().unwrap_or_else(|e|e.into_inner());data.info.execution_id=Some(execution_id);if data.info.status!=RunStatus::Cancelling {data.info.status=RunStatus::Running;}}
                             if persistence::save(self.root.clone(),entry.info()).await.is_err() {

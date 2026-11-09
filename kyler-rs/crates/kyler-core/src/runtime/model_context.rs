@@ -1,5 +1,8 @@
 //! Prepare bounded model input from history, summaries and project memory.
-use super::Agent;
+use super::{
+    Agent,
+    events::{AgentStreamEvent, StreamControl},
+};
 use crate::{
     context::{
         ContentItem, ContextCompactor, messages::build_messages_with_attachments,
@@ -29,6 +32,7 @@ impl Agent {
         session: &mut Session,
         tools: &[ChatCompletionTools],
         client: &Client<OpenAIConfig>,
+        stream: Option<&StreamControl>,
     ) -> Result<Vec<ChatCompletionRequestMessage>> {
         let store = ContextCompactor::new(self.context_policy.clone())?.with_tokenizer(
             self.model_info()
@@ -117,13 +121,77 @@ impl Agent {
             (store.count(&serde_json::json!({"messages":project(session)?,"tools":tools}))? as f64
                 * session.memory.estimation_scale.max(1.0))
             .ceil() as usize;
-        store
-            .prepare(session, &mut summarizer, |candidate| {
+        let mut compaction = if before_tokens > store.input_limit() {
+            Some(kyler_protocol::api::compaction::CompactionInfo {
+                id: uuid::Uuid::new_v4().to_string(),
+                status: kyler_protocol::api::compaction::CompactionStatus::Running,
+                started_at: chrono::Utc::now().timestamp_millis(),
+                finished_at: None,
+            })
+        } else {
+            None
+        };
+        let mut started = Ok(());
+        if let Some(info) = &compaction {
+            self.record(
+                session,
+                vec![ContentItem::ContextCompaction {
+                    compaction: info.clone(),
+                }],
+            )?;
+            self.checkpoint(session).await?;
+            if let Some(stream) = stream {
+                started = stream
+                    .emit(AgentStreamEvent::ContextCompaction {
+                        compaction: info.clone(),
+                    })
+                    .await;
+            }
+        }
+        let outcome = if started.is_err() {
+            started
+        } else {
+            let prepare = store.prepare(session, &mut summarizer, |candidate| {
                 let estimate = store
                     .count(&serde_json::json!({"messages":project(candidate)?,"tools":tools}))?;
                 Ok((estimate as f64 * candidate.memory.estimation_scale.max(1.0)).ceil() as usize)
-            })
-            .await?;
+            });
+            if let Some(stream) = stream {
+                tokio::select! {
+                    biased;
+                    _ = stream.cancelled() => Err(anyhow::anyhow!("agent execution cancelled")),
+                    result = prepare => result,
+                }
+            } else {
+                prepare.await
+            }
+        };
+        if let Some(info) = &mut compaction {
+            use kyler_protocol::api::compaction::CompactionStatus;
+            info.status = if outcome.is_ok() {
+                CompactionStatus::Completed
+            } else if stream.is_some_and(StreamControl::is_cancelled) {
+                CompactionStatus::Cancelled
+            } else {
+                CompactionStatus::Failed
+            };
+            info.finished_at = Some(chrono::Utc::now().timestamp_millis());
+            self.record(
+                session,
+                vec![ContentItem::ContextCompaction {
+                    compaction: info.clone(),
+                }],
+            )?;
+            self.checkpoint(session).await?;
+            if let Some(stream) = stream {
+                let _ = stream
+                    .emit(AgentStreamEvent::ContextCompaction {
+                        compaction: info.clone(),
+                    })
+                    .await;
+            }
+        }
+        outcome?;
         let messages = project(session)?;
         let now = chrono::Utc::now().timestamp_millis();
         if count != session.memory.compression_count {

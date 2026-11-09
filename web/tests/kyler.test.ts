@@ -1298,3 +1298,39 @@ test("older plan details cannot replace the latest successful plan", async (t) =
   }
   assert.equal(latest?.summary, "new");
 });
+
+test("history orders recent activity first after merging saved and pending sessions", () => {
+  const saved = [
+    { session_id: "older", title: "Older", updated_at: 100 },
+    { session_id: "latest", title: "Latest", updated_at: 300 },
+    { session_id: "unknown", title: "Unknown" },
+  ];
+  const local = [
+    {
+      session_id: "older",
+      title: "Local",
+      updated_at: 400,
+      status: "running",
+      placeholder: "Continue",
+    },
+    {
+      session_id: "pending",
+      title: "",
+      updated_at: 200,
+      status: "running",
+      placeholder: "New request",
+    },
+  ];
+  const ordered = mergeSessionHistory(saved, local);
+  assert.deepEqual(
+    ordered.map((item) => item.session_id),
+    ["older", "latest", "pending", "unknown"],
+  );
+  assert.equal(ordered[0].title, "Older");
+  assert.deepEqual(
+    saved.map((item) => item.session_id),
+    ["older", "latest", "unknown"],
+  );
+  const refreshed = mergeSessionHistory([{ ...saved[0], updated_at: 500 }, saved[1]], local);
+  assert.equal(refreshed[0].updated_at, 500);
+});

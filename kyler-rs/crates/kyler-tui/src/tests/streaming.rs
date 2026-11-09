@@ -608,3 +608,42 @@ fn queued_batch_nodes_are_updated_in_place_and_cancelled_with_the_run() {
         2
     );
 }
+
+#[test]
+fn compaction_updates_one_separator_and_stops_when_cancelled() {
+    use kyler_protocol::api::compaction::{CompactionInfo, CompactionStatus};
+    let mut state = ready();
+    state.phase = Phase::Running;
+    state.run = Some("run".into());
+    let mut info = CompactionInfo {
+        id: "compaction".into(),
+        status: CompactionStatus::Running,
+        started_at: 1,
+        finished_at: None,
+    };
+    server(
+        &mut state,
+        1,
+        EventPayload::ContextCompaction {
+            compaction: info.clone(),
+        },
+    );
+    assert!(state.entries.iter().any(|entry| matches!(entry, Entry::Compaction(record) if record.status == CompactionStatus::Running)));
+    info.status = CompactionStatus::Completed;
+    info.finished_at = Some(2);
+    server(
+        &mut state,
+        2,
+        EventPayload::ContextCompaction { compaction: info },
+    );
+    assert_eq!(
+        state
+            .entries
+            .iter()
+            .filter(|entry| matches!(entry, Entry::Compaction(_)))
+            .count(),
+        1
+    );
+    let lines = transcript::lines_with_width(&state.entries, 80);
+    assert!(format!("{lines:?}").contains("Context compacted"));
+}

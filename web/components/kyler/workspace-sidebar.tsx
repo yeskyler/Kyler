@@ -39,7 +39,9 @@ export function WorkspaceSidebar({
   createSession,
   selectSession,
   deleteSession,
+  onSessionUpdate,
 }: {
+  onSessionUpdate?: (session: Session) => void;
   session: Session;
   active: boolean;
   localSessions: HistorySession[];
@@ -139,6 +141,11 @@ export function WorkspaceSidebar({
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [active, sessions.length, session.session_id]);
+
+  useEffect(() => {
+    const current = sessions.find((item) => item.session_id === session.session_id);
+    if (current) onSessionUpdate?.(current);
+  }, [sessions, session.session_id, onSessionUpdate]);
 
   async function more() {
     if (cursor === null) return;

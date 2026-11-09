@@ -70,7 +70,7 @@ pub(crate) fn build_messages_with_attachments(
         let mut calls = Vec::new();
         for item in &event.content {
             match item {
-                ContentItem::Reasoning { .. } => {}
+                ContentItem::Reasoning { .. } | ContentItem::ContextCompaction { .. } => {}
                 ContentItem::Message { role, content } => {
                     messages.push(match role {
                         Role::User => ChatCompletionRequestUserMessageArgs::default()

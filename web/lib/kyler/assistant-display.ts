@@ -1,3 +1,4 @@
+import { isCompactionPart } from "./compaction.ts";
 import type { ThreadAssistantMessagePart } from "@assistant-ui/react";
 
 /** Keep the final answer visible while collecting prior work in chronological order. */
@@ -5,7 +6,8 @@ export function partitionAssistantParts(parts: readonly ThreadAssistantMessagePa
   let lastActivity = -1;
   let lastText = -1;
   parts.forEach((part, index) => {
-    if (part.type === "tool-call" || part.type === "reasoning") lastActivity = index;
+    if (part.type === "tool-call" || part.type === "reasoning" || isCompactionPart(part))
+      lastActivity = index;
     if (part.type === "text" && part.text.trim()) lastText = index;
   });
   const finalStart = lastText > lastActivity ? lastText : parts.length;

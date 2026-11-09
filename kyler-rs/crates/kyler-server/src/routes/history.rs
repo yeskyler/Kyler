@@ -47,6 +47,7 @@ pub async fn list(
         let mut content = Vec::new();
         for item in &event.content {
             content.push(match item {
+                ContentItem::ContextCompaction { compaction } => HistoryContent::ContextCompaction { compaction: compaction.clone() },
                 ContentItem::Reasoning { text } => HistoryContent::Reasoning { text:text.clone() },
                 ContentItem::Message { role, content } => HistoryContent::Message { role: role.as_str().into(), text: content.clone() },
                 ContentItem::Attachment { attachment } => HistoryContent::Attachment { attachment: attachment.clone() },

@@ -265,3 +265,52 @@ fn registered_deliverables_select_primary_without_collecting_intermediate_files(
         .unwrap();
     assert_eq!(store.list(&session).unwrap().len(), 2);
 }
+
+#[test]
+fn markdown_retains_only_explicit_local_dependencies_in_the_same_session() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(workspace.join("report/assets")).unwrap();
+    let workspace = workspace.canonicalize().unwrap();
+    std::fs::write(
+        workspace.join("report/assets/chart.svg"),
+        b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+    )
+    .unwrap();
+    std::fs::write(workspace.join("report/data.csv"), b"value\n42").unwrap();
+    std::fs::write(workspace.join("report/ignored.png"), b"not referenced").unwrap();
+    std::fs::write(workspace.join("report/report.md"), "# Report\n![Chart][figure]\n\n[figure]: assets/chart.svg\n\n[Data](data.csv)\n![Remote](https://example.com/image.png)\n`![Code](ignored.png)`").unwrap();
+    let environment = ExecutionEnvironment::new(
+        &workspace,
+        &workspace,
+        SandboxPolicy::workspace_write("artifacts", &workspace),
+        std::env::current_exe().unwrap(),
+        Arc::new(DirectSandbox),
+    )
+    .unwrap();
+    let store = ArtifactStore::new(root.path().join("artifacts"));
+    let session = Uuid::new_v4().to_string();
+    store
+        .capture(
+            &session,
+            &Uuid::new_v4().to_string(),
+            "[Report](./report/report.md)",
+            Some(&environment),
+        )
+        .unwrap();
+    let files = store.list(&session).unwrap();
+    assert_eq!(files.len(), 3);
+    assert_eq!(files.iter().filter(|file| !file.resource).count(), 1);
+    assert!(files.iter().all(|file| file.available));
+    let chart = files.iter().find(|file| file.name == "chart.svg").unwrap();
+    assert_eq!(chart.mime_type, "image/svg+xml");
+    std::fs::remove_dir_all(workspace.join("report")).unwrap();
+    assert!(
+        store
+            .download(&session, &chart.id)
+            .unwrap()
+            .1
+            .starts_with(b"<svg")
+    );
+    assert!(store.list(&Uuid::new_v4().to_string()).unwrap().is_empty());
+}

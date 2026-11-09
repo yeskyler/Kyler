@@ -1,163 +1,28 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  MinusIcon,
-  PlusIcon,
-  LoaderCircleIcon,
-} from "lucide-react";
+import dynamic from "next/dynamic";
+import { LoaderCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { parseCsv, type PreviewFile } from "@/lib/kyler/artifact-preview";
 import { prepareHtml, readPreview } from "@/lib/kyler/preview-content";
 import { OfficePreview } from "./office-preview";
 import { previewStorageKey, storageSnapshot } from "@/lib/kyler/preview-storage";
-import { SpreadsheetPreview } from "./spreadsheet-preview";
-import type { PDFDocumentProxy } from "pdfjs-dist";
-
-function PdfPreview({ bytes }: { bytes: Uint8Array }) {
-  const [document, setDocument] = useState<PDFDocumentProxy>();
-  const [page, setPage] = useState(1);
-  const [zoom, setZoom] = useState(1);
-  const [error, setError] = useState("");
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const container = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(600);
-  useEffect(() => {
-    let active = true;
-    let task: { destroy: () => Promise<void> } | undefined;
-    void import("pdfjs-dist")
-      .then(async (pdfjs) => {
-        if (!active) return;
-        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-          "pdfjs-dist/build/pdf.worker.min.mjs",
-          import.meta.url,
-        ).toString();
-        const loading = pdfjs.getDocument({
-          data: bytes.slice(),
-          useSystemFonts: true,
-        });
-        task = loading;
-        const pdf = await loading.promise;
-        if (active) {
-          setDocument(pdf);
-          setPage(1);
-        }
-      })
-      .catch(() => {
-        if (active)
-          setError("PDF preview could not load. Download the original file to open it locally.");
-      });
-    return () => {
-      active = false;
-      void task?.destroy().catch(() => undefined);
-    };
-  }, [bytes]);
-  useEffect(() => {
-    const element = container.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setWidth(Math.max(100, entry.contentRect.width - 32)),
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    if (!document || !canvas.current) return;
-    let active = true;
-    let render: { cancel: () => void } | undefined;
-    const element = canvas.current;
-    void document
-      .getPage(page)
-      .then(async (pdfPage) => {
-        if (!active) return;
-        const base = pdfPage.getViewport({ scale: 1 });
-        const viewport = pdfPage.getViewport({ scale: Math.min(3, width / base.width) * zoom });
-        const density = Math.min(window.devicePixelRatio || 1, 2);
-        element.width = Math.ceil(viewport.width * density);
-        element.height = Math.ceil(viewport.height * density);
-        element.style.width = `${viewport.width}px`;
-        element.style.height = `${viewport.height}px`;
-        const task = pdfPage.render({
-          canvas: element,
-          viewport,
-          transform: [density, 0, 0, density, 0, 0],
-        });
-        render = task;
-        await task.promise;
-      })
-      .catch((failure: Error) => {
-        if (active && failure.name !== "RenderingCancelledException")
-          setError("This PDF page could not render.");
-      });
-    return () => {
-      active = false;
-      render?.cancel();
-    };
-  }, [document, page, zoom, width]);
-  return (
-    <div className="flex h-full min-h-0 flex-col" ref={container}>
-      <div className="flex shrink-0 items-center justify-center gap-2 border-b border-border/60 p-2 text-xs">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Previous PDF page"
-          disabled={!document || page <= 1}
-          onClick={() => setPage(page - 1)}
-        >
-          <ChevronLeftIcon />
-        </Button>
-        <span className="tabular-nums">
-          {document ? `${page} / ${document.numPages}` : "Loading PDF…"}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Next PDF page"
-          disabled={!document || page >= document.numPages}
-          onClick={() => setPage(page + 1)}
-        >
-          <ChevronRightIcon />
-        </Button>
-        <span className="mx-1 h-4 border-l border-border" />
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Zoom out PDF"
-          disabled={zoom <= 0.5}
-          onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
-        >
-          <MinusIcon />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Zoom in PDF"
-          disabled={zoom >= 2}
-          onClick={() => setZoom(Math.min(2, zoom + 0.25))}
-        >
-          <PlusIcon />
-        </Button>
-      </div>
-      {error ? (
-        <p role="alert" className="p-5 text-sm text-muted-foreground">
-          {error}
-        </p>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto bg-muted/40 p-4">
-          <canvas
-            ref={canvas}
-            className="mx-auto bg-white shadow-sm"
-            aria-label={`PDF page ${page}`}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
+const SpreadsheetPreview = dynamic(
+  () => import("./spreadsheet-preview").then((module) => module.SpreadsheetPreview),
+  { ssr: false },
+);
+const PresentationPreview = dynamic(
+  () => import("./presentation-preview").then((module) => module.PresentationPreview),
+  { ssr: false },
+);
+const PdfPreview = dynamic(() => import("./pdf-preview").then((module) => module.PdfPreview), {
+  ssr: false,
+});
+const MarkdownPreview = dynamic(
+  () => import("./markdown-preview").then((module) => module.MarkdownPreview),
+  { ssr: false },
+);
 
 export function PreviewRenderer({
   file,
@@ -385,12 +250,14 @@ export function PreviewRenderer({
               className="max-h-full max-w-full"
             />
           </div>
-        ) : ["document", "slides"].includes(file.kind) ? (
-          <OfficePreview bytes={loaded.bytes} slides={file.kind === "slides"} />
+        ) : file.kind === "slides" ? (
+          <PresentationPreview bytes={loaded.bytes} />
+        ) : file.kind === "document" ? (
+          <OfficePreview bytes={loaded.bytes} />
         ) : file.kind === "spreadsheet" ? (
           <SpreadsheetPreview bytes={loaded.bytes} />
         ) : file.kind === "pdf" ? (
-          <PdfPreview bytes={loaded.bytes} />
+          <PdfPreview bytes={loaded.bytes} identity={file.key} />
         ) : csv ? (
           <div className="h-full overflow-auto">
             <table className="w-full border-collapse text-left text-xs">
@@ -423,18 +290,7 @@ export function PreviewRenderer({
             )}
           </div>
         ) : (
-          <div className="aui-md p-5 text-sm leading-7">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              skipHtml
-              components={{
-                img: ({ alt }) => <span>{alt || "Image"}</span>,
-                a: ({ children }) => <span className="underline">{children}</span>,
-              }}
-            >
-              {loaded.text}
-            </ReactMarkdown>
-          </div>
+          <MarkdownPreview text={loaded.text} file={file} files={files} />
         )}
       </div>
     </div>
