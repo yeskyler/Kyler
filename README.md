@@ -17,7 +17,7 @@
     <a href="docs/configuration.md"><img src="https://img.shields.io/badge/extensions-Skills-10b981?style=flat-square" alt="Skills"></a>
   </p>
   <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
-  <p><a href="#installation">Install</a> · <a href="#capabilities">Capabilities</a> · <a href="#documentation">Documentation</a></p>
+  <p><a href="#installation">Install</a> · <a href="#demo">Demo</a> · <a href="#capabilities">Capabilities</a> · <a href="#documentation">Documentation</a></p>
 </div>
 
 Kyler is a general-purpose AI assistant for research, writing, analysis, and software
@@ -28,6 +28,10 @@ through OpenAI-compatible Chat Completions endpoints.
 <p align="center">
   <img src="docs/assets/web-preview.png" width="1120" alt="Kyler Web interface">
 </p>
+
+## Demo
+
+[Watch the demo](demo/example.mov)
 
 ## Capabilities
 
