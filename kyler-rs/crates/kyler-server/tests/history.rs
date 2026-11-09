@@ -258,7 +258,7 @@ async fn context_compaction_stream_and_history_replay_share_one_lifecycle() {
         stored.author.clone(),
         vec![ContentItem::Message {
             role: Role::Assistant,
-            content: "old conversation ".repeat(20000),
+            content: "old conversation ".repeat(80000),
         }],
     ));
     h.store.save(&mut stored).await.unwrap();

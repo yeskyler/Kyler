@@ -13,9 +13,9 @@ pub struct ModelCapabilities {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Tokenizer {
-    #[default]
-    Conservative,
     Cl100kBase,
+    #[default]
+    #[serde(alias = "conservative")]
     O200kBase,
 }
 

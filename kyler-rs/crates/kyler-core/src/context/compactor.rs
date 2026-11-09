@@ -27,7 +27,7 @@ impl ContextCompactor {
         self.tokenizer = tokenizer;
         self
     }
-    /// UTF-8 bytes provide a conservative estimate for byte-based text tokenizers.
+    /// Use the selected tiktoken encoding for text estimates.
     /// JSON counts tool schemas, call arguments and message framing too.
     pub fn count(&self, value: &(impl serde::Serialize + ?Sized)) -> anyhow::Result<usize> {
         // Image tokenization is provider-specific. Reserve a conservative visual budget
@@ -63,16 +63,18 @@ impl ContextCompactor {
         let mut images = 0;
         project(&mut value, &mut images);
         let text = serde_json::to_string(&value)?;
-        let tokens = match self.tokenizer {
-            Tokenizer::Conservative => text.len(),
+        let tokens = self.text_tokens(&text);
+        Ok(tokens + 32 + images * 4096)
+    }
+    fn text_tokens(&self, text: &str) -> usize {
+        match self.tokenizer {
             Tokenizer::Cl100kBase => tiktoken_rs::cl100k_base_singleton()
-                .encode_ordinary(&text)
+                .encode_ordinary(text)
                 .len(),
             Tokenizer::O200kBase => tiktoken_rs::o200k_base_singleton()
-                .encode_ordinary(&text)
+                .encode_ordinary(text)
                 .len(),
-        };
-        Ok(tokens + 32 + images * 4096)
+        }
     }
     pub fn input_limit(&self) -> usize {
         self.policy.input_limit()
@@ -166,8 +168,7 @@ impl ContextCompactor {
             let mut pending = vec![chunk.to_string()];
             while let Some(fragment) = pending.pop() {
                 let input = serde_json::json!({ "previous_summary": summary, "history_fragment": fragment }).to_string();
-                if input.len()
-                    + SUMMARY.len()
+                if self.count(&serde_json::json!([SUMMARY, input]))?
                     + self.policy.summary_tokens
                     + self.policy.safety_tokens
                     + 256
@@ -195,8 +196,8 @@ impl ContextCompactor {
                 }
                 ensure!(!result.text.trim().is_empty(), "empty context summary");
                 ensure!(
-                    result.text.len() <= self.policy.summary_tokens,
-                    "summary exceeds configured conservative token budget"
+                    self.text_tokens(&result.text) <= self.policy.summary_tokens,
+                    "summary exceeds configured token budget"
                 );
                 summary = result.text;
             }
@@ -612,6 +613,34 @@ mod tests {
 #[cfg(test)]
 mod tokenizer_tests {
     use super::{super::ContextPolicy, ContextCompactor};
+
+    #[test]
+    fn default_and_legacy_settings_use_o200k_for_multilingual_requests() {
+        use kyler_protocol::api::models::{ModelCapabilities, Tokenizer};
+        let defaults: ModelCapabilities = serde_json::from_str("{}").unwrap();
+        let legacy: ModelCapabilities =
+            serde_json::from_str(r#"{"tokenizer":"conservative"}"#).unwrap();
+        assert_eq!(defaults.tokenizer, Tokenizer::O200kBase);
+        assert_eq!(legacy.tokenizer, Tokenizer::O200kBase);
+        let value = serde_json::json!({"messages":[{"role":"user","content":"Please create a Snake game. 请生成贪吃蛇游戏。"}],"tools":[]});
+        let expected = tiktoken_rs::o200k_base_singleton()
+            .encode_ordinary(&serde_json::to_string(&value).unwrap())
+            .len()
+            + 32;
+        for tokenizer in [defaults.tokenizer, legacy.tokenizer] {
+            let counter = ContextCompactor::new(ContextPolicy::default())
+                .unwrap()
+                .with_tokenizer(tokenizer);
+            assert_eq!(counter.count(&value).unwrap(), expected);
+        }
+        assert_eq!(
+            ContextCompactor::new(ContextPolicy::default())
+                .unwrap()
+                .count(&value)
+                .unwrap(),
+            expected
+        );
+    }
 
     #[test]
     fn declared_tokenizers_count_text_without_charging_base64_as_text() {

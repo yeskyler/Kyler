@@ -158,7 +158,9 @@ mod tests {
         assert!(counter.count(&huge).unwrap() < 5000);
         assert!(counter.count(&huge).unwrap() >= 4096);
         let text = serde_json::json!({"role":"user", "content":format!("data:image/png;base64,{}", "A".repeat(100_000))});
-        assert!(counter.count(&text).unwrap() > 100_000);
+        let text_tokens = counter.count(&text).unwrap();
+        assert!(text_tokens > counter.count(&huge).unwrap());
+        assert!(text_tokens < 100_000 / 2);
         assert!(matches!(
             &session.events[0].content[0],
             ContentItem::Message {

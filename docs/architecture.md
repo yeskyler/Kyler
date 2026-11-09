@@ -94,6 +94,13 @@ and compacts history according to the configured window and summary policy. Larg
 outputs can have a compressed model view while retaining their original output in
 history.
 
+Text estimates use `tiktoken-rs`, with `o200k_base` as the default encoding. Model
+profiles can explicitly select `cl100k_base`. The legacy `conservative` setting is
+accepted as an alias for `o200k_base`; there is no byte-counting fallback. These
+encodings remain estimates for providers using different tokenizers. Provider-reported
+input usage takes precedence in the context inspector when available. Images retain
+a separate visual-token allowance.
+
 Context compaction records a durable lifecycle with a stable identifier, timestamps,
 and status. The service streams these updates through `context_compaction` events
 and includes them in session history. Web and TUI render one separator per lifecycle,
