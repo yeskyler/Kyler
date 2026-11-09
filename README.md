@@ -25,10 +25,6 @@ development. It combines conversations, tools, and task deliverables in one work
 with Web, TUI, and CLI interfaces powered by a shared Rust runtime. Models connect
 through OpenAI-compatible Chat Completions endpoints.
 
-<p align="center">
-  <img src="docs/assets/web-preview.png" width="1120" alt="Kyler Web interface">
-</p>
-
 ## Demo
 https://github.com/user-attachments/assets/a3c30faf-fc88-4414-9916-643834cd35ea
 
