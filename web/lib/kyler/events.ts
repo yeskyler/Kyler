@@ -1,5 +1,7 @@
 import type { QuestionRecord } from "./questions.ts";
+import type { Compaction } from "./compaction.ts";
 export type KylerEvent = {
+  compaction?: Compaction;
   type: string;
   seq: number;
   execution_id?: string | null;

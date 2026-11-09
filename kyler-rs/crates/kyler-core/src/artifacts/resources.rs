@@ -12,13 +12,35 @@ pub(super) fn references(name: &str, bytes: &[u8]) -> Vec<String> {
         .and_then(|s| s.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !matches!(extension.as_str(), "html" | "htm" | "css" | "js" | "mjs") {
+    if !matches!(
+        extension.as_str(),
+        "html" | "htm" | "css" | "js" | "mjs" | "md" | "markdown"
+    ) {
         return Vec::new();
     }
     let Ok(text) = std::str::from_utf8(bytes) else {
         return Vec::new();
     };
     let mut references = Vec::new();
+    if matches!(extension.as_str(), "md" | "markdown") {
+        use pulldown_cmark::{Event as MarkdownEvent, Options, Parser, Tag};
+        return Parser::new_ext(text, Options::all())
+            .filter_map(|event| match event {
+                MarkdownEvent::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
+                    Some(dest_url.into_string())
+                }
+                _ => None,
+            })
+            .filter(|reference| {
+                !reference.is_empty()
+                    && reference.len() <= 4096
+                    && !reference.starts_with(['/', '#', '?'])
+                    && !reference.contains([':', '\\'])
+            })
+            .take(24)
+            .collect();
+    }
+
     if matches!(extension.as_str(), "html" | "htm") {
         let mut reader = Reader::from_str(text);
         reader.config_mut().check_end_names = false;

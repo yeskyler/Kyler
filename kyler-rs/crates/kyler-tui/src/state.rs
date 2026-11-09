@@ -27,6 +27,7 @@ use kyler_protocol::{
 
 #[derive(Debug, Clone)]
 pub enum Entry {
+    Compaction(kyler_protocol::api::compaction::CompactionInfo),
     Assistant(AgentMessageCell),
     RunTiming {
         label: String,
@@ -380,6 +381,34 @@ impl State {
             .or_else(|| self.info.as_ref().map(|i| i.model.as_str()))
             .unwrap_or("Connecting…")
     }
+    pub(super) fn compaction(
+        &mut self,
+        compaction: kyler_protocol::api::compaction::CompactionInfo,
+    ) {
+        if let Some(Entry::Compaction(previous)) = self
+            .entries
+            .iter_mut()
+            .find(|entry| matches!(entry, Entry::Compaction(info) if info.id == compaction.id))
+        {
+            *previous = compaction;
+        } else {
+            self.entries.push(Entry::Compaction(compaction));
+        }
+    }
+    pub(super) fn settle_compactions(&mut self, cancelled: bool) {
+        use kyler_protocol::api::compaction::CompactionStatus;
+        for entry in &mut self.entries {
+            if let Entry::Compaction(info) = entry {
+                if info.status == CompactionStatus::Running {
+                    info.status = if cancelled {
+                        CompactionStatus::Cancelled
+                    } else {
+                        CompactionStatus::Interrupted
+                    };
+                }
+            }
+        }
+    }
     pub fn notice(&mut self, text: impl Into<String>) {
         self.transcript_version += 1;
         self.entries.push(Entry::Notice(text.into()));
@@ -427,6 +456,7 @@ impl State {
             }
             for item in event.content {
                 match item {
+                    HistoryContent::ContextCompaction { compaction } => self.compaction(compaction),
                     HistoryContent::Reasoning { text } if !text.trim().is_empty() => {
                         self.entries.push(Entry::Message {
                             role: "thinking".into(),
@@ -557,6 +587,7 @@ impl State {
                 }
             }
         }
+        self.settle_compactions(false);
         crate::questions::history(self);
         self.transcript_version += 1;
         self.assistant = None;

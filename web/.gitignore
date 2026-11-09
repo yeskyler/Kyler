@@ -55,3 +55,12 @@ next-env.d.ts
 /blob-report/
 *.log
 next-panic-*
+
+# Generated PDF.js assets
+/public/pdfjs/
+
+# Generated Excel preview runtime
+/public/excel-preview/
+
+# Generated PPTX preview runtime
+/public/pptx-preview/

@@ -104,7 +104,7 @@ impl Agent {
                     .await?;
             }
             let messages = step_agent
-                .prepare_messages(session, &tools, &client)
+                .prepare_messages(session, &tools, &client, stream)
                 .await?;
             let mut builder = CreateChatCompletionRequestArgs::default();
             builder.model(&self.model).messages(messages);

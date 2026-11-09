@@ -62,6 +62,11 @@ async fn completion(State(model): State<Model>, Json(request): Json<Value>) -> R
     if input == "reject-image" {
         return (axum::http::StatusCode::BAD_REQUEST, Json(json!({"code":20041,"message":"The model is not a VLM (Vision Language Model). PRIVATE_PROVIDER_VALUE data:image/png;base64,PRIVATE_IMAGE","data":null}))).into_response();
     }
+    if request["stream"] != true {
+        return Json(json!({"id":"summary", "object":"chat.completion", "created":0, "model":"test",
+            "choices":[{"index":0,"message":{"role":"assistant","content":"Retained conversation facts."},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}})).into_response();
+    }
     let has_result = request["messages"]
         .as_array()
         .unwrap()

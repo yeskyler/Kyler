@@ -16,6 +16,9 @@ pub struct ToolPresentation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
+    ContextCompaction {
+        compaction: super::compaction::CompactionInfo,
+    },
     Reasoning {
         text: String,
     },

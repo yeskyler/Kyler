@@ -18,6 +18,9 @@ use kyler_protocol::activity::{ActivityKind, ToolSource};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentStreamEvent {
+    ContextCompaction {
+        compaction: kyler_protocol::api::compaction::CompactionInfo,
+    },
     Started {
         execution_id: String,
         session_id: String,
@@ -205,4 +208,22 @@ impl Drop for AgentStream {
     fn drop(&mut self) {
         self.cancel.send_replace(true);
     }
+}
+
+#[cfg(test)]
+pub(super) fn compaction_test_stream() -> (
+    StreamControl,
+    mpsc::Receiver<AgentStreamEvent>,
+    watch::Sender<bool>,
+) {
+    let (sender, receiver) = mpsc::channel(32);
+    let (cancel, cancelled) = watch::channel(false);
+    (
+        StreamControl {
+            sender,
+            cancel: cancelled,
+        },
+        receiver,
+        cancel,
+    )
 }

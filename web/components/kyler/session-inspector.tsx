@@ -20,6 +20,7 @@ const tabs = [
 ] as const;
 type InspectionState = {
   session: string;
+  name: string;
   tab: InspectorTab | null;
   setTab: (tab: InspectorTab | null) => void;
   context?: ContextInspection;
@@ -39,6 +40,7 @@ function useInspection() {
 
 export function SessionInspectorProvider({
   session,
+  name,
   active,
   enabled,
   onOpen,
@@ -46,6 +48,7 @@ export function SessionInspectorProvider({
   children,
 }: {
   session: string;
+  name: string;
   active: boolean;
   enabled: boolean;
   onOpen: () => void;
@@ -99,6 +102,7 @@ export function SessionInspectorProvider({
     <Inspection.Provider
       value={{
         session,
+        name,
         tab,
         setTab,
         context,
@@ -124,7 +128,7 @@ export function SessionInspectorProvider({
 }
 
 export function SessionInspectorPage() {
-  const { session, tab, setTab, active, visited, context, error, loading } = useInspection();
+  const { session, name, tab, setTab, active, visited, context, error, loading } = useInspection();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (active) heading.current?.focus();
@@ -153,8 +157,8 @@ export function SessionInspectorPage() {
                 ? "Session summary and saved workspace memory."
                 : "Model input, context budget, and compaction."}
           </p>
-          <p title={session} className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
-            Session {session}
+          <p title={name} className="mt-2 truncate text-xs text-muted-foreground">
+            {name}
           </p>
           <div role="tablist" aria-label="Session inspection" className="mt-5 flex gap-1">
             {tabs.map(({ id, label, Icon }) => (
@@ -219,18 +223,20 @@ export function SessionInspectorPage() {
 }
 
 export function SessionInspectorBackButton() {
-  const { active, back } = useInspection();
+  const { active, back, name } = useInspection();
   if (!active) return null;
   return (
     <Button
       type="button"
       variant="ghost"
       size="sm"
-      className="-ml-1 text-muted-foreground"
+      className="-ml-1 min-w-0 max-w-80 text-muted-foreground"
+      aria-label="Back to chat"
+      title={name}
       onClick={back}
     >
       <ArrowLeftIcon className="size-3.5" />
-      Back to chat
+      <span className="truncate">{name}</span>
     </Button>
   );
 }

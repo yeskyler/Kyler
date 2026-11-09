@@ -7,7 +7,7 @@ type Block = { text: string; heading: boolean; image?: string };
 type Page = { name: string; blocks: Block[] };
 const text = (element: Element) =>
   [...element.getElementsByTagNameNS("*", "t")].map((node) => node.textContent ?? "").join("");
-export function OfficePreview({ bytes, slides }: { bytes: Uint8Array; slides: boolean }) {
+export function OfficePreview({ bytes }: { bytes: Uint8Array }) {
   const [pages, setPages] = useState<Page[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -23,13 +23,8 @@ export function OfficePreview({ bytes, slides }: { bytes: Uint8Array; slides: bo
         if (parsed.querySelector("parsererror")) throw new Error("Invalid document part");
         return parsed;
       };
-      const names = slides
-        ? Object.keys(archive)
-            .filter((path) => /^ppt\/slides\/slide\d+\.xml$/.test(path))
-            .sort((a, b) => Number(a.match(/slide(\d+)/)?.[1]) - Number(b.match(/slide(\d+)/)?.[1]))
-            .slice(0, 50)
-        : ["word/document.xml"];
-      const result = names.map((path, index) => {
+      const names = ["word/document.xml"];
+      const result = names.map((path) => {
         const document = xml(path);
         const blocks: Block[] = [];
         const paragraphs = [...document.getElementsByTagNameNS("*", "p")].slice(0, 1000);
@@ -68,14 +63,14 @@ export function OfficePreview({ bytes, slides }: { bytes: Uint8Array; slides: bo
             blocks.push({ text: "Embedded image", heading: false, image: url });
           }
         }
-        return { name: slides ? `Slide ${index + 1}` : "Document", blocks };
+        return { name: "Document", blocks };
       });
       setPages(result);
     } catch {
       setError("This document could not be previewed. Download the original file.");
     }
     return () => urls.forEach((url) => URL.revokeObjectURL(url));
-  }, [bytes, slides]);
+  }, [bytes]);
   if (error)
     return (
       <p role="alert" className="p-5 text-sm text-muted-foreground">

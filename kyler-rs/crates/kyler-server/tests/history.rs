@@ -227,3 +227,88 @@ async fn legacy_events_keep_attachments_and_explicitly_bound_large_results() {
     assert!(items.iter().any(|item| matches!(item, HistoryContent::ToolResult { output, output_bytes: 40000, truncated: true, .. } if output.len() == 32000 && !output.contains("compressed"))));
     h.close().await;
 }
+
+#[tokio::test]
+async fn context_compaction_stream_and_history_replay_share_one_lifecycle() {
+    use kyler_core::context::{ContentItem, ContextPolicy, Event, Role};
+    use kyler_protocol::api::{compaction::CompactionStatus, event::EventPayload};
+    use std::sync::Arc;
+    let mut h = Harness::new(ServerSettings::default()).await;
+    h.close().await;
+    h.agent = Arc::new((*h.agent).clone().with_context_policy(ContextPolicy {
+        context_tokens: 128000,
+        output_tokens: 1024,
+        summary_tokens: 1024,
+        safety_tokens: 1024,
+        ..Default::default()
+    }));
+    h.restart().await;
+    let session = h.session().await;
+    let mut stored = h.store.load(&session).await.unwrap();
+    stored.add_event(Event::new(
+        "previous",
+        stored.author.clone(),
+        vec![ContentItem::Message {
+            role: Role::User,
+            content: "Earlier question".into(),
+        }],
+    ));
+    stored.add_event(Event::new(
+        "previous",
+        stored.author.clone(),
+        vec![ContentItem::Message {
+            role: Role::Assistant,
+            content: "old conversation ".repeat(20000),
+        }],
+    ));
+    h.store.save(&mut stored).await.unwrap();
+    let run = h.run(&session, "deliver:Done", "compaction").await;
+    let result = h.terminal(&run.run_id).await;
+    let saved = h.store.load(&session).await.unwrap();
+    assert_eq!(
+        result.status,
+        RunStatus::Completed,
+        "{:?}; {:?}",
+        result.error,
+        saved
+            .execution
+            .as_ref()
+            .and_then(|execution| execution.error.as_ref())
+    );
+    let events = h.events(&run.run_id, 0).await;
+    let records = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            EventPayload::ContextCompaction { compaction } => Some(compaction),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].id, records[1].id);
+    assert_eq!(records[0].status, CompactionStatus::Running);
+    assert_eq!(records[1].status, CompactionStatus::Completed);
+    let id = records[0].id.clone();
+    h.restart().await;
+    let history: HistoryPage = h
+        .client
+        .get(format!("{}/v1/sessions/{session}/history?limit=500", h.url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let retained = history
+        .events
+        .iter()
+        .flat_map(|event| &event.content)
+        .filter_map(|item| match item {
+            HistoryContent::ContextCompaction { compaction } => Some(compaction),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(retained.len(), 2);
+    assert!(retained.iter().all(|record| record.id == id));
+    assert_eq!(retained[1].status, CompactionStatus::Completed);
+    h.close().await;
+}

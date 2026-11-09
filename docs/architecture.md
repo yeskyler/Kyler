@@ -68,11 +68,24 @@ forward into later turns.
 
 Registered files define the output list. When no files are registered, local links in
 the final response remain supported for compatibility. The host does not scan workspace
-directories for deliverables. Local dependencies of retained HTML files remain hidden
-from the top-level list. Web opens an available, supported primary file automatically;
+directories for deliverables. Local dependencies of retained HTML and Markdown files
+remain hidden from the top-level list. Web opens an available, supported primary file automatically;
 other files remain selectable from the browser. Missing primary files never cause an
 unrelated file to be selected automatically. File-loading failures show an error and a
 retry control.
+
+XLSX and PPTX previews use `@vue-office/excel` and `@vue-office/pptx` in read-only,
+opaque-origin iframes. The Web build bundles the components, Vue runtime, compatibility
+layer, and styles as local static assets. The parent validates file size and ZIP
+expansion limits before passing bytes to each frame; it does not pass service
+credentials. Frames permit local blob reads and block remote resource connections.
+Removing a frame releases the component's global event handlers and document resources.
+
+PPTX preparation runs in a Worker and removes dangling content-type declarations from
+a preview copy, preserving the original download. Previews support at most 100 slides
+and 20 MiB of compressed input. Page navigation and scaling reuse rendered slides and
+preserve the presentation's page ratio. Advanced chart styling, animations, and embedded
+media depend on the renderer's capabilities.
 
 ## Context and memory
 
@@ -80,6 +93,14 @@ Context management builds a bounded model-facing view, preserves the current que
 and compacts history according to the configured window and summary policy. Large tool
 outputs can have a compressed model view while retaining their original output in
 history.
+
+Context compaction records a durable lifecycle with a stable identifier, timestamps,
+and status. The service streams these updates through `context_compaction` events
+and includes them in session history. Web and TUI render one separator per lifecycle,
+updating its status when compaction completes, fails, or is cancelled. History replay
+marks unfinished lifecycles as interrupted rather than leaving an active indicator.
+These records contain no summary text and are excluded from model requests and
+summary input.
 
 Session summaries are part of session state. Long-term project facts are explicitly
 managed by the `memory` tool and stored separately by the service, scoped to the

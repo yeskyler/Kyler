@@ -63,6 +63,7 @@ export function mergeSessionHistory<
     status?: string | null;
     title?: string | null;
     placeholder?: string;
+    updated_at?: number;
   },
 >(saved: T[], local: T[]): T[] {
   const items = new Map(saved.map((session) => [session.session_id, session]));
@@ -72,10 +73,22 @@ export function mergeSessionHistory<
       items.set(session.session_id, {
         ...previous,
         placeholder: previous.placeholder ?? session.placeholder,
+        ...(previous.updated_at !== undefined || session.updated_at !== undefined
+          ? {
+              updated_at: Math.max(
+                sessionTime(previous.updated_at),
+                sessionTime(session.updated_at),
+              ),
+            }
+          : {}),
         ...(session.status === "running" ? { status: "running" } : {}),
       });
     else if (session.placeholder?.trim() && (!session.draft || session.status === "running"))
       items.set(session.session_id, session);
   }
-  return [...items.values()];
+  return [...items.values()].sort((a, b) => sessionTime(b.updated_at) - sessionTime(a.updated_at));
+}
+
+function sessionTime(value?: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }

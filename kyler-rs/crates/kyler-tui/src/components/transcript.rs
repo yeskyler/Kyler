@@ -129,6 +129,12 @@ pub fn lines_with_width(entries: &[Entry], width: u16) -> Vec<Line<'static>> {
                 lines.push(Line::default());
             }
             Entry::Tool { .. } => unreachable!("tool groups are rendered above"),
+            Entry::Compaction(info) => {
+                lines.push(Line::styled(
+                    format!("── {} ──", info.status.label()),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
             Entry::Notice(text) => {
                 lines.push(Line::styled(
                     clean(&format!("  · {text}")),
@@ -406,6 +412,11 @@ pub fn fingerprint(entry: &Entry) -> u64 {
             error.hash(&mut hash);
             status.hash(&mut hash);
             seconds.map(f64::to_bits).hash(&mut hash);
+        }
+        Entry::Compaction(info) => {
+            7u8.hash(&mut hash);
+            info.id.hash(&mut hash);
+            format!("{:?}", info.status).hash(&mut hash);
         }
         Entry::Notice(text) => {
             2u8.hash(&mut hash);

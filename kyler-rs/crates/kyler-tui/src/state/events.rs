@@ -18,6 +18,11 @@ impl State {
                 self.cursor = event.seq;
                 let queued = matches!(&event.payload, EventPayload::ToolQueued { .. });
                 match event.payload {
+                    EventPayload::ContextCompaction { compaction } => {
+                        self.finish_assistant();
+                        self.compaction(compaction);
+                    }
+
                     EventPayload::QuestionUpdated { question } => {
                         self.finish_assistant();
                         self.questions.update(question);
@@ -179,6 +184,7 @@ impl State {
                 if self.run.as_deref() != Some(&result.run_id) || self.phase == Phase::Ready {
                     return;
                 }
+                self.settle_compactions(result.status == RunStatus::Cancelled);
                 let seconds = result
                     .finished_at
                     .map(|finished| finished.saturating_sub(result.created_at).max(0) as u64 / 1000)

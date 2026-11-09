@@ -15,6 +15,7 @@ import {
   selectedSessionKey,
   runStorageKey,
 } from "@/lib/kyler/client";
+import { sessionTitle } from "@/lib/kyler/sessions";
 import { loadHistory } from "@/lib/kyler/history";
 import { createDraftSession, discardDraft } from "@/lib/kyler/drafts";
 import {
@@ -66,7 +67,9 @@ export function Assistant() {
       if (
         previous?.status === session.status &&
         previous?.placeholder === session.placeholder &&
-        previous?.draft === session.draft
+        previous?.draft === session.draft &&
+        previous?.title === session.title &&
+        previous?.updated_at === session.updated_at
       )
         return items;
       return { ...items, [session.session_id]: session };
@@ -397,22 +400,33 @@ function Connected({
     maxSteps: 1,
     adapters: { attachments: attachmentAdapter },
   });
+  const [historyTitle, setHistoryTitle] = useState(loaded.session.title);
+  const [firstInput, setFirstInput] = useState("");
+  const name = sessionTitle(historyTitle, firstInput);
+  const synchronizeSession = useCallback((session: Session) => setHistoryTitle(session.title), []);
+  const activity = useRef({ running: false, at: loaded.session.updated_at ?? 0 });
   useEffect(() => {
     const report = () => {
       const state = runtime.thread.getState();
       const input = state.messages.find((message) => message.role === "user");
+      const placeholder = input?.content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join(" ");
+      setFirstInput(placeholder ?? "");
+      if (state.isRunning && !activity.current.running) activity.current.at = Date.now();
+      activity.current.running = state.isRunning;
       reportSession({
         ...loaded.session,
+        title: historyTitle,
+        updated_at: Math.max(loaded.session.updated_at ?? 0, activity.current.at),
         status: state.isRunning ? "running" : "idle",
-        placeholder: input?.content
-          .filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join(" "),
+        placeholder,
       });
     };
     report();
     return runtime.thread.subscribe(report);
-  }, [runtime, loaded.session, reportSession]);
+  }, [runtime, loaded.session, reportSession, historyTitle]);
   const recoveryStarted = useRef(false);
   useEffect(() => {
     if (recoveryStarted.current) return;
@@ -455,6 +469,7 @@ function Connected({
             <ArtifactsProvider session={loaded.session.session_id}>
               <SessionInspectorProvider
                 session={loaded.session.session_id}
+                name={name}
                 active={active && view === "inspection"}
                 enabled={!loaded.session.draft}
                 onOpen={() => setView("inspection")}
@@ -489,6 +504,7 @@ function Connected({
                       createSession={createSession}
                       selectSession={selectSession}
                       deleteSession={deleteSession}
+                      onSessionUpdate={synchronizeSession}
                     />
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col">
@@ -518,7 +534,7 @@ function Connected({
                               ? "Plugins"
                               : loaded.session.draft
                                 ? "New Chat"
-                                : loaded.session.title || "Chat"}
+                                : name}
                           </h1>
                         )}
                       </div>
