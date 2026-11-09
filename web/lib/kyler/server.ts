@@ -174,7 +174,7 @@ export async function proxyRequest(request: Request, path: string[]) {
         offset += chunk.length;
       }
       if (route === "sessions") {
-        let requested: { workspace_root?: unknown; draft?: unknown };
+        let requested: { workspace_root?: unknown; draft?: unknown; workspace_mode?: unknown };
         try {
           requested = body.length ? JSON.parse(new TextDecoder().decode(body)) : {};
         } catch {
@@ -184,11 +184,19 @@ export async function proxyRequest(request: Request, path: string[]) {
           !requested ||
           typeof requested !== "object" ||
           Array.isArray(requested) ||
-          Object.keys(requested).some((key) => key !== "workspace_root" && key !== "draft")
+          Object.keys(requested).some(
+            (key) => key !== "workspace_root" && key !== "draft" && key !== "workspace_mode",
+          )
         )
           return Response.json({ message: "Invalid session request." }, { status: 400 });
         if (requested.draft !== undefined && typeof requested.draft !== "boolean")
           return Response.json({ message: "Invalid draft flag." }, { status: 400 });
+        if (
+          requested.workspace_mode !== undefined &&
+          requested.workspace_mode !== "project" &&
+          requested.workspace_mode !== "isolated"
+        )
+          return Response.json({ message: "Invalid workspace mode." }, { status: 400 });
         const workspace = requested.workspace_root;
         if (
           workspace != null &&
@@ -205,6 +213,9 @@ export async function proxyRequest(request: Request, path: string[]) {
           JSON.stringify({
             ...(typeof workspace === "string" ? { workspace_root: workspace } : {}),
             ...(requested.draft === undefined ? {} : { draft: requested.draft }),
+            ...(requested.workspace_mode === undefined
+              ? {}
+              : { workspace_mode: requested.workspace_mode }),
           }),
         );
         headers.set("content-type", "application/json");

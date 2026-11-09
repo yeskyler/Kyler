@@ -50,3 +50,39 @@ async fn legacy_history_fallback_preserves_text_but_never_bypasses_authorization
         task.abort();
     }
 }
+
+#[tokio::test]
+async fn project_session_creation_explicitly_requests_project_execution() {
+    use axum::routing::post;
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = requests.clone();
+    let app = Router::new().route("/v1/sessions", post(move |Json(request): Json<serde_json::Value>| {
+        let captured = captured.clone();
+        async move {
+            captured.lock().unwrap().push(request);
+            Json(json!({"session_id":"00000000-0000-4000-8000-000000000001","workspace_root":"/project","working_directory":"/project","created_at":0,"updated_at":0,"event_count":0,"execution_count":0,"status":null}))
+        }
+    }));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = Client::new(ClientSettings {
+        server_url: format!("http://{}", listener.local_addr().unwrap()),
+        ..Default::default()
+    })
+    .unwrap();
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    client
+        .create_project_session_in(std::path::Path::new("/project"))
+        .await
+        .unwrap();
+    client
+        .create_session_in(std::path::Path::new("/project"))
+        .await
+        .unwrap();
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests[0]["workspace_root"], "/project");
+    assert_eq!(requests[0]["workspace_mode"], "project");
+    assert!(requests[1].get("workspace_mode").is_none());
+    task.abort();
+}

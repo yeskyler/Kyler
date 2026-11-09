@@ -87,6 +87,13 @@ pub async fn create(
         .environment_for_create(request.workspace_root.as_deref())?;
     let mut session = Session::new();
     session.environment = environment;
+    if request.workspace_mode == kyler_protocol::api::session::WorkspaceMode::Project {
+        session
+            .environment
+            .as_mut()
+            .ok_or_else(|| ApiError::bad("Project execution requires an authorized workspace."))?
+            .workspace_mode = request.workspace_mode;
+    }
     state.runs.isolate_session(&mut session).await?;
     if request.draft {
         state.runs.mark_draft(&session.session_id).await?;

@@ -252,3 +252,139 @@ async fn sessions_share_only_project_identity_and_commands_cannot_escape_their_p
     let _ = stop.send(());
     task.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn project_sessions_execute_in_project_with_independent_history_and_host_boundaries() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("source.txt"), "original project file").unwrap();
+    let worker =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/kyler-tool-worker");
+    let mut config = AppConfig::default();
+    config.llm.api_key = SecretString::new("fixture");
+    config.llm.model = "fixture".into();
+    config.llm.base_url = "http://127.0.0.1:1/v1".into();
+    config.session.enabled = true;
+    config.session.directory = root.path().join("sessions");
+    config.workspace.default_directory = project.clone();
+    config.skills = SkillSettings {
+        enabled: false,
+        ..Default::default()
+    };
+    let factory = Arc::new(
+        WorkspaceFactory::native(worker, vec![project.clone()], true, true, false).unwrap(),
+    );
+    let server = Server::from_config_with_workspaces(&config, factory.clone())
+        .await
+        .unwrap();
+    let store = server.state.runs.store.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(server.serve(listener, async {
+        let _ = stopped.await;
+    }));
+    let client = reqwest::Client::new();
+    let mut sessions = Vec::new();
+    for index in 0..2 {
+        let summary: SessionSummary = client
+            .post(format!("{base}/v1/sessions"))
+            .json(&if index == 0 {
+                json!({"workspace_root":project,"workspace_mode":"project"})
+            } else {
+                json!({"workspace_mode":"project","draft":true})
+            })
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            summary.working_directory.as_deref(),
+            project.canonicalize().unwrap().to_str()
+        );
+        sessions.push(summary);
+    }
+    assert_ne!(sessions[0].session_id, sessions[1].session_id);
+    let mut first = store.load(&sessions[0].session_id).await.unwrap();
+    let snapshot = first.environment.clone().unwrap();
+    assert_eq!(
+        snapshot.workspace_mode,
+        kyler_protocol::api::session::WorkspaceMode::Project
+    );
+    assert!(
+        !store
+            .directory()
+            .join("_execution")
+            .join(&first.session_id)
+            .exists()
+    );
+    first
+        .begin_execution("Private first-session question")
+        .unwrap();
+    store.save(&mut first).await.unwrap();
+    assert!(
+        store
+            .load(&sessions[1].session_id)
+            .await
+            .unwrap()
+            .events
+            .is_empty()
+    );
+    let restored = factory
+        .restore(
+            &store
+                .load(&first.session_id)
+                .await
+                .unwrap()
+                .environment
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        restored.session_environment().working_directory,
+        project.canonicalize().unwrap()
+    );
+    let read = restored
+        .run_tool("read_file", &json!({"file_path":"source.txt"}).to_string())
+        .await
+        .unwrap();
+    assert!(read.contains("original project file"));
+    let command = restored
+        .run_tool(
+            "run_command",
+            &json!({"program":"/bin/sh","args":["-c","printf changed > source.txt; pwd"]})
+                .to_string(),
+        )
+        .await
+        .unwrap();
+    assert!(command.contains(project.canonicalize().unwrap().to_str().unwrap()));
+    assert_eq!(
+        std::fs::read_to_string(project.join("source.txt")).unwrap(),
+        "changed"
+    );
+    assert!(
+        restored
+            .policy()
+            .filesystem
+            .check_read(&project, store.directory())
+            .is_err()
+    );
+    let denied = client
+        .post(format!("{base}/v1/sessions"))
+        .json(&json!({"workspace_root":root.path(),"workspace_mode":"project"}))
+        .send()
+        .await
+        .unwrap();
+    assert!(denied.status().is_client_error());
+    let mut forged = snapshot;
+    forged.workspace_root = root.path().canonicalize().unwrap();
+    forged.working_directory = forged.workspace_root.clone();
+    assert!(factory.restore(&forged).is_err());
+    let _ = stop.send(());
+    task.await.unwrap().unwrap();
+}

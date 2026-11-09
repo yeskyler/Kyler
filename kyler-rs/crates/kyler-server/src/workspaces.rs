@@ -238,7 +238,12 @@ impl WorkspaceFactory {
                         .isolated_session(&snapshot.workspace_root, project)?,
                 ));
             }
-            factory.build(&snapshot.workspace_root, &snapshot.working_directory)
+            let environment =
+                factory.build(&snapshot.workspace_root, &snapshot.working_directory)?;
+            if snapshot.workspace_mode == kyler_protocol::api::session::WorkspaceMode::Project {
+                return Ok(Arc::new(environment.as_ref().clone().project_workspace()?));
+            }
+            Ok(environment)
         };
         let environment = restore(self)?;
         if environment.session_environment() != snapshot

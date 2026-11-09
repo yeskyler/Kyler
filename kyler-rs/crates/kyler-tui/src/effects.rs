@@ -138,7 +138,7 @@ impl Effects {
                         let cwd = std::env::current_dir().map_err(|_| {
                             kyler_client::Error::invalid("Cannot determine the current workspace.")
                         })?;
-                        client.create_session_in(&cwd).await?
+                        client.create_project_session_in(&cwd).await?
                     }
                 };
                 info.workspace_root = session.workspace_root.clone();

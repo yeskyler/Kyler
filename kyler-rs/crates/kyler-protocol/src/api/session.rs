@@ -38,9 +38,25 @@ pub struct SessionPage {
     pub next_cursor: Option<usize>,
 }
 
+/// Select an execution layout within the server-authorized workspace boundary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceMode {
+    #[default]
+    Isolated,
+    Project,
+}
+impl WorkspaceMode {
+    pub fn is_isolated(&self) -> bool {
+        *self == Self::Isolated
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionRequest {
+    #[serde(default, skip_serializing_if = "WorkspaceMode::is_isolated")]
+    pub workspace_mode: WorkspaceMode,
     #[serde(default, skip_serializing_if = "is_false")]
     pub draft: bool,
     pub workspace_root: Option<String>,
