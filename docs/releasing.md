@@ -89,8 +89,9 @@ GitHub authentication, tag creation, push, or Release upload occurs.
 
 The local publisher creates and pushes a version tag when needed, then uploads the
 prepared bundles to GitHub in the same process. Build and validate all required platform
-bundles before publishing. The version must match the workspace manifest and must not
-already exist as a Release, including a draft.
+bundles before publishing. The version must match the workspace manifest. When the
+Release already exists, packaging from the same clean source commit can add missing
+platform archives to that Release.
 
 ```sh
 gh auth login
@@ -99,12 +100,26 @@ sh scripts/release.sh 0.1.0
 
 The script derives the GitHub repository from `origin` and performs these steps:
 
-1. Authenticate and reject an existing Release with the same tag.
+1. Authenticate and locate any existing Release with the same tag.
 2. Verify existing local and remote tags point to the release commit.
 3. Create an annotated `v0.1.0` tag if needed and push that tag. Branches are not pushed.
 4. Generate a version-specific `SHA256SUMS`, leaving other versions out of that upload.
 5. Upload native archives, checksums, and `install.sh` to a draft Release with generated notes.
-6. Publish only after all uploads succeed. Versions with a prerelease suffix are marked prerelease.
+6. Publish new drafts only after all uploads succeed. Versions with a prerelease suffix are marked prerelease.
+
+For an existing Release, the remote tag must already point to the local source commit.
+Missing platform archives are uploaded without replacing existing archives. Identical
+archives and installers are skipped; differing content is rejected before uploading.
+The script downloads the current `SHA256SUMS`, preserves other platform entries, and
+replaces only that shared manifest after confirming the new uploads. Older GitHub
+asset metadata without a SHA256 digest is verified by downloading the asset.
+
+Use the same publish command on each native build host, sequentially. The script
+checks for concurrent asset changes before updating the manifest, but GitHub provides
+no atomic transaction across these uploads. A published Release stays published; an
+existing draft is published after successful completion unless `--draft` is selected.
+Release notes are preserved when appending assets. GitHub API pagination does not
+require the `gh api --slurp` option.
 
 Use `--draft` to retain the uploaded Release as a draft for inspection:
 
@@ -115,13 +130,15 @@ sh scripts/release.sh 0.1.0 --draft
 The implementation uses [gh release
 create](https://cli.github.com/manual/gh_release_create) and [gh release
 edit](https://cli.github.com/manual/gh_release_edit). It never force-pushes tags,
-overwrites existing assets, or deletes an existing Release. The publishing command
+overwrites existing archives or installers, or deletes an existing Release. The shared
+checksum manifest is updated when platforms are added. The publishing command
 performs the publication operation without an additional interactive confirmation.
 
 If an upload fails, the tag or draft may remain. Inspect it with `gh release view
-v0.1.0`; no automatic tag deletion or replacement is attempted. Inspect and resolve any
-partial draft before retrying publication. Existing Releases are rejected, including
-drafts.
+v0.1.0`; no automatic tag deletion or replacement is attempted. Retry from the same
+clean source and artifacts. Uploaded identical files are skipped, and checksum entries
+for completed remote archives can be recovered if a manifest upload failed. Incomplete
+remote assets require inspection before retrying.
 
 `dist/` stays ignored by Git. Upload archives as Release assets, never as tracked
 binaries. Users can then follow [installation](installation.md).
