@@ -17,7 +17,7 @@
     <a href="docs/configuration.md"><img src="https://img.shields.io/badge/extensions-Skills-10b981?style=flat-square" alt="Skills"></a>
   </p>
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
-  <p><a href="#安装">安装</a> · <a href="#主要能力">主要能力</a> · <a href="#文档导航">文档导航</a></p>
+  <p><a href="#安装">安装</a> · <a href="#演示">演示</a> · <a href="#主要能力">主要能力</a> · <a href="#文档导航">文档导航</a></p>
 </div>
 
 Kyler 是面向研究、写作、分析和软件开发的通用 AI 助手，将对话、工具与任务产物
@@ -27,6 +27,10 @@ OpenAI Chat Completions 的接口连接模型服务。
 <p align="center">
   <img src="docs/assets/web-preview.png" width="1120" alt="Kyler Web 界面">
 </p>
+
+## 演示
+
+[观看演示视频](demo/example.mov)
 
 ## 主要能力
 
