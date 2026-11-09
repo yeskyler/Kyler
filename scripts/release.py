@@ -122,6 +122,122 @@ def collect_artifacts(source, destination, version, revision):
         stage.rename(destination)
 
 
+def checksum_entries(text):
+    entries = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        match = re.fullmatch(r"([a-fA-F0-9]{64})\s+\*?([^/\\\s]+)", line)
+        if not match or match[2] in entries:
+            raise ValueError("Invalid or duplicate release checksum entry")
+        entries[match[2]] = match[1].lower()
+    return entries
+
+
+def github_pages(endpoint):
+    """Paginate explicitly for compatibility with gh versions without --slurp."""
+    result = []
+    page = 1
+    while True:
+        items = json.loads(run("gh", "api", f"{endpoint}?per_page=100&page={page}"))
+        if not isinstance(items, list):
+            raise ValueError("Expected a GitHub API list")
+        result.extend(items)
+        if len(items) < 100:
+            return result
+        page += 1
+
+
+def download_asset(repo, asset, destination):
+    with destination.open("wb") as output:
+        subprocess.run([
+            "gh", "api", "-H", "Accept: application/octet-stream",
+            f"repos/{repo}/releases/assets/{asset['id']}",
+        ], cwd=ROOT, stdout=output, check=True)
+
+
+def append_assets(repo, tag, existing, bundles, installer, sums, keep_draft):
+    """Add platforms and merge checksums without replacing archives or installers."""
+    endpoint = f"repos/{repo}/releases/{existing['id']}/assets"
+    remote = github_pages(endpoint)
+    by_name = {asset["name"]: asset for asset in remote}
+    if len(by_name) != len(remote):
+        raise ValueError("Duplicate remote release asset names")
+    with tempfile.TemporaryDirectory(prefix="kyler-release-append-") as temporary:
+        directory = Path(temporary)
+        previous = {}
+        if "SHA256SUMS" in by_name:
+            download_asset(repo, by_name["SHA256SUMS"], directory / "previous")
+            previous = checksum_entries((directory / "previous").read_text())
+        local = checksum_entries(sums)
+        archive_pattern = rf"kyler-{re.escape(tag)}-({TARGET})\.tar\.gz"
+        if any(not re.fullmatch(archive_pattern, name) for name in previous):
+            raise ValueError("Remote checksums contain unexpected release filenames")
+        for name, digest in previous.items():
+            if name not in by_name or by_name[name].get("state") != "uploaded":
+                raise ValueError(f"Remote checksum has no complete asset: {name}")
+            remote_digest = by_name[name].get("digest")
+            if remote_digest and remote_digest != "sha256:" + digest:
+                raise ValueError(f"Remote asset checksum mismatch: {name}")
+        # Recover archives uploaded before a previous manifest update failed.
+        for name, asset in by_name.items():
+            if re.fullmatch(archive_pattern, name) and name not in previous and name not in local:
+                if asset.get("state") != "uploaded":
+                    raise ValueError(f"Remote asset is incomplete: {name}")
+                digest = asset.get("digest", "") or ""
+                if not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest):
+                    download_asset(repo, asset, directory / "recover")
+                    digest = "sha256:" + hashlib.sha256((directory / "recover").read_bytes()).hexdigest()
+                previous[name] = digest[7:].lower()
+        pending = []
+        for path in [*bundles, installer]:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if path.name in previous and previous[path.name] != digest:
+                raise ValueError(f"Existing checksum differs: {path.name}")
+            if path.name in by_name:
+                asset = by_name[path.name]
+                if asset.get("state") != "uploaded":
+                    raise ValueError(f"Remote asset is incomplete: {path.name}")
+                remote_digest = asset.get("digest")
+                if not remote_digest:
+                    download_asset(repo, asset, directory / "verify")
+                    remote_digest = "sha256:" + hashlib.sha256((directory / "verify").read_bytes()).hexdigest()
+                if remote_digest != "sha256:" + digest:
+                    raise ValueError(f"Existing asset differs: {path.name}; it will not be overwritten")
+            else:
+                pending.append(path)
+        merged = {**previous, **local}
+        for path in pending:
+            run("gh", "release", "upload", tag, str(path), "--repo", repo)
+        # Detect changes by another publisher before replacing the shared manifest.
+        current = github_pages(endpoint)
+        expected = {**by_name}
+        for path in pending:
+            matches = [asset for asset in current if asset["name"] == path.name]
+            if len(matches) != 1 or matches[0].get("state") != "uploaded":
+                raise ValueError(f"Upload could not be confirmed: {path.name}")
+            uploaded = matches[0]
+            digest = uploaded.get("digest")
+            if not digest:
+                download_asset(repo, uploaded, directory / "uploaded")
+                digest = "sha256:" + hashlib.sha256((directory / "uploaded").read_bytes()).hexdigest()
+            if digest != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest():
+                raise ValueError(f"Uploaded checksum mismatch: {path.name}")
+            expected[path.name] = uploaded
+        if current != remote and {a["name"]: a for a in current} != expected:
+            raise ValueError("Release assets changed concurrently; retry to merge current checksums")
+        if merged != previous or "SHA256SUMS" not in by_name:
+            manifest = directory / "SHA256SUMS"
+            manifest.write_text("".join(f"{digest}  {name}\n" for name, digest in sorted(merged.items())))
+            command = ["gh", "release", "upload", tag, str(manifest), "--repo", repo]
+            if "SHA256SUMS" in by_name:
+                command.append("--clobber")
+            run(*command)
+    if existing.get("draft") and not keep_draft:
+        run("gh", "release", "edit", tag, "--repo", repo, "--draft=false")
+    print(f"Updated: https://github.com/{repo}/releases/tag/{tag}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("version", help="Release version, for example 0.1.0 or v0.1.0")
@@ -154,14 +270,18 @@ def main():
         print(json.dumps(plan, indent=2))
         return
     run("gh", "auth", "status", "--hostname", "github.com")
-    releases = json.loads(run("gh", "api", "--paginate", "--slurp", f"repos/{repo}/releases?per_page=100"))
-    if any(item["tag_name"] == tag for page in releases for item in page):
-        raise ValueError("Release already exists; existing releases and assets are never overwritten")
+    releases = github_pages(f"repos/{repo}/releases")
+    existing = next((item for item in releases if item["tag_name"] == tag), None)
     remote = run("git", "ls-remote", "--tags", "origin", f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
     refs = dict(line.split()[::-1] for line in remote.splitlines())
     remote_revision = refs.get(f"refs/tags/{tag}^{{}}", refs.get(f"refs/tags/{tag}"))
     if remote_revision and remote_revision != revision:
         raise ValueError("Existing remote tag points to a different commit; it will not be moved")
+    if existing and not remote_revision:
+        raise ValueError("Existing release tag is missing; it will not be recreated")
+    if existing:
+        append_assets(repo, tag, existing, bundles, installer, sums, args.draft)
+        return
     if not remote_revision and args.require_existing_tag:
         raise ValueError("The release tag is missing from origin; it will not be recreated")
     if not remote_revision:
@@ -185,5 +305,5 @@ if __name__ == "__main__":
         main()
     except (ValueError, OSError, KeyError, tarfile.TarError, subprocess.CalledProcessError) as error:
         print(f"Error: {error}", file=sys.stderr)
-        print("No existing release was overwritten. If upload failed, inspect the tag and draft before retrying.", file=sys.stderr)
+        print("Release operation failed. Uploaded assets may remain; inspect the release before retrying. Existing archives and installers are never overwritten.", file=sys.stderr)
         sys.exit(1)

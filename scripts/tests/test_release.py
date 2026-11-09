@@ -103,12 +103,19 @@ class ReleaseTests(unittest.TestCase):
             release.repository("https://example.com/yeskyler/Kyler.git")
         self.assertEqual(release.workspace_version(), "0.1.0")
 
-    def invoke(self, arguments=(), releases=None, remote="", dirty=False, local_tag=None, fail_upload=False):
+    def invoke(self, arguments=(), releases=None, remote="", dirty=False, local_tag=None, fail_upload=False, remote_assets=None, remote_sums="", remote_installer=None):
         commands = []
         self.commands = commands
+        remote_assets = list(remote_assets or [])
+        self.uploaded_manifest = None
+        def download(repo, asset, destination):
+            content = remote_sums.encode() if asset["name"] == "SHA256SUMS" else remote_installer
+            if content is None:
+                content = (self.dist / asset["name"]).read_bytes()
+            destination.write_bytes(content)
         def run(*command):
             commands.append(command)
-            if fail_upload and command[:3] == ("gh", "release", "create"):
+            if fail_upload and command[:3] in [("gh", "release", "create"), ("gh", "release", "upload")]:
                 raise subprocess.CalledProcessError(1, command)
             if command[:3] == ("git", "status", "--porcelain"):
                 return " M source" if dirty else ""
@@ -117,12 +124,18 @@ class ReleaseTests(unittest.TestCase):
             if command[:3] == ("git", "remote", "get-url"):
                 return "https://github.com/yeskyler/Kyler.git"
             if command[:2] == ("gh", "api"):
-                return json.dumps([releases or []])
+                return json.dumps(remote_assets if "/assets?" in command[-1] else (releases or []))
+            if command[:3] == ("gh", "release", "upload"):
+                path = Path(command[4])
+                if path.name == "SHA256SUMS":
+                    self.uploaded_manifest = path.read_text()
+                remote_assets[:] = [a for a in remote_assets if a["name"] != path.name]
+                remote_assets.append({"id": len(remote_assets) + 100, "name": path.name, "state": "uploaded", "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
             if command[:2] == ("git", "ls-remote"):
                 return remote
             return ""
         tag_result = subprocess.CompletedProcess([], 0 if local_tag else 1, stdout=(local_tag or "") + "\n")
-        with patch.object(release, "run", side_effect=run), patch.object(release.subprocess, "run", return_value=tag_result), patch("sys.argv", ["release.py", "0.1.0", "--artifacts", str(self.dist), *arguments]), patch("sys.stdout", new_callable=io.StringIO):
+        with patch.object(release, "download_asset", side_effect=download), patch.object(release, "run", side_effect=run), patch.object(release.subprocess, "run", return_value=tag_result), patch("sys.argv", ["release.py", "0.1.0", "--artifacts", str(self.dist), *arguments]), patch("sys.stdout", new_callable=io.StringIO):
             release.main()
         return commands
 
@@ -159,9 +172,109 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(any(command[:3] == ("gh", "release", "edit") for command in self.commands))
 
     def test_dirty_tree_existing_release_and_mismatched_tags_are_rejected(self):
-        for options, message in [({"dirty": True}, "Commit or stash"), ({"releases": [{"tag_name": "v0.1.0"}]}, "Release already exists"), ({"local_tag": "other"}, "local tag"), ({"remote": "other\trefs/tags/v0.1.0"}, "remote tag")]:
+        for options, message in [({"dirty": True}, "Commit or stash"), ({"local_tag": "other"}, "local tag"), ({"remote": "other\trefs/tags/v0.1.0"}, "remote tag")]:
             with self.subTest(options=options), self.assertRaisesRegex(ValueError, message):
                 self.invoke(**options)
+
+    def existing(self, **kwargs):
+        return self.invoke(releases=[{"id": 42, "tag_name": "v0.1.0", "draft": False}], remote="commit-id\trefs/tags/v0.1.0", **kwargs)
+
+    def test_append_preserves_other_platforms_and_merges_checksums(self):
+        other = "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+        digest = "a" * 64
+        assets = [
+            {"id": 1, "name": "SHA256SUMS", "state": "uploaded"},
+            {"id": 2, "name": other, "state": "uploaded", "digest": "sha256:" + digest},
+            {"id": 3, "name": "install.sh", "state": "uploaded"},
+        ]
+        commands = self.existing(remote_assets=assets, remote_sums=f"{digest}  {other}\n")
+        uploads = [c for c in commands if c[:3] == ("gh", "release", "upload")]
+        self.assertEqual([Path(c[4]).name for c in uploads], [self.name, "SHA256SUMS"])
+        self.assertNotIn("--clobber", uploads[0])
+        self.assertIn("--clobber", uploads[1])
+        self.assertIn(other, self.uploaded_manifest)
+        self.assertIn(self.name, self.uploaded_manifest)
+        self.assertFalse(any(c[:3] in [("gh", "release", "create"), ("gh", "release", "edit")] for c in commands))
+        self.assertFalse(any(c[:2] in [("git", "tag"), ("git", "push")] for c in commands))
+        self.assertFalse(any("--slurp" in c for c in commands))
+
+    def test_identical_assets_are_skipped_on_retry(self):
+        assets = [{"id": i, "name": name, "state": "uploaded", "digest": "sha256:" + hashlib.sha256((self.dist / name).read_bytes()).hexdigest()} for i, name in enumerate([self.name, "install.sh", "SHA256SUMS"])]
+        commands = self.existing(remote_assets=assets, remote_sums=(self.dist / "SHA256SUMS").read_text())
+        self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in commands))
+
+    def test_conflicting_bundle_or_installer_prevents_all_uploads(self):
+        for name in (self.name, "install.sh"):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Existing asset differs"):
+                self.existing(remote_assets=[{"id": 1, "name": name, "state": "uploaded", "digest": "sha256:" + "0" * 64}])
+            self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
+
+    def test_invalid_remote_manifest_prevents_uploads(self):
+        asset = {"id": 1, "name": "SHA256SUMS", "state": "uploaded"}
+        with self.assertRaisesRegex(ValueError, "checksum entry"):
+            self.existing(remote_assets=[asset], remote_sums="invalid")
+        self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
+
+    def test_append_failure_does_not_replace_manifest(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.existing(fail_upload=True)
+        self.assertIsNone(self.uploaded_manifest)
+
+    def test_existing_release_requires_matching_tag(self):
+        with self.assertRaisesRegex(ValueError, "remote tag"):
+            self.invoke(releases=[{"id": 42, "tag_name": "v0.1.0"}], remote="other\trefs/tags/v0.1.0")
+        with self.assertRaisesRegex(ValueError, "tag is missing"):
+            self.invoke(releases=[{"id": 42, "tag_name": "v0.1.0"}])
+        self.assertFalse(any(c[:2] in [("git", "tag"), ("git", "push")] for c in self.commands))
+
+    def test_missing_manifest_recovers_other_platform_checksums(self):
+        other = "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+        assets = [{"id": 5, "name": other, "state": "uploaded", "digest": "sha256:" + "b" * 64}]
+        commands = self.existing(remote_assets=assets)
+        self.assertIn("b" * 64 + "  " + other, self.uploaded_manifest)
+        self.assertIn(self.name, self.uploaded_manifest)
+        manifest = next(c for c in commands if c[:3] == ("gh", "release", "upload") and Path(c[4]).name == "SHA256SUMS")
+        self.assertNotIn("--clobber", manifest)
+
+    def test_incomplete_remote_archive_is_not_replaced(self):
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            self.existing(remote_assets=[{"id": 2, "name": self.name, "state": "starter"}])
+        self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
+
+    def test_older_metadata_downloads_existing_asset_for_verification(self):
+        installer = {"id": 5, "name": "install.sh", "state": "uploaded"}
+        with self.assertRaisesRegex(ValueError, "Existing asset differs"):
+            self.existing(remote_assets=[installer], remote_installer=b"changed installer")
+        self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
+
+    def test_checksum_conflict_is_rejected_before_upload(self):
+        assets = [{"id": 1, "name": "SHA256SUMS", "state": "uploaded"},
+                  {"id": 2, "name": self.name, "state": "uploaded"}]
+        with self.assertRaisesRegex(ValueError, "Existing checksum differs"):
+            self.existing(remote_assets=assets, remote_sums="0" * 64 + "  " + self.name + "\n")
+        self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
+
+    def test_existing_draft_is_published_only_when_requested(self):
+        for args in ([], ["--draft"]):
+            commands = self.invoke(arguments=args, releases=[{"id": 42, "tag_name": "v0.1.0", "draft": True}], remote="commit-id\trefs/tags/v0.1.0")
+            edits = [c for c in commands if c[:3] == ("gh", "release", "edit")]
+            self.assertEqual(len(edits), 0 if args else 1)
+
+    def test_concurrent_asset_changes_do_not_replace_shared_manifest(self):
+        assets = [{"id": i, "name": name, "state": "uploaded", "digest": "sha256:" + hashlib.sha256((self.dist / name).read_bytes()).hexdigest()} for i, name in enumerate([self.name, "install.sh", "SHA256SUMS"])]
+        changed = assets + [{"id": 99, "name": "another-upload", "state": "uploaded"}]
+        with patch.object(release, "github_pages", side_effect=[[{"id": 42, "tag_name": "v0.1.0"}], assets, changed]):
+            with self.assertRaisesRegex(ValueError, "concurrently"):
+                self.existing(remote_assets=assets, remote_sums=(self.dist / "SHA256SUMS").read_text())
+        self.assertIsNone(self.uploaded_manifest)
+
+    def test_pagination_without_slurp_checks_later_pages(self):
+        first = [{"id": i} for i in range(100)]
+        with patch.object(release, "run", side_effect=[json.dumps(first), '[{"id": 100}]']) as run:
+            result = release.github_pages("repos/owner/repo/releases")
+        self.assertEqual(len(result), 101)
+        self.assertIn("page=2", run.call_args_list[-1].args[-1])
+
 
 
 if __name__ == "__main__":
