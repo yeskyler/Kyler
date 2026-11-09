@@ -24,13 +24,9 @@ Kyler 是面向研究、写作、分析和软件开发的通用 AI 助手，将�
 整合在同一个工作空间中。Web、TUI 和 CLI 共用 Rust 运行时，通过兼容
 OpenAI Chat Completions 的接口连接模型服务。
 
-<p align="center">
-  <img src="docs/assets/web-preview.png" width="1120" alt="Kyler Web 界面">
-</p>
-
 ## 演示
 
-[观看演示视频](demo/example.mov)
+https://github.com/user-attachments/assets/a3c30faf-fc88-4414-9916-643834cd35ea
 
 ## 主要能力
 
