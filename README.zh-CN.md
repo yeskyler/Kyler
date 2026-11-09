@@ -46,7 +46,7 @@ OpenAI Chat Completions 的接口连接模型服务。
 
 ```sh
 curl -fL https://github.com/yeskyler/Kyler/releases/latest/download/install.sh -o install.sh
-sh install.sh --modify-path
+sh install.sh
 ```
 
 按提示配置模型、API 地址、密钥和服务地址，前后端服务会自动启动。

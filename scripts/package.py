@@ -37,8 +37,7 @@ def download(url, destination):
 def node_distribution(args, temporary, node_os, arch):
     if args.node_dist:
         return args.node_dist.resolve()
-    if not args.download_node:
-        raise ValueError("Supply --node-dist PATH or --download-node (official latest Node 24 release)")
+    print("Preparing the official Node.js 24 distribution...", flush=True)
     base = "https://nodejs.org/dist/latest-v24.x"
     sums = temporary / "node-checksums"
     download(f"{base}/SHASUMS256.txt", sums)
@@ -67,6 +66,33 @@ def node_distribution(args, temporary, node_os, arch):
     return temporary / "node" / filename.removesuffix(".tar.gz")
 
 
+def prepare_rust(environment, temporary):
+    """Reuse available tools or install rustup without changing shell profiles."""
+    def available():
+        return all(shutil.which(tool, path=environment.get("PATH", "")) for tool in ("rustc", "cargo"))
+
+    if not available():
+        cargo_home = Path(environment.get("CARGO_HOME") or Path.home() / ".cargo").expanduser().resolve()
+        environment["PATH"] = str(cargo_home / "bin") + os.pathsep + environment.get("PATH", "")
+    if not available():
+        print("Rust is missing. Installing the stable toolchain with rustup...", flush=True)
+        if not shutil.which("curl", path=environment.get("PATH", "")):
+            raise ValueError("curl is required to install Rust")
+        installer = temporary / "rustup-init.sh"
+        subprocess.run([
+            "curl", "--proto", "=https", "--tlsv1.2", "-sSf",
+            "https://sh.rustup.rs", "-o", str(installer),
+        ], env=environment, check=True)
+        subprocess.run([
+            "sh", str(installer), "-y", "--profile", "minimal",
+            "--default-toolchain", "stable", "--no-modify-path",
+        ], env=environment, check=True)
+    for tool in ("rustc", "cargo"):
+        if not shutil.which(tool, path=environment.get("PATH", "")):
+            raise ValueError(f"{tool} is unavailable after Rust setup")
+        subprocess.run([tool, "--version"], env=environment, check=True)
+
+
 def source_revision():
     """Identify clean source; reused builds cannot establish their source revision."""
     try:
@@ -80,7 +106,7 @@ def source_revision():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--node-dist", type=Path, help="Extracted official Node distribution (bin/node and LICENSE)")
-    parser.add_argument("--download-node", action="store_true")
+    parser.add_argument("--download-node", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--skip-build", action="store_true", help="Use an already-built backend and web/.next/standalone")
     parser.add_argument("--binary", type=Path, default=RUST / "target/release/kyler")
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
@@ -94,6 +120,9 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="kyler-package-") as scratch:
         temporary = Path(scratch)
+        environment = os.environ.copy()
+        if not args.skip_build:
+            prepare_rust(environment, temporary)
         distribution = node_distribution(args, temporary, node_os, arch)
         node = distribution / "bin/node"
         license_path = distribution / "LICENSE"
@@ -102,11 +131,14 @@ def main():
         details = json.loads(subprocess.check_output([node, "-p", "JSON.stringify({version:process.version,platform:process.platform,arch:process.arch})"], text=True))
         if details["platform"] != node_os or details["arch"] != arch or int(details["version"].split(".")[0][1:]) < 22:
             raise ValueError("Node runtime must be native and version 22 or newer")
-        environment = os.environ.copy()
         environment["PATH"] = str(distribution / "bin") + os.pathsep + environment.get("PATH", "")
         environment["NEXT_TELEMETRY_DISABLED"] = "1"
+        print(f"Node.js {details['version']} ({details['platform']}/{details['arch']})", flush=True)
         if not args.skip_build:
-            subprocess.run(["cargo", "build", "--locked", "--release", "-p", "kyler-cli"], cwd=RUST, check=True)
+            if not shutil.which("npm", path=environment["PATH"]):
+                raise ValueError("The Node.js distribution must provide npm for building the Web UI")
+            subprocess.run(["npm", "--version"], env=environment, check=True)
+            subprocess.run(["cargo", "build", "--locked", "--release", "-p", "kyler-cli"], cwd=RUST, env=environment, check=True)
             subprocess.run(["npm", "ci"], cwd=WEB, env=environment, check=True)
             subprocess.run(["npm", "run", "build"], cwd=WEB, env=environment, check=True)
         binary = args.binary.resolve()
@@ -161,7 +193,7 @@ def main():
         sums.write_text("\n".join(sorted([*lines, f"{digest(output)}  {output.name}"])) + "\n")
         shutil.copy2(ROOT / "scripts/install.sh", args.output / "install.sh")
         print(f"Bundle: {output}")
-        print(f"Install: sh scripts/install.sh --bundle {output} --modify-path")
+        print(f"Install: sh scripts/install.sh --bundle {output}")
 
 
 if __name__ == "__main__":

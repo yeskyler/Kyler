@@ -12,7 +12,7 @@ Download and execute the installer:
 
 ```sh
 curl -fL https://github.com/yeskyler/Kyler/releases/latest/download/install.sh -o install.sh
-sh install.sh --modify-path
+sh install.sh
 ```
 
 `latest` selects the latest published non-prerelease version. The installer detects the
@@ -28,13 +28,13 @@ assets require authenticated download followed by local bundle installation.
 Build and install a native bundle from source:
 
 ```sh
-sh scripts/package.sh --download-node
+sh scripts/package.sh
 ```
 
 On macOS Apple Silicon, the generated archive is installed with:
 
 ```sh
-sh scripts/install.sh --bundle ./dist/kyler-v0.1.0-aarch64-apple-darwin.tar.gz --modify-path
+sh scripts/install.sh --bundle ./dist/kyler-v0.1.0-aarch64-apple-darwin.tar.gz
 ```
 
 Archive names follow `kyler-v<version>-<target>.tar.gz`. The target identifies the
@@ -97,8 +97,8 @@ address is **http://127.0.0.1:30002**.
 | Reconfigure model and addresses | `kyler configure --web` |
 | Open the terminal interface | `kyler tui` |
 
-Restart services after changing the saved configuration. `--modify-path` updates the
-shell startup file for new terminals. To use the command in the current shell:
+Restart services after changing the saved configuration. Installation automatically
+updates the shell startup file for new terminals. To use the command in the current shell:
 
 ```sh
 export PATH=~/.local/bin:"$PATH"
@@ -128,27 +128,24 @@ and recovery.
 
 ## Installation options
 
+Run `sh install.sh` to install the latest release, configure the application, and start
+both services. The installer automatically configures PATH for new terminals.
+
 | Option | Behavior |
 | --- | --- |
-| `--version VERSION` | Select a published release version |
-| `--modify-path` | Add the command directory to the shell startup file |
-| `--no-start` | Install without starting services |
-| `--no-configure` | Retain configuration without prompting |
-| `--non-interactive` | Use saved configuration and process environment without prompts |
 | `--bundle PATH` | Install a complete local archive or bundle directory |
-| `--local PATH` | Install a backend-only executable |
+| `--version VERSION` | Select a published release version |
+| `-h`, `--help` | Display installation help |
+
+Advanced options support automation and maintenance:
+
+| Option | Behavior |
+| --- | --- |
+| `--no-start` | Install without starting services; existing managed services are stopped during upgrades |
+| `--no-configure` | Skip the configuration wizard; create defaults only when configuration is absent |
+| `--non-interactive` | Use saved configuration and process environment without prompts |
 
 Non-interactive setup accepts the environment overrides listed in
-[configuration](configuration.md). A backend-only configuration requires `[web].enabled
-= true` before a complete installation can start the Web service.
-
-A backend-only source installation uses:
-
-```sh
-cargo build --manifest-path kyler-rs/Cargo.toml --release -p kyler-cli
-sh scripts/install.sh --local ./kyler-rs/target/release/kyler --modify-path
-```
-
-Complete installations must be upgraded with `--bundle`; `--local` does not include the
-Web application. `KYLER_REPOSITORY` selects the GitHub repository used for release
+[configuration](configuration.md). Installations always include the backend, Web UI,
+and Node.js runtime. `KYLER_REPOSITORY` selects the GitHub repository used for release
 downloads.

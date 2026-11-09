@@ -1,38 +1,32 @@
 #!/bin/sh
-# Install a complete release bundle, or a backend-only local binary.
+# Install a complete release bundle for the current platform.
 set -eu
 usage() {
     cat <<'HELP'
 Usage: sh install.sh [OPTIONS]
   --bundle PATH       Install a complete local bundle directory or .tar.gz.
-  --local PATH        Install a backend-only local kyler binary.
   --version VERSION   Download a specific release (default: latest).
-  --modify-path       Add ~/.local/bin to PATH for new terminals.
-  --no-start          Install without starting services.
-  --no-configure      Preserve configuration without prompting.
-  --non-interactive   Use saved configuration and environment without prompts.
   -h, --help          Show help.
 
 Complete bundles include the backend, Web UI and Node.js runtime.
+Installation automatically adds ~/.local/bin to PATH for new terminals.
 Defaults: Backend 127.0.0.1:30001; Web 127.0.0.1:30002.
 Setup accepts custom listening addresses and backend connection URLs.
 Existing values are kept with Enter. Passwords are hidden.
 HELP
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
-local_binary= bundle= requested_version= modify_path=false start_server=true configure=true non_interactive=false
+local_binary= bundle= requested_version= start_server=true configure=true non_interactive=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --local|--bundle|--version)
+        --bundle|--version)
             flag=$1; [ "$#" -ge 2 ] && [ -n "$2" ] || fail "$flag requires a value."
             case "$2" in --*) fail "$flag requires a value." ;; esac
             case "$flag" in
-                --local) [ -z "$local_binary" ] || fail '--local specified twice.'; local_binary=$2 ;;
                 --bundle) [ -z "$bundle" ] || fail '--bundle specified twice.'; bundle=$2 ;;
                 --version) requested_version=$2 ;;
             esac
             shift 2 ;;
-        --modify-path) modify_path=true; shift ;;
         --no-start) start_server=false; shift ;;
         --no-configure) configure=false; shift ;;
         --non-interactive) non_interactive=true; shift ;;
@@ -40,7 +34,6 @@ while [ "$#" -gt 0 ]; do
         *) fail "Unknown argument: $1. Use --help." ;;
     esac
 done
-[ -z "$local_binary" ] || [ -z "$bundle" ] || fail 'Choose --local or --bundle.'
 case "${HOME:-}" in /*) ;; *) fail 'HOME must be an absolute directory.' ;; esac
 umask 077
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/kyler-install.XXXXXX") || fail 'Cannot create temporary directory.'
@@ -73,7 +66,7 @@ check_manifest() {
     else (cd "$1" && sha256sum -c SHA256SUMS >/dev/null) || fail 'Bundle checksum mismatch.'; fi
 }
 download() { curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 "$1" -o "$2" || fail "Download failed: $1"; }
-if [ -z "$local_binary" ] && [ -z "$bundle" ]; then
+if [ -z "$bundle" ]; then
     command -v curl >/dev/null 2>&1 || fail 'curl is required.'
     case "$(uname -s)" in Darwin) os=apple-darwin ;; Linux) os=unknown-linux-gnu ;; *) fail 'This platform has no release bundle.' ;; esac
     case "$(uname -m)" in arm64|aarch64) arch=aarch64 ;; x86_64|amd64) arch=x86_64 ;; *) fail 'Unsupported architecture.' ;; esac
@@ -93,7 +86,6 @@ if [ -z "$local_binary" ] && [ -z "$bundle" ]; then
     [ -n "$expected" ] && [ "$expected" = "$(checksum "$scratch/$asset")" ] || fail 'Release checksum mismatch.'
     bundle=$scratch/$asset
 fi
-complete=false
 if [ -n "$bundle" ]; then
     case "$bundle" in /*) ;; *) bundle=$PWD/$bundle ;; esac
     if [ ! -d "$bundle" ]; then
@@ -111,7 +103,6 @@ if [ -n "$bundle" ]; then
     check_manifest "$bundle"
     [ -f "$bundle/bin/kyler" ] && [ -f "$bundle/runtime/node" ] && [ -f "$bundle/web/server.js" ] || fail 'Bundle must include bin/kyler, runtime/node and web/server.js.'
     local_binary=$bundle/bin/kyler
-    complete=true
 fi
 case "$local_binary" in /*) ;; *) local_binary=$PWD/$local_binary ;; esac
 [ -f "$local_binary" ] && [ -r "$local_binary" ] || fail "Binary not found or unreadable: $local_binary"
@@ -123,27 +114,22 @@ data_dir=$HOME/.local/share/kyler
 [ ! -d "$installed_binary" ] || fail "$installed_binary is a directory."
 [ ! -d "$config_path" ] || fail "$config_path is a directory."
 mkdir -p "$install_dir" "$config_dir"
-if [ "$complete" = false ] && [ -L "$data_dir/current" ] && [ -L "$installed_binary" ]; then
-    fail 'This is a complete installation. Upgrade it with --bundle to keep the Web UI and backend together.'
-fi
 binary_stage=$(mktemp "$install_dir/.kyler-install.XXXXXX")
 cp "$local_binary" "$binary_stage"; chmod 755 "$binary_stage"
 unset KYLER_INTERNAL_TOOL_WORKER KYLER_STARTUP_TRACE
 version=$("$binary_stage" --version) || fail 'The new binary cannot run on this machine; installed version was kept.'
 case "$version" in 'kyler '[0-9]*) ;; *) fail 'File did not report a kyler version.' ;; esac
 case "${version#kyler }" in *[!a-zA-Z0-9.+-]*) fail 'Invalid binary version.' ;; esac
-if [ "$complete" = true ]; then
-    "$bundle/runtime/node" --version >/dev/null || fail 'Bundled Node.js cannot run on this machine.'
-    mkdir -p "$data_dir/versions"
-    [ ! -e "$data_dir/current" ] || [ -L "$data_dir/current" ] || fail 'current must be a version symlink.'
-    bundle_id=$(checksum "$bundle/SHA256SUMS")
-    version_dir=$data_dir/versions/v${version#kyler }-$(printf %.12s "$bundle_id")
-    if [ -d "$version_dir" ]; then check_manifest "$version_dir";
-    else
-        version_stage=$(mktemp -d "$data_dir/versions/.install-XXXXXX")
-        cp -R "$bundle/." "$version_stage/"
-        mv "$version_stage" "$version_dir"; version_stage=
-    fi
+"$bundle/runtime/node" --version >/dev/null || fail 'Bundled Node.js cannot run on this machine.'
+mkdir -p "$data_dir/versions"
+[ ! -e "$data_dir/current" ] || [ -L "$data_dir/current" ] || fail 'current must be a version symlink.'
+bundle_id=$(checksum "$bundle/SHA256SUMS")
+version_dir=$data_dir/versions/v${version#kyler }-$(printf %.12s "$bundle_id")
+if [ -d "$version_dir" ]; then check_manifest "$version_dir";
+else
+    version_stage=$(mktemp -d "$data_dir/versions/.install-XXXXXX")
+    cp -R "$bundle/." "$version_stage/"
+    mv "$version_stage" "$version_dir"; version_stage=
 fi
 if [ ! -e "$config_path" ]; then
     cat > "$config_path" <<'CONFIG'
@@ -170,7 +156,7 @@ bind = "127.0.0.1:30001"
 [client]
 server_url = "http://127.0.0.1:30001"
 CONFIG
-    if [ "$complete" = true ]; then printf '\n[web]\nenabled = true\nbind = "127.0.0.1:30002"\n' >> "$config_path"; fi
+    printf '\n[web]\nenabled = true\nbind = "127.0.0.1:30002"\n' >> "$config_path"
     chmod 600 "$config_path"
 else
     printf 'Preserved %s\n' "$config_path"
@@ -178,7 +164,7 @@ fi
 if [ "$configure" = true ]; then
     config_stage=$(mktemp "$config_dir/.config-install.XXXXXX")
     set -- --config "$config_path" configure --output "$config_stage" --addresses
-    [ "$complete" = false ] || set -- "$@" --web
+    set -- "$@" --web
     [ "$non_interactive" = false ] || set -- "$@" --non-interactive
     code=0
     # A piped installer still reads interactive answers from the controlling terminal.
@@ -209,12 +195,10 @@ atomic_link() {
 rollback() {
     printf 'Startup failed; restoring the previous installation...\n' >&2
     installed_service service stop >/dev/null 2>&1 || { printf 'Cleanup is not confirmed. Inspect kyler service status and logs before retrying.\n' >&2; return 1; }
-    if [ "$complete" = true ]; then
-        if [ -n "$old_current" ]; then atomic_link "$old_current" "$data_dir/current"; else rm -f "$data_dir/current"; fi
-        if [ -n "$old_entry" ]; then atomic_link "$old_entry" "$installed_binary";
-        elif [ -n "$old_binary" ]; then restore_binary=$(mktemp "$install_dir/.kyler-restore.XXXXXX"); cp "$old_binary" "$restore_binary"; chmod 755 "$restore_binary"; mv -f "$restore_binary" "$installed_binary";
-        else rm -f "$installed_binary"; fi
-    elif [ -n "$old_binary" ]; then restore_binary=$(mktemp "$install_dir/.kyler-restore.XXXXXX"); cp "$old_binary" "$restore_binary"; chmod 755 "$restore_binary"; mv -f "$restore_binary" "$installed_binary"; fi
+    if [ -n "$old_current" ]; then atomic_link "$old_current" "$data_dir/current"; else rm -f "$data_dir/current"; fi
+    if [ -n "$old_entry" ]; then atomic_link "$old_entry" "$installed_binary";
+    elif [ -n "$old_binary" ]; then restore_binary=$(mktemp "$install_dir/.kyler-restore.XXXXXX"); cp "$old_binary" "$restore_binary"; chmod 755 "$restore_binary"; mv -f "$restore_binary" "$installed_binary";
+    else rm -f "$installed_binary"; fi
     # apply follows existing configuration symlinks and preserves private permissions.
     "$binary_stage" --config "$config_path" configure --apply "$config_backup" || return 1
     if [ "$old_running" = true ]; then installed_service service start || return 1; fi
@@ -224,25 +208,19 @@ if [ -n "$config_stage" ] && ! "$binary_stage" --config "$config_path" configure
     if [ "$old_running" = true ]; then installed_service service start || fail 'Configuration was preserved, but the previous services could not restart.'; fi
     fail 'Cannot publish configuration; the previous installation was preserved.'
 fi
-if [ "$complete" = true ]; then
-    atomic_link "$version_dir" "$data_dir/current"
-    atomic_link "$data_dir/current/bin/kyler" "$installed_binary"
-else
-    mv -f "$binary_stage" "$installed_binary"; binary_stage=
-fi
+atomic_link "$version_dir" "$data_dir/current"
+atomic_link "$data_dir/current/bin/kyler" "$installed_binary"
 printf '\nInstalled %s\n' "$version"
-if [ "$modify_path" = true ]; then
-    case "${SHELL:-}" in */zsh) startup_file=$HOME/.zshrc ;; */bash) startup_file=$HOME/.bashrc ;; *) startup_file=$HOME/.profile ;; esac
-    [ ! -d "$startup_file" ] || fail "$startup_file is a directory."
-    path_line='export PATH="$HOME/.local/bin:$PATH"'
-    if ! { [ -f "$startup_file" ] && grep -F -x "$path_line" "$startup_file" >/dev/null 2>&1; }; then printf '\n# Kyler\n%s\n' "$path_line" >> "$startup_file"; fi
-    printf 'PATH ready for new terminals (%s).\n' "$startup_file"
-fi
+case "${SHELL:-}" in */zsh) startup_file=$HOME/.zshrc ;; */bash) startup_file=$HOME/.bashrc ;; *) startup_file=$HOME/.profile ;; esac
+[ ! -d "$startup_file" ] || fail "$startup_file is a directory."
+path_line='export PATH="$HOME/.local/bin:$PATH"'
+if ! { [ -f "$startup_file" ] && grep -F -x "$path_line" "$startup_file" >/dev/null 2>&1; }; then printf '\n# Kyler\n%s\n' "$path_line" >> "$startup_file"; fi
+printf 'PATH ready for new terminals (%s).\n' "$startup_file"
 if [ "$(command -v kyler 2>/dev/null || true)" != "$installed_binary" ]; then printf 'For this terminal, run:\n  export PATH="$HOME/.local/bin:$PATH"\n'; fi
 if [ "$start_server" = true ]; then
     printf 'Starting services...\n'
     if ! installed_service service start --restart; then
-        if [ "$complete" = true ]; then rollback || fail 'Automatic recovery needs attention; inspect service status and logs.'; fi
+        rollback || fail 'Automatic recovery needs attention; inspect service status and logs.'
         fail 'Services could not start. Check kyler service status, ~/.kyler/logs/server.log and ~/.kyler/logs/web.log.'
     fi
     printf '\nKyler · Service status and management\n\n'

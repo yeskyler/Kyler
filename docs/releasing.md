@@ -13,10 +13,16 @@ services. Run these commands from the repository root.
 | `scripts/install.sh` | Download or install a bundle, configure it, and manage installed services |
 | `scripts/tests/test_install.py` | Isolated installer regression tests |
 | `scripts/tests/test_release.py` | Isolated publisher tests; no real uploads or tag pushes |
+| `scripts/tests/test_package.py` | Isolated toolchain setup and runtime download tests |
 
-Build hosts require stable Rust and Cargo, native compilation tools, Python 3.9+, and
-Node.js with npm. `--download-node` fetches the official latest Node.js 24 distribution
-and verifies its checksum; it does not install Cargo, Python, or system compilers.
+Build hosts require native compilation tools and Python 3.9+. Packaging checks for
+Rust and Cargo, including tools installed under `CARGO_HOME` or `~/.cargo/bin`. If
+they are missing, it uses curl to download the official rustup installer and installs
+the stable minimal toolchain without interactive prompts or shell profile changes.
+The build process immediately uses the installed tools. Packaging downloads the
+official latest Node.js 24 distribution, verifies its checksum, and uses its Node.js
+and npm for the build. A system Node.js installation is not required. Python, curl,
+and system compilers must already be available.
 Publishing requires Git, Python 3.9+, and an authenticated [GitHub
 CLI](https://cli.github.com/). Complete bundles include the runtime components required
 for installation.
@@ -35,12 +41,12 @@ cannot be published by the release script.
 ## 2. Build native bundles
 
 ```sh
-sh scripts/package.sh --download-node
+sh scripts/package.sh
 ```
 
 The `--node-dist PATH` option uses an extracted official native Node.js distribution.
-The selected directory must contain `bin/node` and `LICENSE`; npm must be available on
-the build host.
+The selected directory must contain `bin/node` and `LICENSE`, with npm available
+for builds. The default official download includes npm. No download flag is needed.
 
 Packaging builds `kyler-cli` in release mode, runs `npm ci` and `npm run build` in
 `web/`, and collects the backend, standalone Web, native Node runtime, documentation,

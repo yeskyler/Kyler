@@ -47,7 +47,7 @@ Download and run the installer:
 
 ```sh
 curl -fL https://github.com/yeskyler/Kyler/releases/latest/download/install.sh -o install.sh
-sh install.sh --modify-path
+sh install.sh
 ```
 
 Follow setup to configure the model, API URL, API key, and service addresses.
