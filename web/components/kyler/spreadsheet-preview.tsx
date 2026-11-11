@@ -1,5 +1,7 @@
 "use client";
 
+import { randomUuid } from "@/lib/kyler/random-uuid";
+
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { validateWorkbook } from "@/lib/kyler/spreadsheet";
@@ -16,7 +18,7 @@ export function SpreadsheetPreview({ bytes }: { bytes: Uint8Array }) {
     let active = true;
     let sent = false;
     const controller = new AbortController();
-    const channel = crypto.randomUUID();
+    const channel = randomUuid();
     setHtml("");
     setError("");
     setReady(false);

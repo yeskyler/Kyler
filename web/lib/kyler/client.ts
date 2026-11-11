@@ -1,3 +1,4 @@
+import { randomUuid } from "./random-uuid.ts";
 import { upsertCompaction, settleCompactions } from "./compaction.ts";
 import type { QuestionRecord } from "./questions.ts";
 import type {
@@ -169,7 +170,7 @@ export function chatAdapter(
             body: JSON.stringify({
               input,
               attachment_ids: last?.role === "user" ? last.attachments.map((item) => item.id) : [],
-              client_request_id: crypto.randomUUID(),
+              client_request_id: randomUuid(),
             }),
           });
       recovery = undefined;

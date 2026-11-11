@@ -1,3 +1,4 @@
+import { randomUuid } from "./random-uuid.ts";
 import { strToU8, zipSync } from "fflate";
 
 export const LONG_PASTE_CHARACTERS = 4000;
@@ -53,7 +54,7 @@ export function pastedTextDocument(text: string, now = new Date()) {
   );
   return new File(
     [bytes],
-    `pasted-text-${now.toISOString().replace(/[:.]/g, "-")}-${crypto.randomUUID().slice(0, 8)}.docx`,
+    `pasted-text-${now.toISOString().replace(/[:.]/g, "-")}-${randomUuid().slice(0, 8)}.docx`,
     { type: WORD_DOCUMENT_TYPE },
   );
 }
