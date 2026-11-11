@@ -1,4 +1,5 @@
 //! Trusted host policies and isolated worker execution through MXC's Rust API.
+pub mod diagnostics;
 pub mod direct;
 pub mod mxc;
 pub mod paths;

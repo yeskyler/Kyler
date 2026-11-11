@@ -21,7 +21,8 @@ impl ExecutionEnvironment {
         ensure!(
             matches!(
                 tool,
-                "review_git"
+                "sandbox_diagnostics"
+                    | "review_git"
                     | "read_file"
                     | "list_dir"
                     | "grep_files"

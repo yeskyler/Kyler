@@ -21,6 +21,8 @@ pub struct Args {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Check native sandbox execution without credentials or model requests.
+    Doctor,
     /// Install, inspect or remove user skills without a model call.
     Skills {
         #[command(subcommand)]
