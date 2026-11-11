@@ -55,6 +55,15 @@ def local_bundle(root, binary):
     return bundle
 
 
+def sandbox_fixture(root, environment):
+    tools = root / "sandbox-tools"
+    tools.mkdir()
+    bwrap = tools / "bwrap"
+    bwrap.write_text("#!/bin/sh\nprintf 'bubblewrap 0.9.0\\n'\n")
+    bwrap.chmod(0o755)
+    environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
+
+
 class InstallTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="kyler installer ")
@@ -67,6 +76,8 @@ class InstallTests(unittest.TestCase):
         self.source.chmod(0o755)
         self.env = dict(os.environ, HOME=str(self.home), SHELL="/bin/zsh")
         self.env.pop("KYLER_INTERNAL_TOOL_WORKER", None)
+        self.env.pop("XDG_CACHE_HOME", None)
+        sandbox_fixture(self.root, self.env)
 
     def install(self, *args, success=True):
         result = subprocess.run(
@@ -82,12 +93,13 @@ class InstallTests(unittest.TestCase):
     def remote_install(self, mode="server", version=None):
         source = local_bundle(self.root, self.source)
         archive = self.root / "remote.tar.gz"
-        with tarfile.open(archive, "w:gz") as output:
-            output.add(source, arcname="kyler-fixture")
+        if not archive.exists():
+            with tarfile.open(archive, "w:gz") as output:
+                output.add(source, arcname="kyler-fixture")
         tools = self.root / "download-tools"
         tools.mkdir(exist_ok=True)
         curl = tools / "curl"
-        curl.write_text("#!" + sys.executable + "\n" + r'''import os,sys,json,hashlib
+        curl.write_text("#!" + sys.executable + "\n" + r'''import os,sys,json,hashlib,platform
 from pathlib import Path
 args=sys.argv[1:]
 url=next(a for a in args if a.startswith("https://"))
@@ -103,7 +115,9 @@ output=Path(args[args.index("-o")+1])
 if url.endswith("latest.txt"):
     output.write_text("not a version" if mode=="invalid-latest" else "v0.1.0\n")
 elif url.endswith("SHA256SUMS"):
-    name=Path(os.environ["DOWNLOADED_NAME"]).read_text()
+    arch="aarch64" if platform.machine() in ("arm64","aarch64") else "x86_64"
+    target="apple-darwin" if platform.system()=="Darwin" else "unknown-linux-gnu"
+    name=f"kyler-v0.1.0-{arch}-{target}.tar.gz"
     digest="0"*64 if mode=="corrupt" else hashlib.sha256(Path(os.environ["REMOTE_ARCHIVE"]).read_bytes()).hexdigest()
     output.write_text(digest+"  "+name+"\n")
 else:
@@ -116,7 +130,7 @@ else:
         environment = dict(self.env, PATH=str(tools)+os.pathsep+self.env["PATH"], DOWNLOAD_LOG=str(log), DOWNLOAD_MODE=mode, REMOTE_ARCHIVE=str(archive), DOWNLOADED_NAME=str(self.root / "asset-name"))
         command = ["sh", str(INSTALLER), "--no-start", "--no-configure"]
         if version: command += ["--version", version]
-        result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=20)
+        result = subprocess.run(command, cwd=self.root, env=environment, capture_output=True, text=True, timeout=20)
         requests = [json.loads(line) for line in log.read_text().splitlines()]
         urls = [next(arg for arg in args if arg.startswith("https://")) for args in requests]
         return result, urls, requests
@@ -138,11 +152,11 @@ else:
         self.assertIn("switching to GitHub", result.stdout)
         self.assertTrue(any("github.com/yeskyler/Kyler/releases/download/v0.1.0/" in url for url in urls))
 
-    def test_manifest_failure_redownloads_both_files_from_github(self):
+    def test_manifest_failure_fetches_github_checksums_before_downloading(self):
         result, urls, _ = self.remote_install("manifest-fallback", "0.1.0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(any(url.endswith("latest.txt") or url.endswith("/latest") for url in urls))
-        self.assertEqual(sum(url.endswith(".tar.gz") for url in urls), 2)
+        self.assertEqual(sum(url.endswith(".tar.gz") for url in urls), 1)
         self.assertIn("github.com", urls[-1])
 
     def test_checksum_mismatch_stops_without_fallback_or_installation(self):
@@ -163,6 +177,35 @@ else:
         result, urls, _ = self.remote_install("invalid-latest")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(any(url.endswith("/latest") for url in urls))
+
+    def test_second_install_reuses_verified_cache_without_archive_download(self):
+        first, _, _ = self.remote_install()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second, urls, _ = self.remote_install()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertFalse(any(url.endswith(".tar.gz") for url in urls))
+        self.assertIn("Reusing verified bundle", second.stdout)
+
+    def test_matching_archive_in_current_directory_is_reused(self):
+        first, _, _ = self.remote_install()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        archive = next((self.home / ".cache/kyler/downloads/v0.1.0").glob("*.tar.gz"))
+        shutil.copy2(archive, self.root / archive.name)
+        archive.unlink()
+        second, urls, _ = self.remote_install()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertFalse(any(url.endswith(".tar.gz") for url in urls))
+        self.assertIn("Reusing verified bundle", second.stdout)
+
+    def test_corrupt_cached_archive_is_replaced(self):
+        first, _, _ = self.remote_install()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        archive = next((self.home / ".cache/kyler/downloads/v0.1.0").glob("*.tar.gz"))
+        archive.write_bytes(b"corrupt")
+        second, urls, _ = self.remote_install()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertTrue(any(url.endswith(".tar.gz") for url in urls))
+        self.assertIn("fresh download is required", second.stdout)
 
     def test_first_install_creates_private_config_and_configures_path(self):
         result = self.install()
@@ -581,6 +624,7 @@ class BundleTests(unittest.TestCase):
         self.home = self.root / "home"
         self.home.mkdir()
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("KYLER_") and key != "OPENAI_API_KEY"}
+        sandbox_fixture(self.root, self.env)
         self.env.update(HOME=str(self.home), KYLER_LLM_MODEL="bundle-test", KYLER_LLM_BASE_URL="http://127.0.0.1:1/v1", KYLER_LLM_API_KEY="BUNDLE_TEST_KEY")
         self.env["KYLER_SERVER_BIND"] = self.free_address()
         self.env["KYLER_WEB_BIND"] = self.free_address()
@@ -687,6 +731,52 @@ class BundleTests(unittest.TestCase):
         (bundle / "web/server.js").write_text("modified")
         self.install(bundle, success=False)
         self.assertFalse(self.binary.exists())
+
+
+class SandboxSetupTests(unittest.TestCase):
+    def check(self, version="0.9.0", sudo=True, fail_install=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "bin"
+            tools.mkdir()
+            log = root / "commands"
+            marker = root / "installed"
+            scripts = {
+                "uname": "echo Linux",
+                "id": "echo 1000",
+                "bwrap": 'if [ -f "$SANDBOX_MARKER" ]; then echo "bubblewrap 0.9.0"; else echo "bubblewrap $SANDBOX_VERSION"; fi',
+                "sudo": 'printf "sudo %s\\n" "$*" >> "$SANDBOX_LOG"; exec "$@"',
+                "apt": 'printf "apt %s\\n" "$*" >> "$SANDBOX_LOG"; [ "$FAIL_INSTALL" != yes ] || exit 1; if [ "$1" = install ]; then touch "$SANDBOX_MARKER"; fi',
+            }
+            for name, body in scripts.items():
+                if name == "sudo" and not sudo: continue
+                path = tools / name
+                path.write_text("#!/bin/sh\n" + body + "\n")
+                path.chmod(0o755)
+            text = INSTALLER.read_text()
+            function = text[text.index("prepare_linux_sandbox() {"):text.index("transfer() {")]
+            env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ["PATH"], SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no")
+            result = subprocess.run(["sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\nprepare_linux_sandbox'], env=env, capture_output=True, text=True, timeout=10)
+            return result, log.read_text() if log.exists() else ""
+
+    def test_recent_bubblewrap_is_reused_without_apt(self):
+        result, commands = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(commands, "")
+        self.assertIn("Reusing installed Bubblewrap", result.stdout)
+
+    def test_old_bubblewrap_is_upgraded_and_version_checked(self):
+        result, commands = self.check("0.4.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("sudo apt update", commands)
+        self.assertIn("sudo apt install -y bubblewrap", commands)
+        self.assertIn("bubblewrap 0.9.0", result.stdout)
+
+    def test_failed_package_install_stops_with_manual_commands(self):
+        result, commands = self.check("0.4.0", fail_install=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sudo apt update", result.stderr)
+        self.assertNotIn("apt install -y bubblewrap", commands)
 
 
 if __name__ == "__main__":

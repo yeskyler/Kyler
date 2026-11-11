@@ -69,6 +69,29 @@ check_manifest() {
     else (cd "$1" && sha256sum -c SHA256SUMS >/dev/null) || fail 'Bundle checksum mismatch.'; fi
 }
 step() { printf '\n[%s/6] %s\n' "$1" "$2"; }
+prepare_linux_sandbox() {
+    [ "$(uname -s)" = Linux ] || return 0
+    printf 'Checking Linux sandbox dependency (Bubblewrap >= 0.5.0)...\n'
+    bubblewrap_ready() {
+        command -v bwrap >/dev/null 2>&1 || return 1
+        bwrap_version=$(bwrap --version) || return 1
+        printf '%s\n' "$bwrap_version"
+        printf '%s\n' "$bwrap_version" | awk '{split($NF,v,"."); exit !(v[1]+0 > 0 || v[2]+0 >= 5)}'
+    }
+    if bubblewrap_ready; then
+        printf 'Reusing installed Bubblewrap.\n'
+        return 0
+    fi
+    command -v apt >/dev/null 2>&1 || fail 'Install Bubblewrap >= 0.5.0 with your Linux package manager, then rerun this installer.'
+    printf 'Installing Bubblewrap. Administrator access may be required.\n'
+    if [ "$(id -u)" = 0 ]; then
+        apt update && apt install -y bubblewrap || fail 'Cannot install Bubblewrap. Run apt update and apt install -y bubblewrap, then retry.'
+    else
+        command -v sudo >/dev/null 2>&1 || fail 'sudo is required. Ask an administrator to install Bubblewrap >= 0.5.0.'
+        sudo apt update && sudo apt install -y bubblewrap || fail 'Cannot install Bubblewrap. Run sudo apt update and sudo apt install -y bubblewrap, then retry.'
+    fi
+    bubblewrap_ready || fail 'Bubblewrap >= 0.5.0 is still unavailable after installation.'
+}
 transfer() {
     curl --fail --location --show-error --proto '=https' --proto-redir '=https' --tlsv1.2 \
         --connect-timeout 15 --speed-limit 1024 --speed-time 60 --retry 2 --retry-delay 2 "$@"
@@ -92,6 +115,7 @@ printf '\nKyler installer\n\nInstall location: %s/.local/share/kyler\nConfigurat
 printf 'Existing configuration can be kept with Enter. API keys are hidden.\n'
 printf 'Already downloaded a bundle? Run: sh install.sh --bundle /path/to/kyler-platform.tar.gz\n'
 step 1 'Check environment and release version'
+prepare_linux_sandbox
 if [ -z "$bundle" ]; then
     command -v curl >/dev/null 2>&1 || fail 'curl is required.'
     command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail 'Install shasum or sha256sum first.'
@@ -118,14 +142,43 @@ if [ -z "$bundle" ]; then
     github_release=https://github.com/$repository/releases/download/$requested_version
     step 2 'Download release bundle'
     printf 'Version: %s\nPlatform: %s-%s\nFile: %s\n' "$requested_version" "$arch" "$os" "$asset"
+    cache_dir=${XDG_CACHE_HOME:-$HOME/.cache}/kyler/downloads/$requested_version
+    mkdir -p "$cache_dir"
+    printf 'Download cache: %s\n' "$cache_dir"
     downloaded=false
     for source in "$mirror/$requested_version" "$github_release"; do
-        printf '\nSource: %s\nDownloading Kyler %s (size, speed and remaining time below)...\n' "$source" "$requested_version"
-        rm -f "$scratch/$asset" "$scratch/release-checksums"
-        if transfer "$source/$asset" -o "$scratch/$asset" &&
-            transfer "$source/SHA256SUMS" -o "$scratch/release-checksums"; then
-            downloaded=true
-            break
+        printf '\nSource: %s\nFetching release checksums...\n' "$source"
+        rm -f "$scratch/release-checksums"
+        if transfer "$source/SHA256SUMS" -o "$scratch/release-checksums"; then
+            expected=$(awk -v name="$asset" '$2==name || $2=="*"name {print $1}' "$scratch/release-checksums")
+            [ "${#expected}" = 64 ] && printf '%s\n' "$expected" | LC_ALL=C grep -Eq '^[a-fA-F0-9]{64}$' || fail 'Release checksum entry is missing or invalid.'
+            for candidate in "$cache_dir/$asset" "$PWD/$asset"; do
+                if [ -f "$candidate" ]; then
+                    printf 'Checking existing bundle: %s\n' "$candidate"
+                    if [ "$expected" = "$(checksum "$candidate")" ]; then
+                        printf 'Reusing verified bundle; download skipped.\n'
+                        bundle=$candidate
+                        downloaded=true
+                        break
+                    fi
+                    printf 'Existing bundle checksum differs; a fresh download is required.\n'
+                fi
+            done
+            if [ "$downloaded" != true ]; then
+                printf 'Downloading Kyler %s (size, speed and remaining time below)...\n' "$requested_version"
+                if transfer "$source/$asset" -o "$scratch/$asset"; then
+                    [ "$expected" = "$(checksum "$scratch/$asset")" ] || fail 'Release checksum mismatch. Installation stopped.'
+                    cache_stage=$(mktemp "$cache_dir/.download-XXXXXX")
+                    if ! cp "$scratch/$asset" "$cache_stage" || ! mv -f "$cache_stage" "$cache_dir/$asset"; then
+                        rm -f "$cache_stage"
+                        fail 'Cannot save verified bundle in download cache.'
+                    fi
+                    bundle=$cache_dir/$asset
+                    downloaded=true
+                    printf 'Verified bundle saved in cache.\n'
+                fi
+            fi
+            [ "$downloaded" != true ] || break
         fi
         if [ "$source" != "$github_release" ]; then
             printf 'Server download failed; switching to GitHub for the same version %s.\n' "$requested_version"
@@ -137,9 +190,8 @@ if [ -z "$bundle" ]; then
     fi
     step 3 'Verify checksums and unpack bundle'
     expected=$(awk -v name="$asset" '$2==name || $2=="*"name {print $1}' "$scratch/release-checksums")
-    [ -n "$expected" ] && [ "$expected" = "$(checksum "$scratch/$asset")" ] || fail 'Release checksum mismatch. Installation stopped.'
+    [ -n "$expected" ] && [ "$expected" = "$(checksum "$bundle")" ] || fail 'Release checksum mismatch. Installation stopped.'
     printf 'Release SHA256 checksum verified.\n'
-    bundle=$scratch/$asset
 else
     step 2 'Use local bundle (download skipped)'
     printf 'Bundle: %s\n' "$bundle"

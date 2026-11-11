@@ -26,7 +26,19 @@ latest-version discovery.
 Six numbered steps cover environment checks, download, verification, installation,
 configuration, and service startup. Downloads show the source, file, size, speed, and
 remaining time. Failed downloads display manual download and local installation
-commands. Local bundles skip network access.
+commands. Local bundles skip release downloads.
+
+Verified downloads are kept in `${XDG_CACHE_HOME:-$HOME/.cache}/kyler/downloads/vVERSION/`.
+Before downloading an archive, the installer fetches the selected source's current
+checksums and checks both this cache and the current directory. Matching archives
+are reused; corrupt or replaced versions are downloaded again. The cache survives
+configuration or startup failures.
+
+On Linux, environment checks require Bubblewrap 0.5.0 or newer. A compatible installed
+version is reused. On apt-based systems, missing or outdated Bubblewrap is installed
+using `sudo apt update` and `sudo apt install -y bubblewrap` (without sudo when root),
+then checked with `bwrap --version`. Other distributions receive manual installation
+instructions. Host user-namespace restrictions can still prevent sandbox startup.
 
 Unauthenticated download URLs require a publicly accessible repository. Private release
 assets require authenticated download followed by local bundle installation.
