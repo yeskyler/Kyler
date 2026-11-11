@@ -179,7 +179,7 @@ pub(super) async fn start(path: &Path, config: &AppConfig, directory: &Path) -> 
         .env("PORT", config.web.bind.port().to_string())
         .env("KYLER_CONFIG", path)
         .env("KYLER_WEB_BIND", config.web.bind.to_string())
-        .env("KYLER_WEB_TOKEN", config.web.access_token.expose())
+        .env_remove("KYLER_WEB_TOKEN")
         .env("KYLER_WEB_INSTANCE_ID", &instance)
         .env("KYLER_WEB_SERVICE_SECRET", &secret)
         .env("KYLER_CLIENT_SERVER_URL", &config.client.server_url)

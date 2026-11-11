@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import {
   BlocksIcon,
+  LogOutIcon,
   ChevronRightIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -15,7 +16,7 @@ import {
 import { BrandMark } from "./brand-mark";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { api } from "@/lib/kyler/client";
+import { api, redirectToLogin } from "@/lib/kyler/client";
 import { WorkspacePicker } from "./workspace-picker";
 import { Input } from "@/components/ui/input";
 import {
@@ -452,6 +453,23 @@ export function WorkspaceSidebar({
               .includes(query.trim().toLowerCase()),
           ) && <p className="px-3 py-4 text-xs text-sidebar-foreground/50">No matching chats.</p>}
       </nav>
+      <Button
+        variant="ghost"
+        className="mx-2 mb-2 justify-start text-muted-foreground"
+        onClick={async () => {
+          try {
+            const response = await fetch("/api/auth/logout", { method: "POST" });
+            if (!response.ok) throw new Error("Cannot sign out. Try again.");
+            redirectToLogin();
+          } catch (error) {
+            setError((error as Error).message);
+          }
+        }}
+      >
+        <LogOutIcon className="size-4" aria-hidden />
+        Sign out
+      </Button>
+
       {error && !deleting && !removingProject && (
         <p role="alert" className="my-2 px-2 text-xs text-destructive">
           {error}

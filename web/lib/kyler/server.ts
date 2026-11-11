@@ -130,6 +130,8 @@ export async function proxyRequest(request: Request, path: string[]) {
   // browser destination and cannot be changed by a cross-site fetch.
   const destination = new URL(request.url);
   destination.host = request.headers.get("host") ?? destination.host;
+  if (request.headers.get("x-forwarded-proto")?.split(",")[0].trim() === "https")
+    destination.protocol = "https:";
   if (
     (origin && origin !== destination.origin) ||
     request.headers.get("sec-fetch-site") === "cross-site"

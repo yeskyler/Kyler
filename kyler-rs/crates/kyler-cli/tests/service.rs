@@ -474,3 +474,159 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
     assert!(!workspace.join("assets").exists());
     model.abort();
 }
+
+#[tokio::test]
+async fn web_tokens_are_generated_preserved_and_rotated_without_model_credentials() {
+    let h = Harness::new().await;
+    let configured = h
+        .command()
+        .args(["configure", "--non-interactive", "--web"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        configured.status.success(),
+        "{}",
+        String::from_utf8_lossy(&configured.stderr)
+    );
+    let config = kyler_config::loader::load_from(&h.config).unwrap();
+    let first = config.web.access_token.expose().to_owned();
+    assert_eq!(first.len(), 64);
+    assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(!String::from_utf8_lossy(&configured.stdout).contains(&first));
+    assert!(!String::from_utf8_lossy(&configured.stderr).contains(&first));
+    let second = h
+        .command()
+        .args(["configure", "--non-interactive", "--web"])
+        .output()
+        .await
+        .unwrap();
+    assert!(second.status.success());
+    assert_eq!(
+        kyler_config::loader::load_from(&h.config)
+            .unwrap()
+            .web
+            .access_token
+            .expose(),
+        first
+    );
+    let shown = h
+        .command()
+        .args(["service", "token"])
+        .output()
+        .await
+        .unwrap();
+    assert!(shown.status.success());
+    assert_eq!(String::from_utf8_lossy(&shown.stdout).trim(), first);
+    assert!(!String::from_utf8_lossy(&shown.stderr).contains(&first));
+    // Token maintenance remains available with a missing model key.
+    let text = std::fs::read_to_string(&h.config)
+        .unwrap()
+        .replace("test-key", "");
+    std::fs::write(&h.config, text).unwrap();
+    let reset = h
+        .command()
+        .args(["service", "token", "--reset"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        reset.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reset.stderr)
+    );
+    let new = String::from_utf8_lossy(&reset.stdout).trim().to_owned();
+    assert_eq!(new.len(), 64);
+    assert_ne!(new, first);
+    let shown = h
+        .command()
+        .args(["--json", "service", "token"])
+        .output()
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
+    assert_eq!(json["token"], new);
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&h.config).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}
+
+#[tokio::test]
+async fn network_mode_starts_with_default_workspace_and_displays_connection_addresses() {
+    let h = Harness::new().await;
+    let text = std::fs::read_to_string(&h.config)
+        .unwrap()
+        .replace("bind='127.0.0.1:", "bind='0.0.0.0:");
+    std::fs::write(&h.config, text).unwrap();
+    let started = h
+        .command()
+        .args(["service", "start"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let display = String::from_utf8_lossy(&started.stderr);
+    assert!(display.contains("Local access:"));
+    assert!(display.contains("Local network access:"));
+    assert!(display.contains(&h.url));
+    assert!(!display.contains("http://0.0.0.0"));
+    assert!(!display.contains("service-token"));
+    assert!(h.client().info().await.is_ok());
+}
+
+#[tokio::test]
+async fn invalid_or_overridden_web_tokens_do_not_replace_the_saved_token() {
+    let h = Harness::new().await;
+    let mut text = std::fs::read_to_string(&h.config).unwrap();
+    text.push_str("\n[web]\nenabled=true\naccess_token='saved-web-token'\n");
+    std::fs::write(&h.config, text).unwrap();
+    let before = std::fs::read(&h.config).unwrap();
+    let invalid = h
+        .command()
+        .args(["service", "start"])
+        .env("KYLER_WEB_TOKEN", "invalid token")
+        .output()
+        .await
+        .unwrap();
+    assert!(!invalid.status.success());
+    assert_eq!(std::fs::read(&h.config).unwrap(), before);
+    assert!(!String::from_utf8_lossy(&invalid.stderr).contains("invalid token"));
+    let reset = h
+        .command()
+        .args(["service", "token", "--reset"])
+        .env("KYLER_WEB_TOKEN", "environment-token")
+        .output()
+        .await
+        .unwrap();
+    assert!(!reset.status.success());
+    assert_eq!(std::fs::read(&h.config).unwrap(), before);
+    assert!(!String::from_utf8_lossy(&reset.stderr).contains("environment-token"));
+}
+
+#[tokio::test]
+async fn legacy_loopback_web_configuration_remains_restorable_for_upgrade_rollback() {
+    let h = Harness::new().await;
+    let mut text = std::fs::read_to_string(&h.config).unwrap();
+    text.push_str("\n[web]\nenabled=true\nbind='127.0.0.1:30002'\n");
+    let backup = h.config.parent().unwrap().join("rollback.toml");
+    std::fs::write(&backup, &text).unwrap();
+    let result = h
+        .command()
+        .args(["configure", "--apply"])
+        .arg(&backup)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&h.config).unwrap(), text);
+}

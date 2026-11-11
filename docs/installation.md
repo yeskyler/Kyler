@@ -79,25 +79,34 @@ revealing its contents. Invalid input is rejected at the current prompt. Setup d
 send a model request. Esc cancels configuration before an existing installation is
 replaced.
 
-### Service addresses
+### Access scope and Web token
 
-| Input | Default |
-| --- | --- |
-| Backend listening address | `127.0.0.1:30001` |
-| Web listening address | `127.0.0.1:30002` |
+Setup asks for one access scope, not individual addresses or a password:
 
-Listening addresses use a local IP address and a fixed port. IPv6 addresses use
-brackets. Wildcard listeners are supported; public domains and HTTPS URLs are configured
-at a reverse proxy. The backend and Web listeners must not overlap.
+| Choice | Backend listener | Web listener |
+| --- | --- | --- |
+| This machine only (default) | `127.0.0.1:30001` | `127.0.0.1:30002` |
+| Local network | `0.0.0.0:30001` | `0.0.0.0:30002` |
 
-Setup derives the Web-to-backend connection URL from the backend listener and uses
-loopback for wildcard addresses. A separately hosted backend is configured through
-`[client].server_url` and `[client].access_token` in the configuration file.
+Existing ports and advanced environment overrides are retained. Reconfiguration
+selects the current scope by default. Occupied ports are reported before saving.
+The Web-to-backend connection uses loopback for wildcard listeners; browsers
+continue to use the same-origin Next.js API proxy.
 
-A non-loopback Web listener requires an access password. Browser authentication uses
-HTTP Basic with username `kyler` and the configured password. Backend credentials remain
-on the Web server. HTTPS must terminate at a reverse proxy when the service is exposed
-over an untrusted network.
+Setup generates a Web token automatically and preserves it across reinstalls and
+scope changes. Both modes use the same token sign-in page. Paste the token into
+that page; successful sign-in sets a signed, HttpOnly, host-only cookie valid for
+seven days. Tokens are not included in URLs. TUI needs no Web token.
+
+View the token with `kyler service token`. Rotate it with
+`kyler service token --reset`; existing browser sessions fail their next protected
+request. Managed Web services reload the saved token without restarting. Unset
+`KYLER_WEB_TOKEN` before rotating a saved token; manually launched development
+servers using that override need their environment updated as well.
+
+Backend API credentials remain separate, server-side, and are generated automatically
+for non-loopback listeners. HTTPS can terminate at a reverse proxy for access across
+untrusted networks.
 
 Non-loopback backend services restrict project selection to the configured default
 workspace. Local project selection requires a loopback backend listener.
@@ -105,7 +114,8 @@ workspace. Local project selection requires a loopback backend listener.
 ### Service status and management
 
 After successful activation, the installer displays backend and Web status, connection
-addresses, the configuration path, and service management commands. The default browser
+addresses grouped by interface in network mode, the Web token, the configuration path,
+and service management commands. Interface enumeration makes no external IP requests. The default browser
 address is **http://127.0.0.1:30002**.
 
 | Operation | Command |
@@ -114,10 +124,13 @@ address is **http://127.0.0.1:30002**.
 | Stop services | `kyler service stop` |
 | Start services | `kyler service start` |
 | Restart services | `kyler service start --restart` |
-| Reconfigure model and addresses | `kyler configure --web` |
+| View Web token | `kyler service token` |
+| Rotate Web token | `kyler service token --reset` |
+| Reconfigure model and access scope | `kyler configure --web` |
 | Open the terminal interface | `kyler tui` |
 
-Restart services after changing the saved configuration. Installation automatically
+Restart services after changing listener settings. Web token rotation takes effect
+without restarting. Installation automatically
 updates the shell startup file for new terminals. To use the command in the current shell:
 
 ```sh

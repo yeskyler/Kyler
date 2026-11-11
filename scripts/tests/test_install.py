@@ -312,6 +312,7 @@ else:
         for key in ("KYLER_CONFIG", "KYLER_SESSION_DIR", "KYLER_SESSION_ENABLED", "KYLER_SERVER_TOKEN", "KYLER_INTERNAL_TOOL_WORKER"):
             environment.pop(key, None)
         environment["KYLER_SERVER_BIND"] = "127.0.0.1:0"
+        environment["KYLER_WEB_ENABLED"] = "false"
         process = subprocess.Popen(
             [str(binary), "serve", "--model", "installer-test", "--base-url", "http://127.0.0.1:1/v1", "--api-key", "installer-test"],
             cwd=self.root, env=environment, stdin=subprocess.DEVNULL,
@@ -391,21 +392,19 @@ else:
             if installed.exists():
                 subprocess.run([str(installed), "service", "stop"], env=environment, capture_output=True, timeout=15)
 
-    def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None):
+    def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None, access_scope="1", preserve_addresses=False):
         start_services = bundle is not None
         if bundle is None:
             bundle = local_bundle(self.root, KYLER_BINARY)
         replies = list(replies)
+        addresses = []
         if expected == 0:
-            with socket.socket() as listener:
-                listener.bind(("127.0.0.1", 0))
-                address = "127.0.0.1:" + str(listener.getsockname()[1])
-            replies += [(b"[1] Backend address", (address + "\n").encode())]
-            if bundle is not None:
-                with socket.socket() as listener:
-                    listener.bind(("127.0.0.1", 0))
-                    web_address = "127.0.0.1:" + str(listener.getsockname()[1])
-                replies += [(b"[2] Web address", (web_address + "\n").encode())]
+            if not preserve_addresses:
+                for _ in range(2):
+                    with socket.socket() as listener:
+                        listener.bind(("127.0.0.1", 0))
+                        addresses.append("127.0.0.1:" + str(listener.getsockname()[1]))
+            replies += [(b"[1] Access scope", (access_scope + "\n").encode())]
         import pty
         import select
         import termios
@@ -415,6 +414,8 @@ else:
         for name in list(environment):
             if name.startswith("KYLER_") or name == "OPENAI_API_KEY":
                 environment.pop(name)
+        if addresses:
+            environment["KYLER_SERVER_BIND"], environment["KYLER_WEB_BIND"] = addresses
         master, slave = pty.openpty()
         before = termios.tcgetattr(slave)
 
@@ -455,7 +456,7 @@ else:
                     if select.select([master], [], [], 0.1)[0]:
                         output += os.read(master, 65536)
                 cursor = output.index(marker, cursor) + len(marker)
-                if (piped or redirected) and marker == b"[1] Backend address":
+                if (piped or redirected) and marker == b"[1] Access scope":
                     assert_terminal_restored()
                 if marker.startswith(b"["):
                     step = int(marker.split(b"]", 1)[0][1:])
@@ -504,6 +505,29 @@ else:
         self.assertNotIn("tools.tavily", config)
         for marker in [b"[1] OPENAI_BASE_URL", b"[2] OPENAI_API_KEY", b"[3] Model", b"kyler tui", b"kyler service stop"]:
             self.assertIn(marker, output)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_lan_scope_generates_tokens_without_address_or_password_prompts(self):
+        output = self.interactive_install([
+            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[2] OPENAI_API_KEY", b"LAN_MODEL_TEST_KEY\r"),
+            (b"[3] Model [", b"fixture-model\n"),
+        ], access_scope="2")
+        text = (self.home / ".kyler/config.toml").read_text()
+        self.assertEqual(text.count('bind = "0.0.0.0:'), 2)
+        self.assertIn('server_url = "http://127.0.0.1:', text)
+        self.assertNotIn(b"Backend address", output)
+        self.assertNotIn(b"Web address", output)
+        self.assertNotIn(b"Web access password", output)
+        self.assertNotIn(b"LAN_MODEL_TEST_KEY", output)
+        self.assertIn(b"kyler service token", output)
+        again = self.interactive_install([
+            (b"[1] OPENAI_BASE_URL [", b"\n"),
+            (b"[2] OPENAI_API_KEY", b"\r"),
+            (b"[3] Model [", b"\n"),
+        ], access_scope="", preserve_addresses=True)
+        self.assertIn(b"Access scope [2]", again)
+        self.assertEqual((self.home / ".kyler/config.toml").read_text(), text)
 
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_piped_installer_reads_hidden_key_from_controlling_terminal(self):
@@ -712,8 +736,9 @@ class BundleTests(unittest.TestCase):
             (b"[2] OPENAI_API_KEY", b"WIZARD_TEST_KEY\r"),
             (b"[3] Model [deepseek-ai/DeepSeek-V4-Flash]", b"\n"),
         ], bundle=self.bundle("interactive"))
-        titles = [b"Configure model", b"Configure service addresses", b"Service status and management"]
+        titles = [b"Configure model", b"Choose access scope", b"Service status and management"]
         self.assertEqual([output.index(title) for title in titles], sorted(output.index(title) for title in titles))
+        self.assertEqual(output.count(b"Local access:"), 1)
         self.assertIn(b"OpenAI-compatible Chat Completions API", output)
         self.assertNotIn(b"WIZARD_TEST_KEY", output)
         self.assertNotIn(b"Backend URL", output)

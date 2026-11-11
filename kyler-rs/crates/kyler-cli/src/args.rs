@@ -42,10 +42,10 @@ pub enum Command {
     Configure {
         #[arg(long)]
         non_interactive: bool,
-        /// Enable the bundled Web service and configure both listening addresses.
+        /// Enable the bundled Web service and choose its access scope.
         #[arg(long)]
         web: bool,
-        /// Configure backend listening and connection addresses, even without Web.
+        /// Choose local-only or local-network access, even without Web.
         #[arg(long)]
         addresses: bool,
         /// Write a validated candidate beside the selected configuration without replacing it.
@@ -182,4 +182,9 @@ pub enum ServiceCommand {
     },
     Stop,
     Status,
+    /// Display or rotate the Web access token. Rotation signs out existing browsers.
+    Token {
+        #[arg(long)]
+        reset: bool,
+    },
 }

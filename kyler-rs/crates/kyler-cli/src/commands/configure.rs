@@ -88,59 +88,61 @@ pub fn configure(
             }
         }
         if addresses || enable_web || config.web.enabled {
-            prompts.section("Configure service addresses");
-            loop {
-                config.server.bind = prompts.address("Backend address", config.server.bind)?;
-                if address_available(config.server.bind)
-                    || (config.server.bind == old_backend
-                        && path.parent().unwrap().join("server.json").is_file())
-                {
-                    break;
+            prompts.section("Choose access scope");
+            eprintln!(
+                "1. This machine only (127.0.0.1)\n2. Local network (all network interfaces)"
+            );
+            let lan = prompts.access_scope(
+                !config.server.bind.ip().is_loopback()
+                    || (config.web.enabled && !config.web.bind.ip().is_loopback()),
+            )?;
+            let ip = if lan {
+                std::net::Ipv4Addr::UNSPECIFIED
+            } else {
+                std::net::Ipv4Addr::LOCALHOST
+            };
+            config.server.bind.set_ip(ip.into());
+            config.web.bind.set_ip(ip.into());
+            for (label, address, old, record) in [
+                ("Backend", config.server.bind, old_backend, "server.json"),
+                (
+                    "Web",
+                    config.web.bind,
+                    config_before_web(&values),
+                    "web.json",
+                ),
+            ] {
+                if label == "Web" && !config.web.enabled {
+                    continue;
                 }
-                eprintln!(
-                    "Backend address is unavailable. Choose another address or stop its owner."
-                );
-                prompts.repeat_last();
+                if !address_available(address)
+                    && !(address.port() == old.port()
+                        && path.parent().unwrap().join(record).is_file())
+                {
+                    return Err(CliError::new(
+                        2,
+                        format!(
+                            "{label} port {} is unavailable. Stop its owner and run setup again.",
+                            address.port()
+                        ),
+                    ));
+                }
             }
             config.client.server_url = kyler_config::web::connect_url(config.server.bind);
-            config.client.access_token = config.server.access_token.clone();
-            if config.web.enabled {
-                loop {
-                    config.web.bind = prompts.address("Web address", config.web.bind)?;
-                    if !kyler_config::web::addresses_overlap(config.server.bind, config.web.bind)
-                        && (address_available(config.web.bind)
-                            || (config.web.bind == config_before_web(&values)
-                                && path.parent().unwrap().join("web.json").is_file()))
-                    {
-                        break;
-                    }
-                    eprintln!(
-                        "Backend and Web addresses conflict. Choose a different address or port."
-                    );
-                    prompts.repeat_last();
-                }
-                if !config.web.bind.ip().is_loopback() || !config.web.access_token.is_empty() {
-                    config.web.access_token =
-                        prompts.key("Web access password", &config.web.access_token, false)?;
-                }
-            }
-            if !config.server.bind.ip().is_loopback() && config.server.access_token.is_empty() {
-                // A private service token is generated locally, never displayed or put in shell arguments.
-                config.server.access_token = kyler_config::SecretString::new(format!(
-                    "{}{}",
-                    uuid::Uuid::new_v4().simple(),
-                    uuid::Uuid::new_v4().simple()
-                ));
-            }
         }
     }
     if addresses || enable_web || config.web.enabled {
+        if config.web.enabled && config.web.access_token.is_empty() {
+            config.web.access_token = super::access::generate_token()?;
+        }
+        if !config.server.bind.ip().is_loopback() && config.server.access_token.is_empty() {
+            config.server.access_token = super::access::generate_token()?;
+        }
         if !interactive && automatic_connection {
             config.client.server_url = kyler_config::web::connect_url(config.server.bind);
         }
         if kyler_config::web::is_local_backend(config.server.bind, &config.client.server_url)
             && !config.server.access_token.is_empty()
-            && config.client.access_token.is_empty()
         {
             config.client.access_token = config.server.access_token.clone();
         }
@@ -258,7 +260,7 @@ pub fn configure(
     eprintln!("Saved: {}", path.display());
     Ok(())
 }
-fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(super) fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     let destination = if path.exists() {
         std::fs::canonicalize(&path).map_err(CliError::io)?
     } else {

@@ -10,14 +10,18 @@ in [releasing](../docs/releasing.md).
 
 ## Development
 
-With a configured backend running, execute from `web/`:
+From the repository root, run `cargo run --manifest-path kyler-rs/Cargo.toml -p
+kyler-cli -- configure --web` to configure access and generate a Web token. With
+the backend running, execute from `web/`:
 
 ```sh
 npm ci
 npm run dev -- --hostname 127.0.0.1 --port 30002
 ```
 
-Open http://127.0.0.1:30002. If the installed Web service owns this port, choose
+Open http://127.0.0.1:30002 and paste the Web token. View it with
+`cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- service token` from
+the repository root. If the installed Web service owns this port, choose
 another development port. The UI reads `~/.kyler/config.toml` on the Next.js
 server. Workspace identity is provided by the backend, not the UI launch directory.
 
@@ -27,10 +31,10 @@ server. Workspace identity is provided by the backend, not the UI launch directo
 | `KYLER_CLIENT_SERVER_URL` | Backend connection URL                       |
 | `KYLER_CLIENT_TOKEN`      | Backend access token                         |
 | `KYLER_WEB_BIND`          | Listen address used by Web access validation |
-| `KYLER_WEB_TOKEN`         | Web access password                          |
+| `KYLER_WEB_TOKEN`         | Web access token                             |
 
-No `.env` file is required. Backend and Web passwords are separate credentials.
-Public Web bindings require authentication; see [security guidance](../SECURITY.md).
+No `.env` file is required. Backend API and Web access tokens are separate credentials.
+Both local and network Web access require token sign-in; see [security guidance](../SECURITY.md).
 
 ## Features
 
@@ -116,7 +120,10 @@ npm run start -- --hostname 127.0.0.1 --port 30002
 
 Ctrl+C stops a manually launched Next.js process. `kyler service stop` stops
 managed backend and Web services, not a manually launched development server.
-Keep the UI bound to loopback. Public bindings require [web].access_token and use browser Basic authentication;
+Choose local or local-network access during `kyler configure --web`. Both modes
+require `[web].access_token`: enter it on `/login` to create a signed HttpOnly session
+cookie. View it with `kyler service token`; rotate it with `kyler service token --reset`.
+Managed Web services read token changes without restarting.
 use a TLS reverse proxy for access across untrusted networks. This is a single-user application;
 put it behind an authenticated gateway before exposing it to other users.
 
