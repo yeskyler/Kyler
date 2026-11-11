@@ -10,13 +10,18 @@ The standalone Web application runs in a separate Node.js process.
 flowchart TD
     Browser[Web browser] --> Next[Next.js server and API proxy]
     Next --> Server[Rust HTTP and SSE server]
-    TUI[TUI and CLI] --> Client[kyler-client]
+    CLI[HTTP CLI commands] --> Client[kyler-client]
+    TUI[Terminal UI] --> Threads[In-process core ThreadManager]
+    Threads --> Runtime
     Client --> Server
-    Server --> Runtime[kyler-core runtime]
+    Server --> Threads
+    Runtime[kyler-core runtime]
     Runtime --> Model[Configured model provider]
     Runtime --> Tools[Tools and integrations]
     Tools --> Worker[Sandbox worker and managed processes]
     Server --> Store[Session store and Rollout]
+    Threads --> Store
+    Threads --> LocalStore[Local TUI session store and Rollout]
 ```
 
 Web keeps provider and backend credentials server-side. HTTP requests and SSE carry
@@ -28,10 +33,10 @@ and artifacts through their respective views.
 | Crate | Responsibility |
 | --- | --- |
 | `kyler-cli` | Command parsing, setup, service lifecycle, and launch entry points |
-| `kyler-server` | HTTP routes, SSE, run admission, cancellation, workspace binding |
-| `kyler-tui` | Terminal interaction, input, and structured history rendering |
+| `kyler-server` | HTTP routes, SSE cache/replay, durable admission, host workspace binding |
+| `kyler-tui` | Terminal interaction and in-process core operation/event adaptation |
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
-| `kyler-core` | Runtime, tools, sessions, context, memory, sandbox, integrations |
+| `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integrations |
 | `kyler-protocol` | Shared contracts, event metadata, prompts, and agent names |
 | `kyler-config` | Configuration loading, defaults, validation, credential resolution |
 | `kyler-logging` | Logging configuration and initialization |
@@ -134,19 +139,54 @@ guidance](../SECURITY.md).
 
 ## Project execution in Web and TUI
 
-New Web and TUI sessions request `workspace_mode: "project"`. TUI executes tools in
-the terminal's current directory. Web executes tools in the selected project directory,
-or the server-configured default workspace when no project is selected. The server
-validates that directory against its allowed roots and restores the host sandbox policy
-before each run. Chat history, context,
-approvals, process ownership, attachments, and artifact snapshots retain their session
-identity. Sessions in the same project share project files, so simultaneous edits can
-conflict. Project memory retains its existing project scope.
+TUI runs `ThreadManager` and the agent loop inside the terminal process. It never
+uses `kyler-client`, backend HTTP/SSE routes, service discovery, or service tokens.
+`kyler tui --session <id>` resumes a local session; `--server` is rejected for TUI.
+New sessions bind to the current directory. Resumed sessions retain their original
+workspace and must match the current host sandbox policy.
 
-The execution mode is persisted with the session environment and inherited by child
-agents. Resuming a session keeps its saved directory and mode. Existing private sessions
-are not migrated or copied into a project. Other API clients retain the isolated default
-unless they explicitly request project execution.
+`kyler-core/src/thread/` owns thread creation, bounded operation/event channels,
+turn execution, cancellation, preferences, and shutdown. `kyler-tui/src/agent.rs`
+adapts those operations and events to the terminal state. The existing core agent
+loop remains the only execution implementation. Local model configuration is
+loaded independently of client, backend, and Web transport settings.
+
+Local sessions are stored in `tui/sessions` beside the configured session directory
+(normally `~/.kyler/tui/sessions`). A lifetime file lock prevents two TUIs from
+opening the same session. Different sessions can run concurrently. Approvals,
+questions, and managed process records are scoped to the owning session. Exiting
+TUI cancels active work and awaits checkpoint and resource cleanup.
+
+Web retains its HTTP/SSE architecture and server-authorized project workspaces.
+The server attaches hosted sessions to the same core `ThreadManager`. Both adapters
+submit `ThreadOp` for turns, cancellation, approvals, questions, model selection,
+and permission changes. Core owns execution, timeout accounting (excluding human
+waits), session checkpoints, and terminal events. A hosted turn includes an explicitly
+host-authorized agent/session and retains the service's admitted run ID as its operation ID.
+
+`kyler-core/src/thread/protocol.rs` defines operations and notifications with
+thread ID, operation ID, execution ID, and sequence number. `handle.rs` owns operation
+submission and read-only queries; `runner.rs` is shared by both entry points.
+`kyler-server/src/threads/` adapts host contexts and consumes each core stream through
+one serialized bridge. SSE clients read the service cache and never compete for
+core events. Slow or disconnected browsers do not cancel execution. Service
+shutdown cancels active work, joins hosted threads, then shuts down shared resources.
+Closing one hosted thread cannot stop another thread's MCP or process manager.
+The service releases idle execution actors after each run; the next request restores
+state from the existing session and preference files. Durable HTTP admission keys
+continue to prevent duplicate execution across actor recreation and service restarts.
+
+HTTP validation, durable request deduplication, global capacity, admission records,
+SSE retention/replay, and restart manifests remain service responsibilities. Core
+also rejects conflicting operation-ID reuse within a live thread. Service model
+and permission files keep their existing format; TUI storage remains independent.
+History and tool-detail projections are shared in core.
+Both paths use the shared core workspace factory and retain the same host sandbox
+ceiling. Permission selections can narrow this ceiling but cannot expand it.
+Web executes in the selected project or the server-configured default directory,
+validated against the server's allowed roots. Existing private sessions are not
+migrated. Sessions in the same project share files, so simultaneous edits can
+conflict; project memory retains its existing project scope.
 
 ## Private session execution
 

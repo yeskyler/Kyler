@@ -26,6 +26,8 @@ pub struct ProviderSettings {
 #[serde(deny_unknown_fields)]
 pub struct ModelProfile {
     #[serde(default)]
+    pub enable_thinking: Option<bool>,
+    #[serde(default)]
     pub capabilities: ModelCapabilities,
     pub provider: String,
     pub model: String,
@@ -119,6 +121,7 @@ impl AppConfig {
             profiles: [(
                 "default".into(),
                 ModelProfile {
+                    enable_thinking: self.llm.enable_thinking,
                     capabilities: self.llm.capabilities.clone(),
                     provider: "default".into(),
                     model: self.llm.model.clone(),

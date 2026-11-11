@@ -132,6 +132,8 @@ impl McpManager {
                 .await??;
             }
         }
+        self.changes
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
         Ok(())
     }
 
@@ -195,6 +197,7 @@ impl McpManager {
         for slots in sessions.values_mut() {
             let environment = slots.first().and_then(|s| s.environment.clone());
             slots.push(Arc::new(Slot {
+                changes: self.changes.clone(),
                 id: id.clone(),
                 settings: server.clone(),
                 package_root: self.installed_package_root(&server.command),
@@ -205,6 +208,8 @@ impl McpManager {
             }));
         }
         *user = next;
+        self.changes
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
         Ok(McpServerInfo {
             removable: true,
             id,

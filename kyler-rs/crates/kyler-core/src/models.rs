@@ -5,5 +5,7 @@ mod request;
 mod snapshot;
 
 pub use registry::ModelRegistry;
-pub(crate) use request::{project_tool, set_output_limit};
+pub(crate) use request::{
+    attach_reasoning, project_tool, provider_request, set_output_limit, thinking_mode,
+};
 pub use snapshot::ModelSnapshot;

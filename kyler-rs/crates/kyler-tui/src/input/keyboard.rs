@@ -1,5 +1,6 @@
 //! Keyboard routing, local panels and composer shortcuts.
 use super::{cancel, paste_image};
+use crate::agent::AgentHandle;
 use crate::{
     commands::dispatch_command,
     components::command_picker::COMMANDS,
@@ -10,13 +11,11 @@ use crate::{
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use kyler_client::Client;
-
 pub(super) fn handle(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
     view: &View,
 ) -> bool {
@@ -28,6 +27,7 @@ pub(super) fn handle(
         return false;
     }
     match key.code {
+        KeyCode::Char('o') if ctrl => state.toggle_latest_reasoning(),
         KeyCode::Char('r') if ctrl && state.phase == Phase::Ready => {
             if !state.restore_failed_submission() {
                 state.notice("Clear the current draft before restoring failed input.");
@@ -74,19 +74,13 @@ pub(super) fn handle(
                     effects.load(client.clone(), None, generation, send.clone());
                 }
             } else {
-                state.notice("A task is still active. Wait, cancel, or exit and reconnect.");
+                state.notice("A task is still active. Wait, cancel, or exit the session.");
             }
         }
         KeyCode::F(5) if state.phase == Phase::Detached => {
-            if let (Some(session), Some(run)) = (state.session.clone(), state.run.clone()) {
-                state.phase = Phase::Running;
-                effects.watch(
-                    client.clone(),
-                    session,
-                    run,
-                    state.cursor,
-                    state.generation,
-                    send.clone(),
+            if state.run.is_some() {
+                state.notice(
+                    "The local task is still active. Wait for cancellation or exit the TUI.",
                 );
             } else if let (Some(session), Some(pending)) =
                 (state.session.clone(), state.pending.clone())

@@ -1,14 +1,12 @@
 use super::{Effects, Event, Sender};
+use crate::agent::AgentHandle;
 
-use std::time::Duration;
-
-use kyler_client::Client;
 use kyler_protocol::api::{mcp::McpAction, skills::SkillAction};
 
 impl Effects {
     pub fn models(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         generation: u64,
         send: Sender,
@@ -22,7 +20,7 @@ impl Effects {
                     Some(profile) => client.select_model(&session, profile).await?,
                     None => client.session_model(&session).await?,
                 };
-                Ok::<_, kyler_client::Error>((catalog, model))
+                Ok::<_, anyhow::Error>((catalog, model))
             }
             .await;
             let event = match result {
@@ -34,7 +32,7 @@ impl Effects {
     }
     pub fn skills(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         generation: u64,
         send: Sender,
@@ -50,7 +48,7 @@ impl Effects {
     }
     pub fn skill_details(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         skill: String,
         generation: u64,
@@ -66,7 +64,7 @@ impl Effects {
     }
     pub fn skill_action(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         skill: String,
         action: SkillAction,
@@ -89,28 +87,45 @@ impl Effects {
             let _ = send.send((generation, event)).await;
         });
     }
-    pub fn watch_mcp(&mut self, client: Client, session: String, generation: u64, send: Sender) {
+    pub fn watch_mcp(
+        &mut self,
+        client: AgentHandle,
+        session: String,
+        generation: u64,
+        send: Sender,
+    ) {
         if let Some(previous) = self.mcp.take() {
             previous.abort();
         }
         self.mcp = Some(tokio::spawn(async move {
+            let mut changes = match client.mcp_changes(&session).await {
+                Ok(changes) => changes,
+                Err(error) => {
+                    let _ = send
+                        .send((generation, Event::McpError(error.to_string())))
+                        .await;
+                    return;
+                }
+            };
             loop {
                 let event = match client.mcp_servers(&session).await {
                     Ok(servers) => Event::Mcp(servers),
                     Err(_) => Event::McpError(
-                        "MCP status unavailable; verify the server version and connection.".into(),
+                        "MCP status unavailable; check the local connector configuration.".into(),
                     ),
                 };
                 if send.send((generation, event)).await.is_err() {
                     break;
                 }
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                if changes.changed().await.is_err() {
+                    break;
+                }
             }
         }));
     }
     pub fn mcp_action(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         server: String,
         action: McpAction,

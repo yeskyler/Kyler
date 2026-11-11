@@ -110,18 +110,12 @@ pub fn lines_with_width(entries: &[Entry], width: u16) -> Vec<Line<'static>> {
                     lines.push(Line::default());
                 }
             }
+            Entry::Reasoning(cell) => {
+                lines.extend(reasoning_rows(cell, width));
+                lines.push(Line::default());
+            }
             Entry::Message { role, content } => {
-                if role == "thinking" {
-                    lines.push(Line::styled(
-                        "  Thinking",
-                        Style::default().fg(Color::DarkGray),
-                    ));
-                    let mut thinking = super::markdown::render(content, width);
-                    for line in &mut thinking {
-                        line.style = Style::default().fg(Color::DarkGray);
-                    }
-                    lines.extend(thinking);
-                } else if role == "assistant" {
+                if role == "assistant" {
                     lines.extend(super::markdown::render(content, width));
                 } else {
                     lines.extend(super::messages::user::render(content, width));
@@ -144,6 +138,56 @@ pub fn lines_with_width(entries: &[Entry], width: u16) -> Vec<Line<'static>> {
         }
     }
     lines
+}
+
+fn reasoning_rows(
+    cell: &super::messages::assistant::ReasoningCell,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let label = if cell.streaming {
+        "Thinking…".to_owned()
+    } else if let Some(seconds) = cell.seconds {
+        format!(
+            "Thought for {}",
+            if seconds == 0 {
+                "<1s".into()
+            } else {
+                super::status::duration(seconds)
+            }
+        )
+    } else {
+        "Thought".to_owned()
+    };
+    let mut rows = wrap(
+        vec![Line::styled(
+            format!("  {} {label} · Ctrl+O", if cell.open() { "▾" } else { "▸" }),
+            Style::default().fg(Color::DarkGray),
+        )],
+        width,
+    );
+    if !cell.open() {
+        return rows;
+    }
+    let inner_width = width.saturating_sub(4).max(1);
+    let body = wrap(
+        super::markdown::render_reasoning(&cell.content, inner_width),
+        inner_width,
+    );
+    let preview = cell.streaming && cell.expanded != Some(true);
+    let skip = if preview {
+        body.len().saturating_sub(6)
+    } else {
+        0
+    };
+    for line in body.into_iter().skip(skip) {
+        let mut spans = vec![Span::raw("  │ ")];
+        spans.extend(line.spans.into_iter().map(|mut span| {
+            span.style = span.style.fg(Color::DarkGray);
+            span
+        }));
+        rows.push(Line::from(spans).style(Style::default().fg(Color::DarkGray)));
+    }
+    rows
 }
 
 /// Group consecutive calls by category without changing execution order.
@@ -362,6 +406,13 @@ pub fn fingerprint(entry: &Entry) -> u64 {
             cell.displayed().hash(&mut hash);
             cell.is_finished().hash(&mut hash);
             cell.final_separator.hash(&mut hash);
+        }
+        Entry::Reasoning(cell) => {
+            8u8.hash(&mut hash);
+            cell.content.hash(&mut hash);
+            cell.streaming.hash(&mut hash);
+            cell.expanded.hash(&mut hash);
+            cell.seconds.hash(&mut hash);
         }
         Entry::RunTiming { label, seconds } => {
             6u8.hash(&mut hash);

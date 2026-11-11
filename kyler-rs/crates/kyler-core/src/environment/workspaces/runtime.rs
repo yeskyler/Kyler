@@ -1,7 +1,7 @@
 //! Discover host-installed tools without importing the host's shell or credentials.
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
-use kyler_core::sandbox::policy::RustupRuntime;
+use crate::sandbox::policy::RustupRuntime;
 
 #[derive(Default)]
 pub(super) struct Runtime {

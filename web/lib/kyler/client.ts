@@ -79,7 +79,7 @@ export function attachments(reference: SessionReference): AttachmentAdapter {
   };
 }
 
-async function* followRun(run: string, signal: AbortSignal) {
+async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => void) {
   let cursor = 0;
   let retries = 0;
   while (true) {
@@ -91,6 +91,7 @@ async function* followRun(run: string, signal: AbortSignal) {
         cache: "no-store",
       });
       if (!response.ok) throw new Error(`Cannot read run events (${response.status}).`);
+      if (retries > 0) onReconnect?.();
       for await (const event of readEvents(response)) {
         if (event.seq <= cursor) continue;
         cursor = event.seq;
@@ -131,6 +132,7 @@ export function chatAdapter(
     onAdmitted?: (session: string) => void;
     onResponse?: (session: string) => void;
     onQuestion?: (question: QuestionRecord) => void;
+    onReconnect?: () => void;
   },
 ): ChatModelAdapter {
   let recovery = recoverRun;
@@ -210,7 +212,7 @@ export function chatAdapter(
             runStorageKey(session),
             JSON.stringify({ id: accepted.run_id, input }),
           );
-        const events = followRun(accepted.run_id, detailsSignal);
+        const events = followRun(accepted.run_id, detailsSignal, lifecycle?.onReconnect);
         closeEvents = () => events.return(undefined);
         let nextEvent: ReturnType<typeof events.next> | undefined;
         while (true) {

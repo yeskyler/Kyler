@@ -1,4 +1,5 @@
 use super::{ready, render, result};
+use crate::agent::AgentHandle;
 use crate::{
     app,
     components::{command_picker::COMMANDS, status, transcript},
@@ -10,14 +11,11 @@ use crate::{
 use crossterm::event::{Event as Input, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
 
-use kyler_client::Client;
-use kyler_config::ClientSettings;
-
 #[tokio::test]
 async fn mcp_command_opens_management_panel_without_submitting_to_model() {
     use kyler_protocol::api::mcp::{McpServerInfo, McpStatus, McpToolInfo};
 
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     state.mcp = vec![McpServerInfo {
         removable: false,
@@ -85,7 +83,7 @@ async fn mcp_command_opens_management_panel_without_submitting_to_model() {
 
 #[test]
 fn slash_menu_filters_completes_and_dispatches_commands_without_a_model_request() {
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(16);
@@ -151,7 +149,7 @@ fn slash_menu_filters_completes_and_dispatches_commands_without_a_model_request(
 async fn skills_command_requires_review_before_project_approval_and_does_not_submit() {
     use kyler_protocol::api::skills::{SkillDetails, SkillInfo, SkillSource, SkillStatus};
 
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(16);
@@ -225,7 +223,7 @@ async fn skills_command_requires_review_before_project_approval_and_does_not_sub
     assert_eq!(
         state.skills[0].status,
         SkillStatus::NeedsApproval,
-        "wait for server confirmation"
+        "wait for agent confirmation"
     );
     app::handle_input(
         key(KeyCode::Esc),
@@ -250,7 +248,7 @@ async fn skills_command_requires_review_before_project_approval_and_does_not_sub
 async fn model_menu_is_local_and_running_model_is_distinct_from_next_selection() {
     use kyler_protocol::api::models::{ModelCatalog, ModelInfo, SessionModel};
 
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(16);
@@ -356,7 +354,7 @@ async fn permissions_menu_confirms_full_access_and_approval_defaults_to_deny() {
         PermissionState,
     };
 
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(32);
@@ -698,11 +696,7 @@ fn every_surface_anchors_to_composer_and_restores_the_scrolled_transcript() {
 async fn nested_panels_return_to_command_query_and_footer_labels_do_not_open_menus() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
-    let client = Client::new(ClientSettings {
-        server_url: "http://127.0.0.1:1".into(),
-        ..Default::default()
-    })
-    .unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(32);
@@ -795,7 +789,7 @@ fn long_lists_keep_selection_visible_and_details_scroll_without_moving_history()
 
     use kyler_protocol::api::models::{ModelCatalog, ModelInfo};
 
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(16);
@@ -862,7 +856,7 @@ fn builtin_skill(name: &str) -> kyler_protocol::api::skills::SkillInfo {
 
 #[tokio::test]
 async fn skills_actions_prepare_explicit_drafts_without_starting_a_run() {
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     state.skills = vec![
         builtin_skill("skill-creator"),
@@ -900,7 +894,7 @@ async fn skills_actions_prepare_explicit_drafts_without_starting_a_run() {
 async fn dollar_completion_only_inserts_enabled_skills_and_preserves_draft_prefix() {
     use kyler_protocol::api::skills::SkillStatus;
 
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
     let mut disabled = builtin_skill("skill-disabled");
     disabled.status = SkillStatus::Disabled;

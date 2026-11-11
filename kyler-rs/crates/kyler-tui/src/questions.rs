@@ -1,4 +1,5 @@
 //! Explicit clarification above the composer. Enter confirms; Escape dismisses.
+use crate::agent::AgentHandle;
 use crate::{
     components::{
         composer::clean,
@@ -9,7 +10,6 @@ use crate::{
     state::{Entry, State},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use kyler_client::Client;
 use kyler_protocol::api::questions::*;
 use ratatui::{
     Frame,
@@ -127,7 +127,7 @@ fn send_response(
     response: QuestionResponse,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) {
     if state.questions.busy {
@@ -151,7 +151,7 @@ pub fn keyboard(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) -> bool {
     if state.pending_approval().is_some()
@@ -338,7 +338,6 @@ pub fn render(frame: &mut Frame, state: &mut State, input: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kyler_config::ClientSettings;
     fn record() -> QuestionRecord {
         QuestionRecord {
             id: uuid::Uuid::new_v4().to_string(),
@@ -363,7 +362,7 @@ mod tests {
     }
     #[tokio::test]
     async fn enter_submits_custom_answer_and_escape_cancels_without_touching_draft() {
-        let client = Client::new(ClientSettings::default()).unwrap();
+        let client = AgentHandle::new(Default::default(), None);
         let mut effects = Effects::default();
         let (send, _receive) = tokio::sync::mpsc::channel(16);
         let mut state = State::new(None);

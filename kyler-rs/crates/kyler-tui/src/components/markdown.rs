@@ -78,15 +78,25 @@ impl Row {
 }
 
 pub fn render(source: &str, width: u16) -> Vec<Line<'static>> {
+    render_document(source, width, true)
+}
+
+pub fn render_reasoning(source: &str, width: u16) -> Vec<Line<'static>> {
+    render_document(source, width, false)
+}
+
+fn render_document(source: &str, width: u16, assistant_marker: bool) -> Vec<Line<'static>> {
     let source = clean(source);
     let context = Context {
-        prefix: "  ".into(),
+        prefix: if assistant_marker { "  " } else { "" }.into(),
         ..Default::default()
     };
     let mut rows = blocks(&parse(&source), &source, &context, width);
-    if let Some(first) = rows.first_mut() {
-        if first.first.starts_with("  ") {
-            first.first.replace_range(..2, "● ");
+    if assistant_marker {
+        if let Some(first) = rows.first_mut() {
+            if first.first.starts_with("  ") {
+                first.first.replace_range(..2, "● ");
+            }
         }
     }
     rows.into_iter()

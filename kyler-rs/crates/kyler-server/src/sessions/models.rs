@@ -1,14 +1,10 @@
 //! Session preferences are separate from execution checkpoints so active runs retain their lease.
 use crate::{
     error::{ApiError, ApiResult, valid_id},
-    runs::{RunManager, persistence},
+    runs::RunManager,
 };
 
-use std::{
-    fs::File,
-    io::{ErrorKind, Write},
-    path::PathBuf,
-};
+use std::{io::ErrorKind, path::PathBuf};
 
 use kyler_config::loader::LlmOverrides;
 use kyler_protocol::api::models::{ModelCatalog, ModelSelection, SessionModel};
@@ -61,65 +57,19 @@ impl RunManager {
     ) -> ApiResult<SessionModel> {
         valid_id(id)?;
         let registry = self.registry.lock().await;
-        self.store.load(id).await.map_err(ApiError::storage)?;
-        let models = self
-            .agent
-            .model_registry()
-            .ok_or_else(|| ApiError::bad("Model management is unavailable."))?;
-        let selection = if let Some(selection) = selection {
-            if selection.profile.as_ref().is_some_and(|p| {
-                p.is_empty()
-                    || p.len() > 128
-                    || !p
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-            }) {
-                return Err(ApiError::bad("Invalid model profile name."));
-            }
-            models
-                .resolve(selection.profile.as_deref())
-                .map_err(|e| ApiError::bad(&e.to_string()))?;
-            let path = self.root.join(format!("{id}.model"));
-            let root = self.root.clone();
-            let bytes = serde_json::to_vec(&selection)
-                .map_err(|_| ApiError::bad("Cannot encode model selection."))?;
-            tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-                let temporary = root.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
-                let result = (|| -> anyhow::Result<()> {
-                    let mut file = persistence::private_file(&temporary)?;
-                    file.write_all(&bytes)?;
-                    file.sync_all()?;
-                    std::fs::rename(&temporary, path)?;
-                    File::open(&root)?.sync_all()?;
-                    Ok(())
-                })();
-                if result.is_err() {
-                    let _ = std::fs::remove_file(&temporary);
-                }
-                result
-            })
+        let session = self.store.load(id).await.map_err(ApiError::storage)?;
+        let thread = self.core_thread(&session).await?;
+        let mut model = thread
+            .handle
+            .model(selection.map(|s| s.profile))
             .await
-            .map_err(|_| ApiError::bad("Cannot save model selection."))?
-            .map_err(ApiError::storage)?;
-            selection
-        } else {
-            self.read_model_selection(id).await?
-        };
+            .map_err(|error| ApiError::bad(&error.to_string()))?;
         let active = registry
             .active
             .get(id)
             .and_then(|run| registry.runs.get(run))
             .and_then(|entry| entry.info().model);
-        let resolved = models.resolve(selection.profile.as_deref());
-        let (selected, error) = match resolved {
-            Ok(model) => (Some(model.info.clone()), None),
-            Err(e) => (None, Some(e.to_string())),
-        };
-        Ok(SessionModel {
-            profile: selection.profile,
-            selected,
-            active,
-            error,
-        })
+        model.active = active;
+        Ok(model)
     }
 }

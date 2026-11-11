@@ -118,7 +118,7 @@ impl Agent {
             Ok(messages)
         };
         let before_tokens =
-            (store.count(&serde_json::json!({"messages":project(session)?,"tools":tools}))? as f64
+            (store.count(&serde_json::json!({"messages":self.request_messages(project(session)?,session)?,"tools":tools}))? as f64
                 * session.memory.estimation_scale.max(1.0))
             .ceil() as usize;
         let mut compaction = if before_tokens > store.input_limit() {
@@ -153,7 +153,7 @@ impl Agent {
         } else {
             let prepare = store.prepare(session, &mut summarizer, |candidate| {
                 let estimate = store
-                    .count(&serde_json::json!({"messages":project(candidate)?,"tools":tools}))?;
+                    .count(&serde_json::json!({"messages":self.request_messages(project(candidate)?,candidate)?,"tools":tools}))?;
                 Ok((estimate as f64 * candidate.memory.estimation_scale.max(1.0)).ceil() as usize)
             });
             if let Some(stream) = stream {
@@ -202,7 +202,7 @@ impl Agent {
                 window_start: session.memory.window_start,
             });
         }
-        let serialized = serde_json::to_value(&messages)?;
+        let serialized = self.request_messages(messages.clone(), session)?;
         let mut system = Vec::new();
         let mut memory = Vec::new();
         let mut conversation = Vec::new();

@@ -1,5 +1,6 @@
 //! Trusted workspace binding and immutable sandbox ceilings.
 mod worker;
+pub mod workspaces;
 
 use crate::sandbox::{
     MxcSandbox, NetworkAccess, Sandbox, SandboxMode, SandboxPolicy,

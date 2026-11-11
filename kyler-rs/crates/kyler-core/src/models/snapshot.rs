@@ -9,6 +9,7 @@ pub struct ModelSnapshot {
     pub info: ModelInfo,
     pub policy: ContextPolicy,
     pub output_token_parameter: OutputTokenParameter,
+    pub enable_thinking: Option<bool>,
     pub(crate) base_url: String,
     pub(crate) api_key: SecretString,
 }

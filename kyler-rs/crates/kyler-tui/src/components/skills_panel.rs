@@ -1,4 +1,5 @@
 use super::panel::{self, Position};
+use crate::agent::AgentHandle;
 use crate::{
     components::composer::clean,
     effects::{Effects, Sender},
@@ -13,10 +14,9 @@ use ratatui::{
     text::Line,
 };
 
-use kyler_client::Client;
 use kyler_protocol::api::skills::{SkillAction, SkillSource, SkillStatus};
 
-pub fn open(state: &mut State, effects: &mut Effects, client: &Client, send: &Sender) {
+pub fn open(state: &mut State, effects: &mut Effects, client: &AgentHandle, send: &Sender) {
     state.open_panel(Panel::Skills);
     state.skill_details = None;
     state.skills_error = None;
@@ -38,7 +38,7 @@ pub fn handle_key(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) {
     if key.code == KeyCode::Esc {

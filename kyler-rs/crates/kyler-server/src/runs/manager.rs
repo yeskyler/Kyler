@@ -30,6 +30,7 @@ use kyler_protocol::{
 };
 
 pub struct RunManager {
+    pub(crate) threads: crate::threads::CoreThreads,
     pub(crate) questions: Arc<kyler_core::questions::QuestionManager>,
     pub(crate) approval_settings: ApprovalSettings,
     pub(crate) processes: Arc<ProcessManager>,
@@ -131,6 +132,7 @@ impl RunManager {
                 .with_processes(processes.clone()),
         );
         Ok(Arc::new(Self {
+            threads: crate::threads::CoreThreads::new(store.clone()),
             questions: Arc::new(kyler_core::questions::QuestionManager::persistent(
                 store.directory().join("_questions"),
             )?),

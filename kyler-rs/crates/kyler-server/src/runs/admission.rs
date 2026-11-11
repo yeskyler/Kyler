@@ -10,7 +10,7 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use sha2::{Digest, Sha256};
 
-use kyler_core::{approval::ApprovalContext, runtime::UserTurn};
+use kyler_core::runtime::UserTurn;
 use kyler_protocol::api::{
     attachments::{AttachmentInfo, AttachmentKind, MAX_ATTACHMENTS},
     images::MAX_IMAGES,
@@ -145,7 +145,7 @@ impl RunManager {
                 .map_err(ApiError::storage)?;
         }
         let selection = self.read_model_selection(&session_id).await?;
-        let mut agent = self
+        let agent = self
             .agent_for_session(&session)?
             .bind_model(selection.profile.as_deref())
             .map_err(|e| ApiError::bad(&e.to_string()))?;
@@ -181,15 +181,15 @@ impl RunManager {
             agent.validate_document_input().map_err(|_|ApiError::new(StatusCode::BAD_REQUEST,"model_tools_unsupported","The selected model cannot read attachments using tools. Select a tool-capable model with /model."))?;
         }
         let run_id = uuid::Uuid::new_v4().to_string();
-        let permission = if let Some(manager) = &self.approvals {
-            let policy = self.read_permissions(&session_id).await?;
-            manager.update_policy(&session_id, policy.clone());
-            agent = agent.with_approvals(ApprovalContext {
-                manager: manager.clone(),
-                policy: policy.clone(),
-                session_id: session_id.clone(),
-                run_id: run_id.clone(),
-            });
+        let permission = if self.approvals.is_some() {
+            let policy = self
+                .core_thread(&session)
+                .await?
+                .handle
+                .permissions(None)
+                .await
+                .map_err(|error| ApiError::bad(&error.to_string()))?
+                .selected;
             Some(policy)
         } else {
             None
@@ -272,13 +272,15 @@ impl RunManager {
                 tracing::error!(run_id=%entry.info().run_id,"run driver failed");
                 manager.finish(&entry, None, Some(error)).await;
             }
-            if let Some(approvals) = &manager.approvals {
-                approvals.cancel_run(&entry.info().run_id);
-            }
             let mut registry = manager.registry.lock().await;
             let finished = entry.info();
             if registry.active.get(&finished.session_id) == Some(&finished.run_id) {
                 registry.active.remove(&finished.session_id);
+                // HTTP deduplication and session history are durable; idle actors can be
+                // released without stopping the host's shared tools or connections.
+                if manager.threads.close(&finished.session_id).await.is_err() {
+                    tracing::warn!("Unable to join an idle core thread");
+                }
             }
             drop(permit);
         });

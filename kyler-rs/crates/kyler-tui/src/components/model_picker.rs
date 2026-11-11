@@ -2,6 +2,7 @@ use super::{
     composer::clean,
     panel::{self, Position},
 };
+use crate::agent::AgentHandle;
 use crate::{
     effects::{Effects, Sender},
     state::{Panel, State},
@@ -15,13 +16,12 @@ use ratatui::{
     text::Line,
 };
 
-use kyler_client::Client;
 use kyler_protocol::tokens::format_tokens;
 
 pub fn refresh(
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
     reload: bool,
     selection: Option<Option<String>>,
@@ -42,7 +42,7 @@ pub fn refresh(
         );
     }
 }
-pub fn open(state: &mut State, effects: &mut Effects, client: &Client, send: &Sender) {
+pub fn open(state: &mut State, effects: &mut Effects, client: &AgentHandle, send: &Sender) {
     state.open_panel(Panel::Model);
     if let Some(index) = state
         .session_model
@@ -63,7 +63,7 @@ pub fn handle_key(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) {
     if let Some(form) = state.model_form.as_mut() {

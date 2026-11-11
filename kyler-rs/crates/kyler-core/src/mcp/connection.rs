@@ -79,6 +79,11 @@ impl Slot {
         }
     }
     pub(super) async fn change(self: &Arc<Self>, action: McpAction) {
+        self.change_inner(action).await;
+        self.changes
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
+    }
+    async fn change_inner(self: &Arc<Self>, action: McpAction) {
         let _operation = self.operation.lock().await;
         if self.retired.load(Ordering::SeqCst) && !matches!(action, McpAction::Disconnect) {
             return;
@@ -139,6 +144,8 @@ impl Slot {
             return;
         }
         self.state.write().unwrap().0 = McpStatus::Connecting;
+        self.changes
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
         let connecting = tokio::time::timeout(
             Duration::from_secs(self.settings.connect_timeout_seconds),
             self.connect(),
@@ -155,7 +162,10 @@ impl Slot {
                         if slot.strong_count() == 0 || connection.service.is_closed() { break; }
                         if connection.changed.swap(false, Ordering::SeqCst) {
                             match tokio::time::timeout(Duration::from_secs(10), discover(&connection.service)).await {
-                                Ok(Ok(tools)) => *connection.tools.write().unwrap() = tools,
+                                Ok(Ok(tools)) => {
+                                    *connection.tools.write().unwrap() = tools;
+                                    if let Some(slot) = slot.upgrade() {slot.changes.send_modify(|revision| *revision = revision.wrapping_add(1));}
+                                },
                                 _ => { connection.enabled.store(false, Ordering::SeqCst); break; }
                             }
                         }
@@ -164,6 +174,7 @@ impl Slot {
                         let mut state = slot.state.write().unwrap();
                         if state.1.as_ref().is_some_and(|c| Arc::ptr_eq(c, &connection)) {
                             *state = (McpStatus::Failed, None, Some("Connection closed or tool refresh failed; reconnect to retry.".into()));
+                            slot.changes.send_modify(|revision| *revision = revision.wrapping_add(1));
                         }
                     }
                     connection.service.cancellation_token().cancel();

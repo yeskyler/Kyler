@@ -60,7 +60,7 @@ pub enum Command {
         #[command(subcommand)]
         command: ServiceCommand,
     },
-    /// Open the full-screen terminal interface.
+    /// Open the local in-process terminal agent (no backend service required).
     Tui {
         #[arg(long)]
         session: Option<String>,

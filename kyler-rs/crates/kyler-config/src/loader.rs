@@ -266,3 +266,25 @@ pub fn load_for_setup(path: Option<&Path>) -> Result<AppConfig> {
     }
     merged(path, &environment, false)
 }
+
+/// Load local agent settings without applying or validating service/client transport settings.
+pub fn load_local(path: Option<&Path>) -> Result<AppConfig> {
+    load_local_with_env(path, &env::vars().collect())
+}
+pub fn load_local_with_env(
+    path: Option<&Path>,
+    environment: &HashMap<String, String>,
+) -> Result<AppConfig> {
+    let mut local_environment = environment.clone();
+    local_environment.retain(|name, _| {
+        !["KYLER_CLIENT_", "KYLER_SERVER_", "KYLER_WEB_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+    });
+    let mut config = merged(path, &local_environment, false)?;
+    config.client = Default::default();
+    config.server = Default::default();
+    config.web = Default::default();
+    config.validate()?;
+    Ok(config)
+}

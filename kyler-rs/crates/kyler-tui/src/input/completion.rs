@@ -1,5 +1,6 @@
 //! Slash-command and attachment completion before composer input.
 use super::paste_image;
+use crate::agent::AgentHandle;
 use crate::{
     commands::dispatch_command,
     components::composer,
@@ -9,13 +10,11 @@ use crate::{
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use kyler_client::Client;
-
 pub(super) fn handle(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) -> bool {
     let skills = crate::components::skill_picker::candidates(state)

@@ -1,17 +1,17 @@
 use super::{Entry, Phase, State};
-use crate::components::messages::assistant::AgentMessageCell;
+use crate::agent::AgentEvent;
+use crate::components::messages::assistant::{AgentMessageCell, ReasoningCell};
 
 use std::time::Instant;
 
-use kyler_client::ClientEvent;
 use kyler_protocol::api::{event::EventPayload, permissions::ApprovalStatus, run::RunStatus};
 
 impl State {
-    pub fn stream(&mut self, event: ClientEvent) {
+    pub fn stream(&mut self, event: AgentEvent) {
         self.transcript_version += 1;
         self.dirty = true;
         match event {
-            ClientEvent::Server(event) => {
+            AgentEvent::Event(event) => {
                 if self.run.as_deref() != Some(&event.run_id) || event.seq <= self.cursor {
                     return;
                 }
@@ -19,17 +19,20 @@ impl State {
                 let queued = matches!(&event.payload, EventPayload::ToolQueued { .. });
                 match event.payload {
                     EventPayload::ContextCompaction { compaction } => {
+                        self.finish_reasoning();
                         self.finish_assistant();
                         self.compaction(compaction);
                     }
 
                     EventPayload::QuestionUpdated { question } => {
+                        self.finish_reasoning();
                         self.finish_assistant();
                         self.questions.update(question);
                         crate::questions::history(self);
                     }
                     EventPayload::ApprovalUpdated { approval } => {
                         if approval.status == ApprovalStatus::Pending {
+                            self.finish_reasoning();
                             self.finish_assistant();
                         }
                         if let Some(Entry::Tool { status, .. }) = self.entries.iter_mut().rev().find(|entry| matches!(entry, Entry::Tool { id, .. } if id == &approval.tool_call_id)) {
@@ -43,28 +46,29 @@ impl State {
                     EventPayload::RunStarted { model, .. } => self.active_model = model,
                     EventPayload::StepStarted { step } => {
                         if self.step != Some(step) {
+                            self.finish_reasoning();
                             self.finish_assistant();
                             self.step = Some(step);
                         }
                     }
-                    EventPayload::ReasoningDelta { step, text }
-                        if !self.gap && !text.is_empty() =>
-                    {
+                    EventPayload::ReasoningDelta { step, text } if !text.is_empty() => {
                         self.finish_assistant();
-                        if self.step == Some(step)
-                            && let Some(Entry::Message { role, content }) = self.entries.last_mut()
-                            && role == "thinking"
+                        if self.step != Some(step) {
+                            self.finish_reasoning();
+                        }
+                        if let Some(Entry::Reasoning(cell)) =
+                            self.reasoning.and_then(|index| self.entries.get_mut(index))
                         {
-                            content.push_str(&text);
+                            cell.content.push_str(&text);
                         } else {
-                            self.entries.push(Entry::Message {
-                                role: "thinking".into(),
-                                content: text,
-                            });
+                            self.reasoning = Some(self.entries.len());
+                            self.entries
+                                .push(Entry::Reasoning(ReasoningCell::streaming(text)));
                         }
                         self.step = Some(step);
                     }
-                    EventPayload::TextDelta { step, text } if !self.gap => {
+                    EventPayload::TextDelta { step, text } => {
+                        self.finish_reasoning();
                         if self.step != Some(step) {
                             self.finish_assistant();
                             self.step = Some(step);
@@ -81,6 +85,7 @@ impl State {
                         }
                     }
                     EventPayload::ToolCallDelta { call_id, name } => {
+                        self.finish_reasoning();
                         self.finish_assistant();
                         if let Some(Entry::Tool { name: current, .. }) =
                             self.entries.iter_mut().rev().find(
@@ -117,6 +122,7 @@ impl State {
                         source,
                         summary,
                     } => {
+                        self.finish_reasoning();
                         self.finish_assistant();
                         if let Some(Entry::Tool {
                             status,
@@ -209,17 +215,11 @@ impl State {
                     _ => {}
                 }
             }
-            ClientEvent::Reconnecting { attempt, .. } => {
-                self.notice(format!("Disconnected; reconnecting (attempt {attempt})…"))
-            }
-            ClientEvent::Gap { .. } => {
-                self.gap = true;
-                self.notice("Some streamed content has expired; waiting for the complete result.");
-            }
-            ClientEvent::Result(result) => {
+            AgentEvent::Result(result) => {
                 if self.run.as_deref() != Some(&result.run_id) || self.phase == Phase::Ready {
                     return;
                 }
+                self.finish_reasoning();
                 self.settle_compactions(result.status == RunStatus::Cancelled);
                 let seconds = result
                     .finished_at
@@ -230,9 +230,6 @@ impl State {
                             .unwrap_or(0)
                     });
                 if let Some(answer) = result.output {
-                    if self.gap {
-                        self.notice("Complete answer recovered from the final snapshot.");
-                    }
                     let after_activity = self
                         .entries
                         .iter()

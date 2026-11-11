@@ -1,4 +1,5 @@
-//! Single-column terminal client. Sessions, tools and sandbox authority stay on the server.
+//! Terminal UI backed by an agent running in this process.
+mod agent;
 mod app;
 mod attachments;
 mod commands;

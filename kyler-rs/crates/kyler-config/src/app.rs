@@ -60,6 +60,8 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LlmSettings {
+    /// None selects the provider/model default; explicit values override it.
+    pub enable_thinking: Option<bool>,
     pub capabilities: ModelCapabilities,
     pub base_url: String,
     pub model: String,
@@ -68,6 +70,7 @@ pub struct LlmSettings {
 impl Default for LlmSettings {
     fn default() -> Self {
         Self {
+            enable_thinking: None,
             capabilities: Default::default(),
             base_url: String::new(),
             model: String::new(),

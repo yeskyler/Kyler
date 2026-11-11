@@ -360,3 +360,57 @@ fn obsolete_search_configuration_is_ignored_without_hiding_unknown_settings() {
     assert!(!format!("{config:?}").contains("obsolete-secret"));
     assert!(loader::parse(&format!("{VALID}\n[tools.other]\nenabled=true")).is_err());
 }
+
+#[test]
+fn local_agent_ignores_service_and_client_transport_settings() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("local.toml");
+    std::fs::write(&path, format!("{VALID}\n[client]\nserver_url='not-a-url'\n[server]\nbind='0.0.0.0:30001'\n[web]\nbind='0.0.0.0:30002'\n")).unwrap();
+    let environment = HashMap::from([
+        ("KYLER_SERVER_BIND".into(), "invalid-address".into()),
+        ("KYLER_WEB_BIND".into(), "invalid-address".into()),
+        ("KYLER_CLIENT_SERVER_URL".into(), "invalid-url".into()),
+    ]);
+    let config = loader::load_local_with_env(Some(&path), &environment).unwrap();
+    assert_eq!(config.llm.model, "local-model");
+    assert!(config.server.bind.ip().is_loopback());
+    assert!(config.web.bind.ip().is_loopback());
+    assert!(loader::load_from_with_env(&path, &environment).is_err());
+}
+
+#[test]
+fn thinking_flags_parse_for_legacy_and_named_models_without_forcing_other_providers() {
+    let config = loader::parse(VALID).unwrap();
+    assert_eq!(
+        config.effective_models().profiles["default"].enable_thinking,
+        None
+    );
+    for enabled in [true, false] {
+        let config = loader::parse(&format!("{VALID}\nenable_thinking={enabled}\n")).unwrap();
+        assert_eq!(
+            config.effective_models().profiles["default"].enable_thinking,
+            Some(enabled)
+        );
+    }
+    let config = loader::parse(
+        r#"
+[models]
+default="fast"
+[models.providers.fixture]
+base_url="http://localhost:1234/v1"
+api_key="fixture"
+[models.profiles.fast]
+provider="fixture"
+model="fixture"
+context_tokens=64000
+output_tokens=2048
+enable_thinking=false
+"#,
+    )
+    .unwrap();
+    config.validate().unwrap();
+    assert_eq!(
+        config.effective_models().profiles["fast"].enable_thinking,
+        Some(false)
+    );
+}

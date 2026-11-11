@@ -31,6 +31,26 @@ pub struct View {
     pub transcript: Rect,
 }
 impl View {
+    pub fn reasoning_at(&self, column: u16, row: u16, state: &State) -> Option<usize> {
+        if !self.transcript.contains((column, row).into())
+            || self.panel.contains((column, row).into())
+        {
+            return None;
+        }
+        if !state.follow && row + 1 == self.transcript.bottom() {
+            return None;
+        }
+        let logical_row = (state.scroll + usize::from(row - self.transcript.y))
+            .checked_sub(self.welcome_height)?;
+        self.starts.iter().enumerate().find_map(|(index, start)| {
+            (*start == logical_row
+                && matches!(
+                    state.entries.get(index),
+                    Some(crate::state::Entry::Reasoning(_))
+                ))
+            .then_some(index)
+        })
+    }
     pub fn render(&mut self, frame: &mut Frame, state: &mut State) {
         self.panel = Rect::default();
         let screen = frame.area();
@@ -165,7 +185,7 @@ impl View {
                 Phase::Loading => Some("Connecting…"),
                 Phase::Submitting | Phase::Running => Some(working.as_str()),
                 Phase::Cancelling => Some("Cancelling…"),
-                Phase::Detached => Some("Disconnected · F5 retry / reconnect"),
+                Phase::Detached => Some("Local agent unavailable · F5 retry"),
                 Phase::Ready => None,
             }
         };
@@ -315,7 +335,7 @@ impl View {
             } else {
                 (
                     "Help",
-                    "/model        Model\n/permissions  Permissions\n/mcp          MCP\n/skills       Skills\n$             Select skill\n@PATH         Attach file\nCtrl+V        Paste image / text\nAlt+Backspace Remove image\nEnter         Send\nAlt+Enter     New line\nCtrl+P        Permissions\nF2            Approvals\nF3            Latest tool details\nPageUp/Down   Scroll messages\nCtrl+End      Latest message\nCtrl+N        New session\nF5            Reconnect\nCtrl+C        Cancel / exit\nCtrl+R        Restore failed input\nF10           Exit",
+                    "/model        Model\n/permissions  Permissions\n/mcp          MCP\n/skills       Skills\n$             Select skill\n@PATH         Attach file\nCtrl+V        Paste image / text\nCtrl+O        Toggle latest thought\nAlt+Backspace Remove image\nEnter         Send\nAlt+Enter     New line\nCtrl+P        Permissions\nF2            Approvals\nF3            Latest tool details\nPageUp/Down   Scroll messages\nCtrl+End      Latest message\nCtrl+N        New session\nF5            Reconnect\nCtrl+C        Cancel / exit\nCtrl+R        Restore failed input\nF10           Exit",
                     "↑↓ Scroll · Esc Back",
                 )
             };

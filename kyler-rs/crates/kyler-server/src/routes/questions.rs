@@ -44,10 +44,19 @@ pub async fn respond(
     {
         return Err(ApiError::missing());
     }
+    let snapshot = state
+        .runs
+        .store
+        .load(&session)
+        .await
+        .map_err(ApiError::storage)?;
     state
         .runs
-        .questions
-        .respond(&session, &id, &response)
+        .core_thread(&snapshot)
+        .await?
+        .handle
+        .respond_question(session, id, response)
+        .await
         .map(Json)
         .map_err(|error| ApiError::bad(&error.to_string()))
 }

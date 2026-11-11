@@ -1,4 +1,5 @@
 //! Focused panel keyboard routing and global panel shortcuts.
+use crate::agent::AgentHandle;
 use crate::{
     effects::{Effects, Sender},
     state::{Entry, Panel, State},
@@ -6,14 +7,13 @@ use crate::{
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use kyler_client::Client;
 use kyler_protocol::api::mcp::McpAction;
 
 pub(super) fn handle(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) -> Option<bool> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
