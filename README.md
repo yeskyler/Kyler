@@ -45,7 +45,7 @@ The complete package includes the backend, Web application, and Node.js runtime.
 Download and run the installer:
 
 ```sh
-curl -fL https://github.com/yeskyler/Kyler/releases/latest/download/install.sh -o install.sh
+curl -fL https://raw.githubusercontent.com/yeskyler/Kyler/main/scripts/install.sh -o install.sh
 sh install.sh
 ```
 

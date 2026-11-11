@@ -87,12 +87,7 @@ def assets(directory, version, revision):
                 if source.read() != license_path.read_bytes():
                     raise ValueError("Bundle LICENSE differs from source")
         lines.append(f"{digest.hexdigest()}  {path.name}\n")
-    installer = directory / "install.sh"
-    if installer.is_symlink() or not installer.is_file():
-        raise ValueError("Missing release install.sh")
-    if installer.read_bytes() != (ROOT / "scripts/install.sh").read_bytes():
-        raise ValueError("Release install.sh differs from the current source")
-    return bundles, installer, "".join(lines)
+    return bundles, "".join(lines)
 
 
 def collect_artifacts(source, destination, version, revision):
@@ -105,7 +100,7 @@ def collect_artifacts(source, destination, version, revision):
     files = {}
     checksums = []
     for group in groups:
-        bundles, _, sums = assets(group, version, revision)
+        bundles, sums = assets(group, version, revision)
         for bundle in bundles:
             if bundle.name in files:
                 raise ValueError("Duplicate platform archive across artifacts")
@@ -117,7 +112,6 @@ def collect_artifacts(source, destination, version, revision):
         stage.mkdir()
         for name, path in files.items():
             shutil.copy2(path, stage / name)
-        shutil.copy2(ROOT / "scripts/install.sh", stage / "install.sh")
         (stage / "SHA256SUMS").write_text("".join(sorted("".join(checksums).splitlines(keepends=True))))
         stage.rename(destination)
 
@@ -156,8 +150,8 @@ def download_asset(repo, asset, destination):
         ], cwd=ROOT, stdout=output, check=True)
 
 
-def append_assets(repo, tag, existing, bundles, installer, sums, keep_draft):
-    """Add platforms and merge checksums without replacing archives or installers."""
+def append_assets(repo, tag, existing, bundles, sums, keep_draft):
+    """Add platforms and merge checksums without replacing archives."""
     endpoint = f"repos/{repo}/releases/{existing['id']}/assets"
     remote = github_pages(endpoint)
     by_name = {asset["name"]: asset for asset in remote}
@@ -190,7 +184,7 @@ def append_assets(repo, tag, existing, bundles, installer, sums, keep_draft):
                     digest = "sha256:" + hashlib.sha256((directory / "recover").read_bytes()).hexdigest()
                 previous[name] = digest[7:].lower()
         pending = []
-        for path in [*bundles, installer]:
+        for path in bundles:
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             if path.name in previous and previous[path.name] != digest:
                 raise ValueError(f"Existing checksum differs: {path.name}")
@@ -257,7 +251,7 @@ def main():
     repo = repository(run("git", "remote", "get-url", "origin"))
     if args.collect:
         collect_artifacts(args.collect.resolve(), args.artifacts.resolve(), version, revision)
-    bundles, installer, sums = assets(args.artifacts.resolve(), version, revision)
+    bundles, sums = assets(args.artifacts.resolve(), version, revision)
     available_targets = {path.name[len(f"kyler-v{version}-"):-7] for path in bundles}
     if not set(args.require_target).issubset(available_targets):
         raise ValueError("A required native target is missing from the release")
@@ -265,7 +259,7 @@ def main():
     local = subprocess.run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], cwd=ROOT, text=True, capture_output=True)
     if local.returncode == 0 and local.stdout.strip() != revision:
         raise ValueError("Existing local tag points to a different commit; it will not be moved")
-    plan = {"repository": repo, "tag": tag, "commit": revision, "assets": [p.name for p in bundles] + ["SHA256SUMS", "install.sh"], "draft": args.draft, "prerelease": "-" in version.split("+")[0]}
+    plan = {"repository": repo, "tag": tag, "commit": revision, "assets": [p.name for p in bundles] + ["SHA256SUMS"], "draft": args.draft, "prerelease": "-" in version.split("+")[0]}
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return
@@ -280,7 +274,7 @@ def main():
     if existing and not remote_revision:
         raise ValueError("Existing release tag is missing; it will not be recreated")
     if existing:
-        append_assets(repo, tag, existing, bundles, installer, sums, args.draft)
+        append_assets(repo, tag, existing, bundles, sums, args.draft)
         return
     if not remote_revision and args.require_existing_tag:
         raise ValueError("The release tag is missing from origin; it will not be recreated")
@@ -291,7 +285,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="kyler-release-") as temporary:
         manifest = Path(temporary) / "SHA256SUMS"
         manifest.write_text(sums)
-        command = ["gh", "release", "create", tag, *(str(p) for p in bundles), str(manifest), str(installer), "--repo", repo, "--verify-tag", "--generate-notes", "--title", f"Kyler {version}", "--draft"]
+        command = ["gh", "release", "create", tag, *(str(p) for p in bundles), str(manifest), "--repo", repo, "--verify-tag", "--generate-notes", "--title", f"Kyler {version}", "--draft"]
         if plan["prerelease"]:
             command.append("--prerelease")
         run(*command)
@@ -305,5 +299,5 @@ if __name__ == "__main__":
         main()
     except (ValueError, OSError, KeyError, tarfile.TarError, subprocess.CalledProcessError) as error:
         print(f"Error: {error}", file=sys.stderr)
-        print("Release operation failed. Uploaded assets may remain; inspect the release before retrying. Existing archives and installers are never overwritten.", file=sys.stderr)
+        print("Release operation failed. Uploaded assets may remain; inspect the release before retrying. Existing archives are never overwritten.", file=sys.stderr)
         sys.exit(1)
