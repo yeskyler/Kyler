@@ -49,8 +49,9 @@ curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-Follow setup to configure the model, API URL, API key, and service addresses.
-The backend and Web service start automatically. Open **http://127.0.0.1:30002**.
+Follow setup to configure the model, API URL, API key, and local or local-network access.
+The backend and Web service start automatically. Open the displayed Web address
+and sign in with the generated Web token (`kyler service token`).
 
 ```sh
 kyler service status
@@ -71,12 +72,12 @@ cd Kyler
 Configure the backend on first use, then start it. `cargo run` builds it automatically:
 
 ```sh
-cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
+cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --web
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```
 
 Both services use `~/.kyler/config.toml` by default. Skip `configure` if it is already
-configured. Start Web in a second terminal from the repository root:
+configured with a Web token. Start Web in a second terminal from the repository root:
 
 ```sh
 cd web

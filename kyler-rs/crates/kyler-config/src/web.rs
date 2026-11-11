@@ -33,6 +33,8 @@ impl WebSettings {
         );
         if self.enabled {
             ensure!(self.bind.port() > 0, "Web service requires a fixed port");
+            // Legacy loopback configurations must remain restorable during upgrade rollback.
+            // Managed startup generates a token; the Web gateway requires it in both modes.
             ensure!(
                 self.bind.ip().is_loopback() || !self.access_token.is_empty(),
                 "non-loopback Web binding requires web.access_token"
@@ -86,7 +88,7 @@ mod tests {
         assert!(!is_local_backend(bind, "https://example.com"));
     }
     #[test]
-    fn public_web_requires_authentication_and_addresses_cannot_conflict() {
+    fn legacy_loopback_and_authenticated_network_bindings_cannot_conflict() {
         let backend = "127.0.0.1:30001".parse().unwrap();
         let mut web = WebSettings {
             enabled: true,
@@ -94,7 +96,9 @@ mod tests {
             ..Default::default()
         };
         assert!(web.validate(backend).is_err());
-        web.access_token = SecretString::new("test-password");
+        web.bind = "127.0.0.1:30002".parse().unwrap();
+        assert!(web.validate(backend).is_ok());
+        web.access_token = SecretString::new("test-token");
         assert!(web.validate(backend).is_ok());
         web.bind = "0.0.0.0:30001".parse().unwrap();
         assert!(web.validate(backend).is_err());

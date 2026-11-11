@@ -1,7 +1,7 @@
 # Troubleshooting
 
 Record the installed version, service status, and relevant log entries before diagnosing
-a failure. Redact model keys, backend tokens, Web passwords, and private tool output
+a failure. Redact model keys, backend tokens, Web tokens, and private tool output
 before sharing diagnostics.
 
 ```sh
@@ -77,8 +77,8 @@ managed installation, use `kyler service start --restart` after configuration
 changes. For manual Next.js production serving, run `npm run build` from `web/` after
 source changes; `npm run start` serves the existing build.
 
-Check `client.server_url`, backend authentication, and the Web log. A public Web binding
-needs its configured access password. Public backend bindings also restrict workspace
+Check `client.server_url`, backend authentication, and the Web log. Web access requires a configured token in both local and network modes.
+Run `kyler service token` and enter the result on the login page. Public backend bindings also restrict workspace
 selection. See [configuration](configuration.md) and [installation](installation.md).
 
 ## Tool execution failures

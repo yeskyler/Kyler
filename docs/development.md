@@ -81,7 +81,7 @@ workspaces and session stores.
 For first-time backend setup from a checkout:
 
 ```sh
-cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
+cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --web
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```
 

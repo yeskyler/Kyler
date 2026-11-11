@@ -21,9 +21,6 @@ impl Prompts {
         self.completed = 0;
         eprintln!("\nKyler · {title}\n");
     }
-    pub fn repeat_last(&mut self) {
-        self.completed = self.completed.saturating_sub(1);
-    }
     fn step<T>(&mut self, label: &str, read: impl FnOnce(&str) -> Result<T>) -> Result<T> {
         let label = format!("[{}] {label}", self.completed + 1);
         let value = read(&label)?;
@@ -36,17 +33,13 @@ impl Prompts {
     pub fn api_url(&mut self, label: &str, default: &str) -> Result<String> {
         self.step(label, |label| api_url(label, default))
     }
-    pub fn address(
-        &mut self,
-        label: &str,
-        default: std::net::SocketAddr,
-    ) -> Result<std::net::SocketAddr> {
-        self.step(label, |label| {
+    pub fn access_scope(&mut self, lan: bool) -> Result<bool> {
+        self.step("Access scope", |label| {
             loop {
-                let value = prompt(label, &default.to_string())?;
-                match parse_address(&value) {
-                    Ok(value) => return Ok(value),
-                    Err(message) => eprintln!("{message} Try again."),
+                match prompt(label, if lan { "2" } else { "1" })?.as_str() {
+                    "1" => return Ok(false),
+                    "2" => return Ok(true),
+                    _ => eprintln!("Choose 1 for this machine or 2 for local network access."),
                 }
             }
         })
@@ -59,24 +52,6 @@ impl Prompts {
     ) -> Result<SecretString> {
         self.step(label, |label| key(label, existing, optional))
     }
-}
-pub(super) fn parse_address(
-    value: &str,
-) -> std::result::Result<std::net::SocketAddr, &'static str> {
-    let raw = value
-        .trim()
-        .strip_prefix("http://")
-        .unwrap_or(value.trim())
-        .trim_end_matches('/');
-    let raw = raw
-        .strip_prefix("localhost:")
-        .map(|port| format!("127.0.0.1:{port}"))
-        .unwrap_or_else(|| raw.into());
-    let address=raw.parse::<std::net::SocketAddr>().map_err(|_|"Use a local IP address and port, such as 127.0.0.1:30001, 0.0.0.0:30001 or [::1]:30001. TLS belongs at a reverse proxy.")?;
-    if address.port() == 0 {
-        return Err("Use a fixed port from 1 to 65535.");
-    }
-    Ok(address)
 }
 
 fn prompt(label: &str, default: &str) -> Result<String> {
@@ -343,26 +318,6 @@ mod tests {
             assert_eq!(collect(cancelled).unwrap_err().code, 130);
         }
     }
-    #[test]
-    fn listening_addresses_accept_custom_ips_and_ipv6_but_not_tls_or_ephemeral_ports() {
-        for value in [
-            "0.0.0.0:30001",
-            "http://127.0.0.1:30002/",
-            "localhost:30002",
-            "[::1]:45000",
-        ] {
-            assert!(super::parse_address(value).is_ok());
-        }
-        for value in [
-            "127.0.0.1:0",
-            "https://localhost:30002",
-            "127.0.0.1:70000",
-            "example.com/path",
-        ] {
-            assert!(super::parse_address(value).is_err());
-        }
-    }
-
     #[test]
     fn api_urls_reject_credentials_and_completion_endpoints() {
         for value in ["https://example.com/v1", "http://127.0.0.1:3000/v1/"] {

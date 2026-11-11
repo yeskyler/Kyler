@@ -23,8 +23,8 @@ The maintainer should document these details when establishing the release polic
 
 ## Operating guidance
 
-- Keep services on loopback for local use. Public Web bindings require an access
-  password; use TLS at a reverse proxy across untrusted networks.
+- Keep services on loopback for local use. Web access requires a token in both modes;
+  use TLS at a reverse proxy across untrusted networks.
 - Keep backend tokens and model keys on the server. Restrict access to configuration,
   service records, logs, and conversation storage.
 - Use workspace access or read-only permissions when they meet the task's needs.

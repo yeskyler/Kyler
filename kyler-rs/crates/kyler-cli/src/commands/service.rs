@@ -1,3 +1,4 @@
+mod addresses;
 mod web;
 
 use super::configure::config_path;
@@ -120,6 +121,9 @@ async fn backend_execute(
         Err(e) => return Err(CliError::io(e)),
     };
     match command {
+        ServiceCommand::Token { .. } => {
+            return Err(failure("Unsupported backend service operation"));
+        }
         ServiceCommand::Status => {
             if let Some(record) = &record {
                 let state = probe(&config, record).await?;
@@ -389,11 +393,31 @@ pub async fn execute(explicit: Option<&Path>, command: &ServiceCommand, json: bo
     let lock = private_file(&directory.join("services.lock"))?;
     lock.try_lock()
         .map_err(|_| failure("Another service operation is in progress."))?;
-    let config =
+    let mut config =
         loader::load_for_setup(Some(&path)).map_err(|e| CliError::new(2, e.to_string()))?;
     match command {
+        ServiceCommand::Token { reset } => {
+            let token = if *reset {
+                super::access::reset_web_token(&path)?
+            } else {
+                config.web.access_token.clone()
+            };
+            if token.is_empty() {
+                return Err(CliError::new(
+                    2,
+                    "No Web token configured. Run kyler configure --web.",
+                ));
+            }
+            if json {
+                output::json(&serde_json::json!({"token":token.expose()}))?;
+            } else {
+                output::text(&format!("{}\n", token.expose()))?;
+            }
+        }
         ServiceCommand::Start { restart } => {
             if config.web.enabled {
+                config.web.access_token =
+                    super::access::ensure_web_token(&path, &config.web.access_token)?;
                 web::check_bundle()?;
                 config
                     .web
@@ -420,6 +444,8 @@ pub async fn execute(explicit: Option<&Path>, command: &ServiceCommand, json: bo
                 output::json(
                     &serde_json::json!({"running":backend["running"],"backend":backend,"web":web}),
                 )?;
+            } else {
+                addresses::print(&config);
             }
         }
         ServiceCommand::Stop => {
@@ -466,6 +492,9 @@ pub async fn execute(explicit: Option<&Path>, command: &ServiceCommand, json: bo
                     },
                     web["url"].as_str().unwrap_or("not configured")
                 );
+                if running {
+                    addresses::print(&config);
+                }
             }
         }
     }

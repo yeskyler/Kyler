@@ -17,6 +17,14 @@ export class KylerApiError extends Error {
   }
 }
 
+export function redirectToLogin() {
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.assign(
+      `/login?next=${encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)}`,
+    );
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/kyler/${path}`, {
     ...init,
@@ -27,6 +35,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
+    if (response.status === 401) redirectToLogin();
     const error = await response.json().catch(() => ({}));
     throw new KylerApiError(
       error.message ?? error.error?.message ?? `Kyler request failed (${response.status}).`,
@@ -90,7 +99,10 @@ async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => 
         signal,
         cache: "no-store",
       });
-      if (!response.ok) throw new Error(`Cannot read run events (${response.status}).`);
+      if (!response.ok) {
+        if (response.status === 401) redirectToLogin();
+        throw new KylerApiError(`Cannot read run events (${response.status}).`, response.status);
+      }
       if (retries > 0) onReconnect?.();
       for await (const event of readEvents(response)) {
         if (event.seq <= cursor) continue;
@@ -100,7 +112,7 @@ async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => 
         if (["run_completed", "run_failed", "run_cancelled"].includes(event.type)) return;
       }
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted || (error instanceof KylerApiError && error.status === 401)) throw error;
       if (retries >= 3) throw error;
     }
     if (++retries > 3)

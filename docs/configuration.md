@@ -65,7 +65,7 @@ version control.
 | `KYLER_LLM_API_KEY` / `OPENAI_API_KEY` | Model key, with the Kyler variable taking precedence |
 | `KYLER_SERVER_BIND` / `KYLER_SERVER_TOKEN` | Backend listen address and token |
 | `KYLER_CLIENT_SERVER_URL` / `KYLER_CLIENT_TOKEN` | Backend client endpoint and token |
-| `KYLER_WEB_BIND` / `KYLER_WEB_TOKEN` / `KYLER_WEB_ENABLED` | Web listen address, password, and enabled flag |
+| `KYLER_WEB_BIND` / `KYLER_WEB_TOKEN` / `KYLER_WEB_ENABLED` | Web listen address, access token, and enabled flag |
 | `KYLER_SESSION_DIR` / `KYLER_SESSION_ENABLED` | Session storage |
 | `KYLER_MAX_STEPS` / `KYLER_LOG_FILTER` | Execution limit and log filter |
 
@@ -140,3 +140,8 @@ Streaming reasoning appears separately from the final answer. Current-turn tool
 continuations include the associated `reasoning_content` and count it in the input
 budget. Reasoning from prior turns is not resent. Thinking may increase response
 latency and token usage; this setting does not automatically raise reasoning effort.
+
+Web access uses `[web].access_token` in both local and network modes. Setup generates
+it automatically; `kyler service token` displays it and `--reset` rotates it. The
+browser exchanges this token for a signed session cookie. Managed Web services read
+the token from the configuration so rotation invalidates old cookies without a restart.

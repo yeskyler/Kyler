@@ -50,7 +50,8 @@ sh install.sh
 ```
 
 按提示配置模型、API 地址、密钥和服务地址，前后端服务会自动启动。
-在浏览器打开 **http://127.0.0.1:30002**。
+在浏览器打开安装结束时显示的 Web 地址，粘贴自动生成的 Web token 登录。
+使用 `kyler service token` 查看 token。
 
 ```sh
 kyler service status
@@ -71,11 +72,11 @@ cd Kyler
 首次使用时配置后端，然后启动；`cargo run` 会自动完成所需的编译：
 
 ```sh
-cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --addresses
+cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --web
 cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
 ```
 
-前后端默认使用 `~/.kyler/config.toml`。已有有效配置时，可以跳过 `configure`。
+前后端默认使用 `~/.kyler/config.toml`。已有包含 Web token 的有效配置时，可以跳过 `configure`。
 在另一个终端中，从仓库根目录启动 Web：
 
 ```sh

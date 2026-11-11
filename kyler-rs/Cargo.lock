@@ -2112,6 +2112,7 @@ dependencies = [
  "clap",
  "crossterm",
  "futures",
+ "getrandom 0.3.4",
  "kyler-client",
  "kyler-config",
  "kyler-core",

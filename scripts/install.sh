@@ -334,14 +334,20 @@ if [ "$(command -v kyler 2>/dev/null || true)" != "$installed_binary" ]; then pr
 step 6 'Start and check services'
 if [ "$start_server" = true ]; then
     printf 'Starting services...\n'
-    if ! installed_service service start --restart; then
+    if ! installed_service --json service start --restart >/dev/null; then
         rollback || fail 'Automatic recovery needs attention; inspect service status and logs.'
         fail 'Services could not start. Check kyler service status, ~/.kyler/logs/server.log and ~/.kyler/logs/web.log.'
     fi
     printf '\nKyler · Service status and management\n\n'
     installed_service service status
+    if web_token=$(installed_service service token 2>/dev/null); then
+        printf '\nWeb token: %s\n' "$web_token"
+        unset web_token
+    else
+        printf '\nWeb token unavailable. Run kyler configure --web.\n'
+    fi
 else printf '\nKyler · Service status and management\n\nServices not started.\n'; fi
 printf '\nInstallation complete.\n'
 printf '\nConfiguration: %s\n' "$config_path"
-printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n'
+printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n  Token:    kyler service token\n'
 printf '\nRun in your project:\n  kyler tui\n'
