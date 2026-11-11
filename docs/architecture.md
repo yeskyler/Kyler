@@ -176,6 +176,11 @@ Project directories and other sessions remain unchanged.
 
 ## Tool progress events
 
+While a model streams tool calls, `tool_call_delta` announces the call ID and the
+accumulated name so Web and TUI can display preparation before arguments finish.
+Partial arguments are neither published nor executed. Identity updates reuse the same
+card; cancellation or failure settles unfinished preparation along with queued tools.
+
 After recording a model's complete tool-call batch, the runtime emits `tool_queued` for
 every call before authorizing and executing calls in order. `tool_started` means
 execution has begun; `tool_finished` also covers calls refused by approval. Web and TUI

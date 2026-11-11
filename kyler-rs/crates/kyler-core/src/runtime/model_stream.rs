@@ -159,6 +159,7 @@ impl Agent {
                 }
                 for delta in choice.delta.standard.tool_calls.unwrap_or_default() {
                     let call = calls.entry(delta.index).or_default();
+                    let previous = (call.0.clone(), call.1.clone());
                     if let Some(id) = delta.id {
                         call.0.push_str(&id);
                     }
@@ -169,6 +170,15 @@ impl Agent {
                         if let Some(arguments) = function.arguments {
                             call.2.push_str(&arguments);
                         }
+                    }
+                    // Only publish identity changes; partial arguments stay private and unparsed.
+                    if !call.0.is_empty() && (call.0 != previous.0 || call.1 != previous.1) {
+                        events
+                            .emit(AgentStreamEvent::ToolCallDelta {
+                                call_id: call.0.clone(),
+                                name: call.1.clone(),
+                            })
+                            .await?;
                     }
                 }
                 if let Some(reason) = choice.finish_reason {

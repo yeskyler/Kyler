@@ -1337,3 +1337,66 @@ test("history orders recent activity first after merging saved and pending sessi
   const refreshed = mergeSessionHistory([{ ...saved[0], updated_at: 500 }, saved[1]], local);
   assert.equal(refreshed[0].updated_at, 500);
 });
+
+test("tool preparation and running render before a gated tool result without duplicate cards", async (t) => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  t.mock.method(globalThis, "fetch", async (path: string) => {
+    if (path.endsWith("/runs")) return Response.json({ run_id: "preparing" });
+    return new Response(
+      new ReadableStream({
+        async start(controller) {
+          const send = (event: object) =>
+            controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+          send({ seq: 1, type: "tool_call_delta", call_id: "call", name: "read" });
+          send({ seq: 2, type: "tool_call_delta", call_id: "call", name: "read_file" });
+          send({
+            seq: 3,
+            type: "tool_queued",
+            call_id: "call",
+            name: "read_file",
+            summary: "Read source",
+            activity: "explore",
+          });
+          send({
+            seq: 4,
+            type: "tool_started",
+            call_id: "call",
+            name: "read_file",
+            summary: "Read source",
+            activity: "explore",
+          });
+          await gate;
+          send({ seq: 5, type: "tool_finished", call_id: "call", status: "success" });
+          send({ seq: 6, type: "run_completed", output: "Done" });
+          controller.close();
+        },
+      }),
+    );
+  });
+  const states: unknown[] = [];
+  try {
+    for await (const update of chatAdapter("session", () => {}).run({
+      messages: [{ role: "user", content: [{ type: "text", text: "Read" }], attachments: [] }],
+      abortSignal: new AbortController().signal,
+    } as never) as AsyncGenerator<ChatModelRunResult>) {
+      const tools = update.content?.filter((part) => part.type === "tool-call") ?? [];
+      assert.equal(tools.length, 1);
+      const tool = tools[0];
+      if (tool.type !== "tool-call") throw new Error("Expected tool");
+      const state = tool.providerMetadata?.kyler?.state;
+      states.push(state);
+      if (state === "running") {
+        assert.equal(tool.result, undefined);
+        assert.equal(tool.toolName, "read_file");
+        assert.equal(tool.providerMetadata?.kyler?.summary, "Read source");
+        finish();
+      }
+    }
+  } finally {
+    finish();
+  }
+  assert.deepEqual(states.slice(0, 5), ["preparing", "preparing", "queued", "running", "finished"]);
+});

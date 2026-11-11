@@ -43,6 +43,10 @@ pub enum EventPayload {
         step: u32,
         text: String,
     },
+    ToolCallDelta {
+        call_id: String,
+        name: String,
+    },
     ToolQueued {
         call_id: String,
         name: String,
@@ -92,6 +96,7 @@ impl EventPayload {
             Self::StepStarted { .. } => "step_started",
             Self::ReasoningDelta { .. } => "reasoning_delta",
             Self::TextDelta { .. } => "text_delta",
+            Self::ToolCallDelta { .. } => "tool_call_delta",
             Self::ToolQueued { .. } => "tool_queued",
             Self::ToolStarted { .. } => "tool_started",
             Self::ToolFinished { .. } => "tool_finished",

@@ -647,3 +647,46 @@ fn compaction_updates_one_separator_and_stops_when_cancelled() {
     let lines = transcript::lines_with_width(&state.entries, 80);
     assert!(format!("{lines:?}").contains("Context compacted"));
 }
+
+#[test]
+fn preparing_tool_is_updated_in_place_and_settled_on_cancel() {
+    let mut state = ready();
+    state.run = Some("run".into());
+    state.phase = Phase::Running;
+    server(
+        &mut state,
+        1,
+        EventPayload::ToolCallDelta {
+            call_id: "a".into(),
+            name: "read".into(),
+        },
+    );
+    server(
+        &mut state,
+        2,
+        EventPayload::ToolCallDelta {
+            call_id: "a".into(),
+            name: "read_file".into(),
+        },
+    );
+    assert_eq!(
+        state
+            .entries
+            .iter()
+            .filter(|e| matches!(e, Entry::Tool { .. }))
+            .count(),
+        1
+    );
+    assert!(state.entries.iter().any(|e| matches!(e, Entry::Tool { name, status, .. } if name == "read_file" && status == "preparing")));
+    let ClientEvent::Result(mut info) = result("") else {
+        unreachable!()
+    };
+    info.status = RunStatus::Cancelled;
+    state.stream(ClientEvent::Result(info));
+    assert!(
+        state
+            .entries
+            .iter()
+            .any(|e| matches!(e, Entry::Tool { status, .. } if status == "cancelled"))
+    );
+}

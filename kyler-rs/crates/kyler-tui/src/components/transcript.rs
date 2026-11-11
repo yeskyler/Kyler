@@ -165,7 +165,7 @@ pub fn tool_rows(entries: &[Entry], width: u16) -> Vec<Line<'static>> {
         let blocked = group.iter().any(|entry| matches!(entry, Entry::Tool { status, .. } if matches!(status.as_str(), "denied" | "permission_denied" | "pending" | "cancelled")));
         let running = group
             .iter()
-            .any(|entry| matches!(entry, Entry::Tool { status, .. } if status == "running"));
+            .any(|entry| matches!(entry, Entry::Tool { status, .. } if matches!(status.as_str(), "preparing" | "running")));
         let queued = group
             .iter()
             .any(|entry| matches!(entry, Entry::Tool { status, .. } if status == "queued"));
@@ -283,6 +283,7 @@ fn tool_status(status: &str) -> (&'static str, Color, &'static str) {
     match status {
         "success" => ("✓", Color::Green, ""),
         "unknown" => ("?", Color::DarkGray, "Outcome unknown · F3 details"),
+        "preparing" => ("◌", Color::Cyan, "Preparing call"),
         "queued" => ("○", Color::DarkGray, "Queued"),
         "running" => ("◌", Color::Cyan, ""),
         "cancelled" => ("–", Color::DarkGray, "Cancelled"),

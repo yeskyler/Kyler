@@ -61,38 +61,44 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
     (props.result === undefined &&
       messageStatus?.type === "incomplete" &&
       messageStatus.reason === "cancelled");
+  const preparing = !cancelled && data?.state === "preparing" && props.result === undefined;
   const queued = !cancelled && data?.state === "queued" && props.result === undefined;
   const failed = !cancelled && (props.isError || props.status.type === "incomplete");
   const waiting =
     !cancelled && (data?.state === "approval" || props.status.type === "requires-action");
   const running =
+    !preparing &&
     !queued &&
     !cancelled &&
     !failed &&
     !waiting &&
     (data?.state === "running" || props.status.type === "running");
-  const StatusIcon = queued
-    ? ClockIcon
-    : cancelled
-      ? MinusIcon
-      : failed
-        ? XCircleIcon
-        : waiting
-          ? ShieldQuestionIcon
-          : running
-            ? LoaderCircleIcon
-            : CheckIcon;
-  const status = queued
-    ? "Queued"
-    : cancelled
-      ? "Cancelled"
-      : failed
-        ? "Failed"
-        : waiting
-          ? "Approval required"
-          : running
-            ? "Running"
-            : "Completed";
+  const StatusIcon = preparing
+    ? LoaderCircleIcon
+    : queued
+      ? ClockIcon
+      : cancelled
+        ? MinusIcon
+        : failed
+          ? XCircleIcon
+          : waiting
+            ? ShieldQuestionIcon
+            : running
+              ? LoaderCircleIcon
+              : CheckIcon;
+  const status = preparing
+    ? "Preparing tool call"
+    : queued
+      ? "Queued"
+      : cancelled
+        ? "Cancelled"
+        : failed
+          ? "Failed"
+          : waiting
+            ? "Approval required"
+            : running
+              ? "Running"
+              : "Completed";
   const source = typeof data?.sourceLabel === "string" ? data.sourceLabel : undefined;
   const now = Date.now();
   const elapsed =
@@ -121,7 +127,7 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
       >
         <StatusIcon
           aria-hidden
-          className={`size-3.5 shrink-0 ${running ? "animate-spin motion-reduce:animate-none" : ""}`}
+          className={`size-3.5 shrink-0 ${running || preparing ? "animate-spin motion-reduce:animate-none" : ""}`}
         />
         <span className="max-w-[45%] shrink-0 truncate font-mono font-medium">
           {props.toolName}
@@ -134,6 +140,7 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
             {source}
           </span>
         )}
+        {preparing && <span className="shrink-0 text-[10px]">Preparing call</span>}
         {queued && <span className="shrink-0 text-[10px]">Queued</span>}
         {cancelled && <span className="shrink-0 text-[10px]">Cancelled</span>}
         {waiting && <span className="shrink-0 text-[10px]">Approval required</span>}
@@ -177,7 +184,7 @@ function ActivityDetails(props: ToolCallMessagePartProps) {
   useEffect(() => {
     if (
       props.status.type === "requires-action" ||
-      ["queued", "approval"].includes(String(props.providerMetadata?.kyler?.state))
+      ["preparing", "queued", "approval"].includes(String(props.providerMetadata?.kyler?.state))
     ) {
       setLoading(false);
       return;

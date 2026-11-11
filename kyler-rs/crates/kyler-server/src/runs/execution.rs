@@ -102,6 +102,7 @@ impl RunManager {
                             let cap=(self.settings.event_buffer_max_bytes/8).min(16384);let mut rest=text.as_str();
                             while !rest.is_empty() {let part=prefix(rest,cap);rest=&rest[part.len()..];entry.publish(EventPayload::TextDelta {step,text:part});}
                         }
+                        AgentStreamEvent::ToolCallDelta {call_id,name} => entry.publish(EventPayload::ToolCallDelta {call_id:prefix(&call_id,256),name:prefix(&name,256)}),
                         AgentStreamEvent::ToolQueued {call_id,name,arguments,activity,source}=>entry.publish(EventPayload::ToolQueued {call_id:prefix(&call_id,256),summary:tool_summary(&name,&arguments,&source),name:prefix(&name,256),activity,source}),
                         AgentStreamEvent::ToolStarted {call_id,name,arguments,activity,source}=>entry.publish(EventPayload::ToolStarted {call_id:prefix(&call_id,256),summary:tool_summary(&name,&arguments,&source),name:prefix(&name,256),activity,source}),
                         AgentStreamEvent::ToolFinished {call_id,name,status,output}=>entry.publish(EventPayload::ToolFinished {call_id:prefix(&call_id,256),name:prefix(&name,256),status:if status==kyler_core::context::ToolResultStatus::Success {"success"} else {"error"}.into(),output_bytes:output.len(),error:if status==kyler_core::context::ToolResultStatus::Success {None} else {output.lines().find(|line|!line.trim().is_empty()).map(|line|prefix(line,240))}}),
