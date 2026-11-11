@@ -779,5 +779,48 @@ class SandboxSetupTests(unittest.TestCase):
         self.assertNotIn("apt install -y bubblewrap", commands)
 
 
+class PublicWebAddressTests(unittest.TestCase):
+    def render(self, bind="0.0.0.0:30002", host="", detected="203.0.113.7"):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "runtime").mkdir()
+            (root / "runtime/node").symlink_to(shutil.which("node"))
+            config = root / "config.toml"
+            config.write_text('[server]\nbind = "127.0.0.1:30001"\n[web]\nenabled = true\nbind = "'+bind+'"\n[client]\nserver_url = "http://127.0.0.1:30001"\n')
+            tools = root / "bin"
+            tools.mkdir()
+            log = root / "curl-called"
+            curl = tools / "curl"
+            curl.write_text('#!/bin/sh\ntouch "$PUBLIC_TEST_LOG"\nprintf "%s" "$PUBLIC_TEST_IP"\n')
+            curl.chmod(0o755)
+            text = INSTALLER.read_text()
+            function = text[text.index("show_public_web() {"):text.index("transfer() {")]
+            env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ["PATH"], KYLER_PUBLIC_HOST=host, PUBLIC_TEST_LOG=str(log), PUBLIC_TEST_IP=detected)
+            result = subprocess.run(["sh", "-c", function+'\nconfig_path=$1; bundle=$2; show_public_web', "test", str(config), str(root)], env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout, log.exists()
+
+    def test_detects_public_address_without_changing_listen_address(self):
+        output, queried = self.render()
+        self.assertTrue(queried)
+        self.assertIn("http://203.0.113.7:30002", output)
+        self.assertIn("not been verified", output)
+
+    def test_explicit_public_host_skips_external_query(self):
+        output, queried = self.render(host="chat.example.com")
+        self.assertFalse(queried)
+        self.assertIn("http://chat.example.com:30002", output)
+
+    def test_loopback_binding_does_not_advertise_public_access(self):
+        output, queried = self.render(bind="127.0.0.1:30002")
+        self.assertFalse(queried)
+        self.assertEqual(output, "")
+
+    def test_invalid_detection_is_nonfatal_and_shows_manual_address(self):
+        output, queried = self.render(detected="<html>bad gateway</html>")
+        self.assertTrue(queried)
+        self.assertIn("http://YOUR_SERVER_PUBLIC_IP:30002", output)
+
+
 if __name__ == "__main__":
     unittest.main()
