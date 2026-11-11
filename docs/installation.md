@@ -11,12 +11,12 @@ Run source-repository commands from the repository root.
 Download and execute the installer:
 
 ```sh
-curl -fL https://raw.githubusercontent.com/yeskyler/Kyler/main/scripts/install.sh -o install.sh
+curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-The installer is distributed separately from Release assets. The source URL above
-can be replaced by the installation server URL once deployed. The installer selects
+The installer is hosted on the installation server, separately from Release assets.
+It selects
 the latest published non-prerelease version and detects the
 host platform, downloads the corresponding archive and `SHA256SUMS`, and validates the
 archive before installation. `--version VERSION` selects a specific published release.
