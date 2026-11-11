@@ -173,9 +173,16 @@ workspace. Local project selection requires a loopback backend listener.
 ### Service status and management
 
 After successful activation, the installer displays backend and Web status, connection
-addresses grouped by interface in network mode, the Web token, the configuration path,
-and service management commands. Interface enumeration makes no external IP requests. The default browser
-address is **http://127.0.0.1:30002**.
+local addresses plus one primary interface under `Network access` in network mode,
+the Web token, the configuration path, and service management commands. The interface
+is selected from active IPv4 links and the host's default routes (Linux route metric;
+macOS unscoped defaults before scoped defaults). Known VPN/tunnel/container links and
+reserved addresses are excluded; a scoped physical default can be selected beneath a
+VPN. Equal-priority links, multiple addresses on the selected link, missing routes or
+routing-table errors produce an identification message instead of an arbitrary URL.
+This changes display only, not listeners or routing. No external IP service is queried,
+and an interface address is not claimed to be a public IP. The default browser address
+is **http://127.0.0.1:30002**.
 
 | Operation | Command |
 | --- | --- |
