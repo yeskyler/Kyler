@@ -2,6 +2,9 @@
 """Isolated packaging setup tests; never install toolchains or use the network."""
 import argparse
 import importlib.util
+import contextlib
+import io
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -73,6 +76,79 @@ class PackageSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "curl is required"):
             package.prepare_rust(self.environment, self.root)
 
+    def test_local_node_and_license_are_reused_without_download(self):
+        self.tool("node")
+        self.tool("npm")
+        (self.root / "LICENSE").write_text("Node license")
+        scratch = self.root / "scratch"
+        scratch.mkdir()
+        details = '{"version":"v24.0.0","platform":"linux","arch":"x64"}'
+        with patch.dict(package.os.environ, self.environment, clear=True), patch.object(package.subprocess, "check_output", return_value=details), patch.object(package, "download") as fetch:
+            result = package.node_distribution(argparse.Namespace(node_dist=None, skip_build=False), scratch, "linux", "x64")
+        fetch.assert_not_called()
+        self.assertEqual((result / "bin/node").resolve(), (self.bin / "node").resolve())
+        self.assertEqual((result / "LICENSE").read_text(), "Node license")
+
+    def test_old_local_node_falls_back_to_download(self):
+        self.tool("node")
+        details = '{"version":"v20.0.0","platform":"linux","arch":"x64"}'
+        with patch.dict(package.os.environ, self.environment, clear=True), patch.object(package.subprocess, "check_output", return_value=details):
+            self.assertIsNone(package.local_node(argparse.Namespace(skip_build=False), self.root, "linux", "x64"))
+
+    def test_missing_local_npm_stops_with_actionable_error(self):
+        self.tool("node")
+        details = '{"version":"v24.0.0","platform":"linux","arch":"x64"}'
+        with patch.dict(package.os.environ, self.environment, clear=True), patch.object(package.subprocess, "check_output", return_value=details):
+            with self.assertRaisesRegex(ValueError, "npm is missing"):
+                package.local_node(argparse.Namespace(skip_build=False), self.root, "linux", "x64")
+
+    def test_local_node_downloads_only_matching_license_if_missing(self):
+        self.tool("node")
+        self.tool("npm")
+        details = '{"version":"v24.0.0","platform":"linux","arch":"x64"}'
+        def license_download(url, destination):
+            destination.write_text("Node license")
+        with patch.dict(package.os.environ, self.environment, clear=True), patch.object(package.subprocess, "check_output", return_value=details), patch.object(package, "download", side_effect=license_download) as fetch:
+            result = package.local_node(argparse.Namespace(skip_build=False), self.root, "linux", "x64")
+        self.assertTrue((result / "LICENSE").is_file())
+        self.assertEqual(fetch.call_args.args[0], "https://raw.githubusercontent.com/nodejs/node/v24.0.0/LICENSE")
+
+    def test_skip_build_packages_fixture_with_all_nine_steps(self):
+        project = self.root / "project"
+        web = project / "web"
+        (web / ".next/standalone").mkdir(parents=True)
+        (web / ".next/static").mkdir()
+        (web / ".next/standalone/server.js").write_text("server")
+        (web / "README.md").write_text("Web")
+        (web / "package-lock.json").write_text('{"packages":{}}')
+        (project / "docs").mkdir()
+        (project / "scripts").mkdir()
+        self.tool("kyler")
+        distribution = self.root / "runtime"
+        self.tool("node", distribution / "bin")
+        (distribution / "LICENSE").write_text("Node license")
+        output = self.root / "dist"
+        log = io.StringIO()
+        def version(command, **kwargs):
+            if Path(command[0]).name == "node":
+                return json.dumps({"version": "v24.0.0", "platform": "linux", "arch": "x64"})
+            return "kyler 0.1.0"
+        with patch.object(package, "ROOT", project), patch.object(package, "WEB", web), patch.object(package.platform, "system", return_value="Linux"), patch.object(package.platform, "machine", return_value="x86_64"), patch.object(package.subprocess, "check_output", side_effect=version), patch.object(package.subprocess, "run") as run, patch("sys.argv", ["package.py", "--skip-build", "--node-dist", str(distribution), "--binary", str(self.bin / "kyler"), "--output", str(output)]), contextlib.redirect_stdout(log):
+            package.main()
+        run.assert_not_called()
+        text = log.getvalue()
+        positions = [text.index(f"[{number}/9]") for number in range(1, 10)]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("Packaging complete", text)
+        archive = output / "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+        self.assertFalse((output / "install.sh").exists())
+        self.assertIn(package.digest(archive), (output / "SHA256SUMS").read_text())
+        with tarfile.open(archive) as bundle:
+            prefix = archive.name[:-7]
+            self.assertNotIn(prefix + "/install.sh", bundle.getnames())
+            self.assertEqual(bundle.extractfile(prefix + "/runtime/node").read(), (distribution / "bin/node").read_bytes())
+            self.assertEqual(bundle.extractfile(prefix + "/licenses/NODE-LICENSE").read(), b"Node license")
+
     def test_default_node_download_is_verified_and_includes_npm(self):
         distribution = self.root / "node-v24.0.0-linux-x64"
         self.tool("node", distribution / "bin")
@@ -89,7 +165,7 @@ class PackageSetupTests(unittest.TestCase):
         scratch = self.root / "scratch"
         scratch.mkdir()
         with patch.object(package, "download", side_effect=download) as fetch:
-            result = package.node_distribution(argparse.Namespace(node_dist=None), scratch, "linux", "x64")
+            result = package.node_distribution(argparse.Namespace(node_dist=None, download_node=True), scratch, "linux", "x64")
         self.assertTrue((result / "bin/node").is_file())
         self.assertTrue((result / "bin/npm").is_file())
         self.assertEqual(fetch.call_count, 2)
@@ -102,7 +178,7 @@ class PackageSetupTests(unittest.TestCase):
                 destination.write_bytes(b"corrupt archive")
         with patch.object(package, "download", side_effect=download):
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                package.node_distribution(argparse.Namespace(node_dist=None), self.root, "linux", "x64")
+                package.node_distribution(argparse.Namespace(node_dist=None, download_node=True), self.root, "linux", "x64")
         self.assertFalse((self.root / "node").exists())
 
 

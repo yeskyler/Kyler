@@ -28,15 +28,68 @@ def digest(path):
 def download(url, destination):
     if not url.startswith("https://"):
         raise ValueError("Release downloads must use HTTPS")
+    print(f"Downloading: {url}", flush=True)
     with urllib.request.urlopen(url, timeout=120) as source, destination.open("wb") as target:
         if not source.url.startswith("https://"):
             raise ValueError("Insecure download redirect")
-        shutil.copyfileobj(source, target)
+        received = 0
+        next_report = 8 * 1024 * 1024
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            target.write(chunk)
+            received += len(chunk)
+            if received >= next_report:
+                print(f"  Downloaded {received / (1024 * 1024):.1f} MiB", flush=True)
+                next_report = received + 8 * 1024 * 1024
+        print(f"  Download complete: {received} bytes", flush=True)
+
+
+def step(number, message):
+    print(f"\n[{number}/9] {message}", flush=True)
+
+
+def local_node(args, temporary, node_os, arch):
+    node = shutil.which("node")
+    if not node:
+        print("Local Node.js: not found.", flush=True)
+        return None
+    try:
+        details = json.loads(subprocess.check_output([
+            node, "-p", "JSON.stringify({version:process.version,platform:process.platform,arch:process.arch})",
+        ], text=True))
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        print(f"Local Node.js cannot run: {node}", flush=True)
+        return None
+    print(f"Local Node.js: {details['version']} ({details['platform']}/{details['arch']}) at {node}", flush=True)
+    if details["platform"] != node_os or details["arch"] != arch or int(details["version"].split(".")[0][1:]) < 22:
+        print("Local Node.js requires native architecture and version 22 or newer.", flush=True)
+        return None
+    if not args.skip_build and not shutil.which("npm"):
+        raise ValueError("Local Node.js is available but npm is missing; install npm or use --node-dist")
+    distribution = temporary / "local-node"
+    (distribution / "bin").mkdir(parents=True)
+    # Retain the local npm command and its installation layout; only node is bundled.
+    (distribution / "bin/node").symlink_to(Path(node).resolve())
+    prefix = Path(node).resolve().parent.parent
+    candidates = [prefix / "LICENSE", prefix / "share/doc/node/LICENSE", prefix / "share/licenses/node/LICENSE", prefix / "include/node/LICENSE"]
+    license_path = next((path for path in candidates if path.is_file()), None)
+    if license_path:
+        shutil.copy2(license_path, distribution / "LICENSE")
+        print(f"Reusing Node.js license: {license_path}", flush=True)
+    else:
+        print("Local Node.js license is missing; downloading its matching license only (no runtime download).", flush=True)
+        download(f"https://raw.githubusercontent.com/nodejs/node/{details['version']}/LICENSE", distribution / "LICENSE")
+    print("Reusing local Node.js; runtime download skipped.", flush=True)
+    return distribution
 
 
 def node_distribution(args, temporary, node_os, arch):
     if args.node_dist:
+        print(f"Using supplied Node.js distribution: {args.node_dist.resolve()}", flush=True)
         return args.node_dist.resolve()
+    if not getattr(args, "download_node", False):
+        local = local_node(args, temporary, node_os, arch)
+        if local:
+            return local
     print("Preparing the official Node.js 24 distribution...", flush=True)
     base = "https://nodejs.org/dist/latest-v24.x"
     sums = temporary / "node-checksums"
@@ -50,6 +103,7 @@ def node_distribution(args, temporary, node_os, arch):
     download(f"{base}/{filename}", archive)
     if digest(archive) != expected:
         raise ValueError("Node runtime checksum mismatch")
+    print("Node.js archive checksum verified. Extracting runtime...", flush=True)
     with tarfile.open(archive) as source:
         destination = (temporary / "node").resolve()
         for member in source.getmembers():
@@ -87,6 +141,7 @@ def prepare_rust(environment, temporary):
             "sh", str(installer), "-y", "--profile", "minimal",
             "--default-toolchain", "stable", "--no-modify-path",
         ], env=environment, check=True)
+    print("Checking Rust toolchain versions (reusing installed tools).", flush=True)
     for tool in ("rustc", "cargo"):
         if not shutil.which(tool, path=environment.get("PATH", "")):
             raise ValueError(f"{tool} is unavailable after Rust setup")
@@ -106,7 +161,7 @@ def source_revision():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--node-dist", type=Path, help="Extracted official Node distribution (bin/node and LICENSE)")
-    parser.add_argument("--download-node", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--download-node", action="store_true", help="Download official Node.js 24 instead of reusing local Node.js")
     parser.add_argument("--skip-build", action="store_true", help="Use an already-built backend and web/.next/standalone")
     parser.add_argument("--binary", type=Path, default=RUST / "target/release/kyler")
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
@@ -121,8 +176,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="kyler-package-") as scratch:
         temporary = Path(scratch)
         environment = os.environ.copy()
+        print(f"Target: {target}\nOutput: {args.output.resolve()}", flush=True)
+        step(1, "Check Rust environment")
+        if args.skip_build:
+            print("Skipped: using existing backend and Web build.", flush=True)
         if not args.skip_build:
             prepare_rust(environment, temporary)
+        step(2, "Check Node.js and npm environment")
         distribution = node_distribution(args, temporary, node_os, arch)
         node = distribution / "bin/node"
         license_path = distribution / "LICENSE"
@@ -138,9 +198,16 @@ def main():
             if not shutil.which("npm", path=environment["PATH"]):
                 raise ValueError("The Node.js distribution must provide npm for building the Web UI")
             subprocess.run(["npm", "--version"], env=environment, check=True)
+            step(3, "Build Rust backend")
             subprocess.run(["cargo", "build", "--locked", "--release", "-p", "kyler-cli"], cwd=RUST, env=environment, check=True)
+            step(4, "Install Web dependencies (npm ci)")
             subprocess.run(["npm", "ci"], cwd=WEB, env=environment, check=True)
+            step(5, "Build Web production bundle")
             subprocess.run(["npm", "run", "build"], cwd=WEB, env=environment, check=True)
+        else:
+            for number, label in [(3, "Rust backend"), (4, "Web dependencies"), (5, "Web production bundle")]:
+                step(number, f"Skip {label}: --skip-build")
+        step(6, "Collect backend, Node.js, Web, documentation and licenses")
         binary = args.binary.resolve()
         reported = subprocess.check_output([binary, "--version"], text=True, env={k: v for k, v in environment.items() if k not in ("KYLER_INTERNAL_TOOL_WORKER", "KYLER_STARTUP_TRACE")}).strip()
         if not reported.startswith("kyler "):
@@ -169,15 +236,16 @@ def main():
                 shutil.copy2(ROOT / relative, bundle / relative)
         shutil.copytree(ROOT / "docs", bundle / "docs")
         shutil.copy2(WEB / "README.md", bundle / "web/README.md")
-        shutil.copy2(ROOT / "scripts/install.sh", bundle / "install.sh")
         lock = json.loads((WEB / "package-lock.json").read_text())
         notices = [{"package": path, "version": item.get("version"), "license": item.get("license")} for path, item in lock.get("packages", {}).items() if path and not item.get("dev")]
         (bundle / "licenses/npm-packages.json").write_text(json.dumps(notices, indent=2) + "\n")
+        step(7, "Write bundle metadata and internal checksums")
         (bundle / "bundle.json").write_text(json.dumps({"version": version, "target": target, "source_revision": revision if revision == source_revision() else None, "node": details["version"], "web": "standalone", "license_note": "Project distribution licensing must be selected by the owner before public release." if not (ROOT / "LICENSE").exists() else None}, indent=2) + "\n")
         files = sorted(path for path in bundle.rglob("*") if path.is_file())
         if any("\n" in str(path) or "\r" in str(path) for path in files):
             raise ValueError("Bundle filenames cannot contain line breaks")
         (bundle / "SHA256SUMS").write_text("".join(f"{digest(path)}  {path.relative_to(bundle).as_posix()}\n" for path in files))
+        step(8, "Compress native archive")
         output = args.output / f"{name}.tar.gz"
         with tempfile.NamedTemporaryFile(dir=args.output, prefix=".package-", delete=False) as stage:
             stage_path = Path(stage.name)
@@ -187,12 +255,12 @@ def main():
             stage_path.replace(output)
         finally:
             stage_path.unlink(missing_ok=True)
+        step(9, "Write release checksums")
         sums = args.output / "SHA256SUMS"
         lines = sums.read_text().splitlines() if sums.exists() else []
         lines = [line for line in lines if line.split()[-1] != output.name]
         sums.write_text("\n".join(sorted([*lines, f"{digest(output)}  {output.name}"])) + "\n")
-        shutil.copy2(ROOT / "scripts/install.sh", args.output / "install.sh")
-        print(f"Bundle: {output}")
+        print(f"\nPackaging complete.\nBundle: {output}\nSize: {output.stat().st_size / (1024 * 1024):.1f} MiB", flush=True)
         print(f"Install: sh scripts/install.sh --bundle {output}")
 
 

@@ -21,14 +21,12 @@ class ReleaseTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="kyler-release-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        (self.root / "scripts").mkdir()
-        (self.root / "scripts/install.sh").write_text("#!/bin/sh\nexit 0\n")
         (self.root / "kyler-rs").mkdir()
         (self.root / "kyler-rs/Cargo.toml").write_text('[workspace.package]\nversion = "0.1.0"\n')
         (self.root / "LICENSE").write_text("Fixture project license")
         self.dist = self.root / "dist"
         self.dist.mkdir()
-        (self.dist / "install.sh").write_bytes((self.root / "scripts/install.sh").read_bytes())
+        (self.dist / "install.sh").write_text("Legacy installer; must never be uploaded")
         self.name = "kyler-v0.1.0-aarch64-apple-darwin.tar.gz"
         self.bundle()
         self.patch = patch.object(release, "ROOT", self.root)
@@ -48,24 +46,24 @@ class ReleaseTests(unittest.TestCase):
         digest = hashlib.sha256((self.dist / self.name).read_bytes()).hexdigest()
         (self.dist / "SHA256SUMS").write_text(f"{digest}  {self.name}\n")
 
-    def test_assets_verify_checksum_metadata_and_installer(self):
-        bundles, installer, sums = release.assets(self.dist, "0.1.0", "commit-id")
+    def test_assets_verify_checksum_and_metadata(self):
+        bundles, sums = release.assets(self.dist, "0.1.0", "commit-id")
         self.assertEqual([item.name for item in bundles], [self.name])
-        self.assertEqual(installer.name, "install.sh")
         self.assertIn(self.name, sums)
         with (self.dist / self.name).open("ab") as source:
             source.write(b"corrupted")
         with self.assertRaisesRegex(ValueError, "Checksum"):
             release.assets(self.dist, "0.1.0", "commit-id")
 
-    def test_wrong_bundle_version_and_installer_are_rejected(self):
+    def test_wrong_bundle_version_is_rejected_and_installer_is_not_required(self):
         self.bundle("0.2.0")
         with self.assertRaisesRegex(ValueError, "version or target"):
             release.assets(self.dist, "0.1.0", "commit-id")
         self.bundle()
         (self.dist / "install.sh").write_text("different")
-        with self.assertRaisesRegex(ValueError, "differs"):
-            release.assets(self.dist, "0.1.0", "commit-id")
+        bundles, sums = release.assets(self.dist, "0.1.0", "commit-id")
+        (self.dist / "install.sh").unlink()
+        self.assertEqual(release.assets(self.dist, "0.1.0", "commit-id"), (bundles, sums))
 
     def test_release_requires_matching_source_and_license(self):
         with self.assertRaisesRegex(ValueError, "source revision"):
@@ -87,7 +85,7 @@ class ReleaseTests(unittest.TestCase):
         shutil.copytree(self.dist,source / "linux")
         destination=self.root / "collected"
         release.collect_artifacts(source,destination,"0.1.0","commit-id")
-        bundles,_,sums=release.assets(destination,"0.1.0","commit-id")
+        bundles,sums=release.assets(destination,"0.1.0","commit-id")
         self.assertEqual(len(bundles),2)
         self.assertEqual(len(sums.splitlines()),2)
         with self.assertRaisesRegex(ValueError,"must not already exist"):
@@ -147,6 +145,7 @@ class ReleaseTests(unittest.TestCase):
     def test_publish_uploads_to_draft_before_publishing(self):
         commands = self.invoke()
         create = next(command for command in commands if command[:3] == ("gh", "release", "create"))
+        self.assertFalse(any(Path(str(arg)).name == "install.sh" for arg in create))
         self.assertIn("--draft", create)
         self.assertIn("--verify-tag", create)
         self.assertTrue(any(command[:2] == ("git", "push") for command in commands))
@@ -198,13 +197,19 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(any(c[:2] in [("git", "tag"), ("git", "push")] for c in commands))
         self.assertFalse(any("--slurp" in c for c in commands))
 
+    def test_append_ignores_legacy_installer_and_never_uploads_it(self):
+        legacy = {"id": 3, "name": "install.sh", "state": "uploaded", "digest": "sha256:" + "0" * 64}
+        commands = self.existing(remote_assets=[legacy])
+        uploads = [c for c in commands if c[:3] == ("gh", "release", "upload")]
+        self.assertEqual([Path(c[4]).name for c in uploads], [self.name, "SHA256SUMS"])
+
     def test_identical_assets_are_skipped_on_retry(self):
         assets = [{"id": i, "name": name, "state": "uploaded", "digest": "sha256:" + hashlib.sha256((self.dist / name).read_bytes()).hexdigest()} for i, name in enumerate([self.name, "install.sh", "SHA256SUMS"])]
         commands = self.existing(remote_assets=assets, remote_sums=(self.dist / "SHA256SUMS").read_text())
         self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in commands))
 
-    def test_conflicting_bundle_or_installer_prevents_all_uploads(self):
-        for name in (self.name, "install.sh"):
+    def test_conflicting_bundle_prevents_all_uploads(self):
+        for name in (self.name,):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Existing asset differs"):
                 self.existing(remote_assets=[{"id": 1, "name": name, "state": "uploaded", "digest": "sha256:" + "0" * 64}])
             self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
@@ -242,9 +247,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
 
     def test_older_metadata_downloads_existing_asset_for_verification(self):
-        installer = {"id": 5, "name": "install.sh", "state": "uploaded"}
+        installer = {"id": 5, "name": self.name, "state": "uploaded"}
         with self.assertRaisesRegex(ValueError, "Existing asset differs"):
-            self.existing(remote_assets=[installer], remote_installer=b"changed installer")
+            self.existing(remote_assets=[installer], remote_installer=b"changed archive")
         self.assertFalse(any(c[:3] == ("gh", "release", "upload") for c in self.commands))
 
     def test_checksum_conflict_is_rejected_before_upload(self):

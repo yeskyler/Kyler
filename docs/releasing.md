@@ -19,9 +19,14 @@ Build hosts require native compilation tools and Python 3.9+. Packaging checks f
 Rust and Cargo, including tools installed under `CARGO_HOME` or `~/.cargo/bin`. If
 they are missing, it uses curl to download the official rustup installer and installs
 the stable minimal toolchain without interactive prompts or shell profile changes.
-The build process immediately uses the installed tools. Packaging downloads the
-official latest Node.js 24 distribution, verifies its checksum, and uses its Node.js
-and npm for the build. A system Node.js installation is not required. Python, curl,
+The build process immediately uses the installed tools. Packaging prints nine numbered
+steps and retains Cargo, npm, and download output. It first checks local Node.js and
+reuses a native version 22 or newer, along with local npm. If the matching Node.js
+license is not installed, only that version's license is downloaded for the bundle.
+When local Node.js is missing or incompatible, packaging downloads the official latest
+Node.js 24 distribution and verifies its checksum. Use `--download-node` to explicitly
+request that official distribution instead. Missing npm alongside a compatible local
+Node.js produces an actionable error; install npm or supply `--node-dist`. A system Node.js installation is not required. Python, curl,
 and system compilers must already be available.
 Publishing requires Git, Python 3.9+, and an authenticated [GitHub
 CLI](https://cli.github.com/). Complete bundles include the runtime components required
@@ -55,8 +60,7 @@ and third-party notices. It does not contact GitHub or create a version tag.
 ```text
 dist/
 ├── kyler-v0.1.0-aarch64-apple-darwin.tar.gz
-├── SHA256SUMS
-└── install.sh
+└── SHA256SUMS
 ```
 
 The outer checksum file verifies downloadable archives. The archive also contains an
@@ -71,7 +75,8 @@ cannot be published by the release script.
 Build on each intended native platform. This script does not cross-compile or produce a
 platform matrix automatically. To publish several platforms together, use identical
 clean source commits and combine their `.tar.gz` archives and checksum entries in one
-directory. Keep one matching `install.sh`. Each Release contains only the platform
+directory. Publish `scripts/install.sh` separately on your installation server; neither
+packaging nor release publishing distributes it. Each Release contains only the platform
 archives supplied to the publisher.
 
 ## 3. Validate without publishing
@@ -81,8 +86,7 @@ sh scripts/release.sh 0.1.0 --dry-run
 ```
 
 Validation checks the source version, clean working tree, origin repository, archive
-checksums, platform/version metadata, source revision, project license, and matching
-installer. `--artifacts PATH` selects another directory. Dry-run is local only: no
+checksums, platform/version metadata, source revision, and project license. `--artifacts PATH` selects another directory. Dry-run is local only: no
 GitHub authentication, tag creation, push, or Release upload occurs.
 
 ## 4. Publish local bundles
@@ -104,12 +108,12 @@ The script derives the GitHub repository from `origin` and performs these steps:
 2. Verify existing local and remote tags point to the release commit.
 3. Create an annotated `v0.1.0` tag if needed and push that tag. Branches are not pushed.
 4. Generate a version-specific `SHA256SUMS`, leaving other versions out of that upload.
-5. Upload native archives, checksums, and `install.sh` to a draft Release with generated notes.
+5. Upload native archives and checksums to a draft Release with generated notes.
 6. Publish new drafts only after all uploads succeed. Versions with a prerelease suffix are marked prerelease.
 
 For an existing Release, the remote tag must already point to the local source commit.
 Missing platform archives are uploaded without replacing existing archives. Identical
-archives and installers are skipped; differing content is rejected before uploading.
+archives are skipped; differing content is rejected before uploading.
 The script downloads the current `SHA256SUMS`, preserves other platform entries, and
 replaces only that shared manifest after confirming the new uploads. Older GitHub
 asset metadata without a SHA256 digest is verified by downloading the asset.
@@ -130,7 +134,7 @@ sh scripts/release.sh 0.1.0 --draft
 The implementation uses [gh release
 create](https://cli.github.com/manual/gh_release_create) and [gh release
 edit](https://cli.github.com/manual/gh_release_edit). It never force-pushes tags,
-overwrites existing archives or installers, or deletes an existing Release. The shared
+overwrites existing archives, or deletes an existing Release. The shared
 checksum manifest is updated when platforms are added. The publishing command
 performs the publication operation without an additional interactive confirmation.
 
