@@ -169,3 +169,16 @@ Non-interactive setup accepts the environment overrides listed in
 [configuration](configuration.md). Installations always include the backend, Web UI,
 and Node.js runtime. `KYLER_REPOSITORY` selects the GitHub repository used for release
 downloads.
+
+
+When Web listens on `0.0.0.0`, successful installation also displays a suggested
+public Web URL. The installer optionally queries `https://api.ipify.org` with a
+five-second timeout; failure does not fail installation. For a known public IPv4
+address or domain, skip detection with:
+
+```sh
+KYLER_PUBLIC_HOST=your-server.example.com sh install.sh
+```
+
+The address is informational; public reachability depends on routing, cloud security
+groups, and firewall rules. Loopback-only Web services do not display a public URL.
