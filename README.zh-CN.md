@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/a3c30faf-fc88-4414-9916-643834cd35ea
 下载并运行安装程序：
 
 ```sh
-curl -fL https://raw.githubusercontent.com/yeskyler/Kyler/main/scripts/install.sh -o install.sh
+curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
