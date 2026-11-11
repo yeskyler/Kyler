@@ -8,6 +8,9 @@ Usage: sh install.sh [OPTIONS]
   --version VERSION   Download a specific release (default: latest).
   -h, --help          Show help.
 
+Downloads: https://www.kyler.work/releases first, GitHub Releases as fallback.
+Local installation: sh install.sh --bundle /path/to/kyler-platform.tar.gz
+
 Complete bundles include the backend, Web UI and Node.js runtime.
 Installation automatically adds ~/.local/bin to PATH for new terminals.
 Defaults: Backend 127.0.0.1:30001; Web 127.0.0.1:30002.
@@ -65,26 +68,82 @@ check_manifest() {
     if command -v shasum >/dev/null 2>&1; then (cd "$1" && shasum -a 256 -c SHA256SUMS >/dev/null) || fail 'Bundle checksum mismatch.';
     else (cd "$1" && sha256sum -c SHA256SUMS >/dev/null) || fail 'Bundle checksum mismatch.'; fi
 }
-download() { curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 "$1" -o "$2" || fail "Download failed: $1"; }
+step() { printf '\n[%s/6] %s\n' "$1" "$2"; }
+transfer() {
+    curl --fail --location --show-error --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        --connect-timeout 15 --speed-limit 1024 --speed-time 60 --retry 2 --retry-delay 2 "$@"
+}
+valid_version() {
+    printf '%s\n' "$1" | LC_ALL=C grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$'
+}
+manual_help() {
+    printf '\nManual installation:\n' >&2
+    printf '  curl -fL %s/%s -o %s\n' "$github_release" "$asset" "$asset" >&2
+    printf '  curl -fL %s/SHA256SUMS -o SHA256SUMS\n' "$github_release" >&2
+    if command -v shasum >/dev/null 2>&1; then
+        printf '  grep "  %s$" SHA256SUMS | shasum -a 256 -c -\n' "$asset" >&2
+    else
+        printf '  grep "  %s$" SHA256SUMS | sha256sum -c -\n' "$asset" >&2
+    fi
+    printf '  sh install.sh --bundle ./%s\n' "$asset" >&2
+    printf 'Verify the archive against SHA256SUMS before installing.\n' >&2
+}
+printf '\nKyler installer\n\nInstall location: %s/.local/share/kyler\nConfiguration: %s/.kyler/config.toml\n' "$HOME" "$HOME"
+printf 'Existing configuration can be kept with Enter. API keys are hidden.\n'
+printf 'Already downloaded a bundle? Run: sh install.sh --bundle /path/to/kyler-platform.tar.gz\n'
+step 1 'Check environment and release version'
 if [ -z "$bundle" ]; then
     command -v curl >/dev/null 2>&1 || fail 'curl is required.'
+    command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail 'Install shasum or sha256sum first.'
     case "$(uname -s)" in Darwin) os=apple-darwin ;; Linux) os=unknown-linux-gnu ;; *) fail 'This platform has no release bundle.' ;; esac
     case "$(uname -m)" in arm64|aarch64) arch=aarch64 ;; x86_64|amd64) arch=x86_64 ;; *) fail 'Unsupported architecture.' ;; esac
     repository=${KYLER_REPOSITORY:-yeskyler/Kyler}
     case "$repository" in *[!a-zA-Z0-9_./-]*|*..*|/*|*/|*/*/*) fail 'Invalid release repository.' ;; esac
+    mirror=https://www.kyler.work/releases
+    printf 'Download order: %s -> GitHub Releases\n' "$mirror"
     if [ -z "$requested_version" ]; then
-        effective=$(curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 -o /dev/null -w '%{url_effective}' "https://github.com/$repository/releases/latest") || fail 'No published release found.'
-        requested_version=${effective##*/}
+        printf 'Checking latest version on Kyler download server...\n'
+        if transfer --silent --max-time 45 "$mirror/latest.txt" -o "$scratch/latest" &&
+            requested_version=$(cat "$scratch/latest") && valid_version "$requested_version"; then
+            :
+        else
+            printf 'Server version lookup failed; checking GitHub Releases...\n'
+            effective=$(transfer --silent --max-time 45 -o /dev/null -w '%{url_effective}' "https://github.com/$repository/releases/latest") || fail 'Cannot determine latest version. Retry with --version VERSION.'
+            requested_version=${effective##*/}
+        fi
     fi
-    case "$requested_version" in v[0-9]*) ;; [0-9]*) requested_version=v$requested_version ;; *) fail 'Invalid release version.' ;; esac
-    case "$requested_version" in *[!a-zA-Z0-9_.-]*) fail 'Invalid release version.' ;; esac
+    valid_version "$requested_version" || fail 'Invalid release version.'
+    case "$requested_version" in v*) ;; *) requested_version=v$requested_version ;; esac
     asset=kyler-$requested_version-$arch-$os.tar.gz
-    printf 'Downloading Kyler %s...\n' "$requested_version"
-    download "https://github.com/$repository/releases/download/$requested_version/$asset" "$scratch/$asset"
-    download "https://github.com/$repository/releases/download/$requested_version/SHA256SUMS" "$scratch/release-checksums"
+    github_release=https://github.com/$repository/releases/download/$requested_version
+    step 2 'Download release bundle'
+    printf 'Version: %s\nPlatform: %s-%s\nFile: %s\n' "$requested_version" "$arch" "$os" "$asset"
+    downloaded=false
+    for source in "$mirror/$requested_version" "$github_release"; do
+        printf '\nSource: %s\nDownloading Kyler %s (size, speed and remaining time below)...\n' "$source" "$requested_version"
+        rm -f "$scratch/$asset" "$scratch/release-checksums"
+        if transfer "$source/$asset" -o "$scratch/$asset" &&
+            transfer "$source/SHA256SUMS" -o "$scratch/release-checksums"; then
+            downloaded=true
+            break
+        fi
+        if [ "$source" != "$github_release" ]; then
+            printf 'Server download failed; switching to GitHub for the same version %s.\n' "$requested_version"
+        fi
+    done
+    if [ "$downloaded" != true ]; then
+        manual_help
+        fail 'Both download sources failed. Existing installation was kept.'
+    fi
+    step 3 'Verify checksums and unpack bundle'
     expected=$(awk -v name="$asset" '$2==name || $2=="*"name {print $1}' "$scratch/release-checksums")
-    [ -n "$expected" ] && [ "$expected" = "$(checksum "$scratch/$asset")" ] || fail 'Release checksum mismatch.'
+    [ -n "$expected" ] && [ "$expected" = "$(checksum "$scratch/$asset")" ] || fail 'Release checksum mismatch. Installation stopped.'
+    printf 'Release SHA256 checksum verified.\n'
     bundle=$scratch/$asset
+else
+    step 2 'Use local bundle (download skipped)'
+    printf 'Bundle: %s\n' "$bundle"
+    step 3 'Verify checksums and unpack bundle'
 fi
 if [ -n "$bundle" ]; then
     case "$bundle" in /*) ;; *) bundle=$PWD/$bundle ;; esac
@@ -102,10 +161,12 @@ if [ -n "$bundle" ]; then
     fi
     check_manifest "$bundle"
     [ -f "$bundle/bin/kyler" ] && [ -f "$bundle/runtime/node" ] && [ -f "$bundle/web/server.js" ] || fail 'Bundle must include bin/kyler, runtime/node and web/server.js.'
+    printf 'Bundle files verified.\n'
     local_binary=$bundle/bin/kyler
 fi
 case "$local_binary" in /*) ;; *) local_binary=$PWD/$local_binary ;; esac
 [ -f "$local_binary" ] && [ -r "$local_binary" ] || fail "Binary not found or unreadable: $local_binary"
+step 4 'Install application files'
 install_dir=$HOME/.local/bin
 installed_binary=$install_dir/kyler
 config_dir=$HOME/.kyler
@@ -131,6 +192,7 @@ else
     cp -R "$bundle/." "$version_stage/"
     mv "$version_stage" "$version_dir"; version_stage=
 fi
+step 5 'Configure model and services'
 if [ ! -e "$config_path" ]; then
     cat > "$config_path" <<'CONFIG'
 [llm]
@@ -217,6 +279,7 @@ path_line='export PATH="$HOME/.local/bin:$PATH"'
 if ! { [ -f "$startup_file" ] && grep -F -x "$path_line" "$startup_file" >/dev/null 2>&1; }; then printf '\n# Kyler\n%s\n' "$path_line" >> "$startup_file"; fi
 printf 'PATH ready for new terminals (%s).\n' "$startup_file"
 if [ "$(command -v kyler 2>/dev/null || true)" != "$installed_binary" ]; then printf 'For this terminal, run:\n  export PATH="$HOME/.local/bin:$PATH"\n'; fi
+step 6 'Start and check services'
 if [ "$start_server" = true ]; then
     printf 'Starting services...\n'
     if ! installed_service service start --restart; then
@@ -226,6 +289,7 @@ if [ "$start_server" = true ]; then
     printf '\nKyler · Service status and management\n\n'
     installed_service service status
 else printf '\nKyler · Service status and management\n\nServices not started.\n'; fi
+printf '\nInstallation complete.\n'
 printf '\nConfiguration: %s\n' "$config_path"
 printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n'
 printf '\nRun in your project:\n  kyler tui\n'

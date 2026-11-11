@@ -146,3 +146,19 @@ remote assets require inspection before retrying.
 
 `dist/` stays ignored by Git. Upload archives as Release assets, never as tracked
 binaries. Users can then follow [installation](installation.md).
+
+
+## Installation server
+
+Deploy the same archives and `SHA256SUMS` under
+`/usr/share/caddy/releases/vVERSION/`, served at
+`https://www.kyler.work/releases/vVERSION/`. Upload platform archives first, then the
+checksum file. Finally, atomically publish `/usr/share/caddy/releases/latest.txt`
+containing the version on one line, for example `v0.1.0`. Update this pointer only
+after all intended platforms are available. Keep earlier version directories for
+pinned installations.
+
+Deploy `scripts/install.sh` separately as `/usr/share/caddy/install.sh`. Caddy must
+allow `/install.sh` and `/releases/*`; directory listing is not required. The GitHub
+publisher does not deploy files to this server. Installation prefers the server and
+falls back to GitHub for the same selected version.

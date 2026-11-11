@@ -15,12 +15,18 @@ curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-The installer is hosted on the installation server, separately from Release assets.
-It selects
-the latest published non-prerelease version and detects the
-host platform, downloads the corresponding archive and `SHA256SUMS`, and validates the
-archive before installation. `--version VERSION` selects a specific published release.
-The required platform archive must be present in that release.
+The installer is hosted separately from Release assets. It reads the latest version
+from `https://www.kyler.work/releases/latest.txt`, detects the host platform, and
+fetches the archive and `SHA256SUMS` from the server's `/releases/vVERSION/` directory.
+If version discovery fails, it queries GitHub Releases. If a server download fails,
+it downloads both files again from GitHub for the same version. Checksum failures
+stop installation; they do not silently switch sources. `--version VERSION` skips
+latest-version discovery.
+
+Six numbered steps cover environment checks, download, verification, installation,
+configuration, and service startup. Downloads show the source, file, size, speed, and
+remaining time. Failed downloads display manual download and local installation
+commands. Local bundles skip network access.
 
 Unauthenticated download URLs require a publicly accessible repository. Private release
 assets require authenticated download followed by local bundle installation.
