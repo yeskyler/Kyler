@@ -1,8 +1,6 @@
 use super::{Effects, Event, Sender};
+use crate::agent::AgentHandle;
 
-use std::time::Duration;
-
-use kyler_client::Client;
 use kyler_protocol::api::permissions::{
     ApprovalDecision, ApprovalRecord, ApprovalResponse, PermissionSelection,
 };
@@ -10,7 +8,7 @@ use kyler_protocol::api::permissions::{
 impl Effects {
     pub fn watch_permissions(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         generation: u64,
         epoch: u64,
@@ -20,41 +18,38 @@ impl Effects {
             previous.abort();
         }
         self.permissions = Some(tokio::spawn(async move {
-            loop {
-                if let Ok(state) = client.permissions(&session).await {
-                    if send
-                        .send((generation, Event::Permissions(epoch, state)))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
+            if let Ok(state) = client.permissions(&session).await {
+                if send
+                    .send((generation, Event::Permissions(epoch, state)))
+                    .await
+                    .is_err()
+                {
+                    return;
                 }
-                if let Ok(records) = client.approvals(&session).await {
-                    if send
-                        .send((generation, Event::Approvals(records)))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
+            }
+            if let Ok(records) = client.approvals(&session).await {
+                if send
+                    .send((generation, Event::Approvals(records)))
+                    .await
+                    .is_err()
+                {
+                    return;
                 }
-                if let Ok(records) = client.questions(&session).await {
-                    if send
-                        .send((generation, Event::Questions(records)))
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
+            }
+            if let Ok(records) = client.questions(&session).await {
+                if send
+                    .send((generation, Event::Questions(records)))
+                    .await
+                    .is_err()
+                {
+                    return;
                 }
-                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }));
     }
     pub fn select_permissions(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         selection: PermissionSelection,
         generation: u64,
@@ -71,7 +66,7 @@ impl Effects {
     }
     pub fn decide_approval(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         approval: ApprovalRecord,
         decision: ApprovalDecision,
         generation: u64,
@@ -99,7 +94,7 @@ impl Effects {
 impl Effects {
     pub fn answer_question(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         id: String,
         response: kyler_protocol::api::questions::QuestionResponse,

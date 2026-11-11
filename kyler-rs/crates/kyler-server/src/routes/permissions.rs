@@ -37,5 +37,5 @@ pub async fn decide(
     Path(id): Path<String>,
     Json(response): Json<ApprovalResponse>,
 ) -> Result<Json<ApprovalRecord>, ApiError> {
-    state.runs.approval_decide(&id, &response).map(Json)
+    state.runs.approval_decide(&id, &response).await.map(Json)
 }

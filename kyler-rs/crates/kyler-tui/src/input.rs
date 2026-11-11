@@ -4,6 +4,7 @@ mod keyboard;
 mod mouse;
 mod panels;
 
+use crate::agent::AgentHandle;
 use crate::{
     components::composer,
     effects::{Effects, Sender},
@@ -18,15 +19,18 @@ use std::{
 
 use crossterm::event::{Event as Input, KeyEventKind};
 
-use kyler_client::Client;
 use kyler_protocol::api::attachments::MAX_ATTACHMENTS;
 
-pub(crate) fn cancel(state: &mut State, effects: &mut Effects, client: &Client, send: &Sender) {
+pub(crate) fn cancel(
+    state: &mut State,
+    effects: &mut Effects,
+    client: &AgentHandle,
+    send: &Sender,
+) {
     state.cancel_requested = true;
     state.phase = Phase::Cancelling;
     state.dirty = true;
-    state.cancel_deadline =
-        Some(Instant::now() + Duration::from_secs(client.settings().cancel_timeout_seconds));
+    state.cancel_deadline = Some(Instant::now() + Duration::from_secs(10));
     if let Some(run) = state.run.clone() {
         effects.cancel(client.clone(), run, state.generation, send.clone());
     }
@@ -35,7 +39,7 @@ pub(crate) fn handle_input(
     event: Input,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
     view: &View,
 ) -> bool {

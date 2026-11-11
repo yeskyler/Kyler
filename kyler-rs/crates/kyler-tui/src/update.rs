@@ -1,4 +1,5 @@
 //! Apply asynchronous service results to the terminal application state.
+use crate::agent::AgentHandle;
 use crate::{
     attachments::Paste,
     components::composer,
@@ -7,15 +8,14 @@ use crate::{
     state::{Entry, Phase, State},
 };
 
-use kyler_client::Client;
-use kyler_protocol::api::{attachments::MAX_ATTACHMENTS, permissions::ApprovalStatus};
+use kyler_protocol::api::attachments::MAX_ATTACHMENTS;
 
 pub(crate) fn apply(
     generation: u64,
     event: Event,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) {
     if generation != state.generation {
@@ -103,23 +103,6 @@ pub(crate) fn apply(
         }
         Event::Permissions(..) | Event::PermissionsChanged(..) | Event::PermissionsError(..) => {}
         Event::Approvals(records) => {
-            if state.phase == Phase::Detached && state.run.is_none() {
-                if let Some(pending) = records.iter().find(|r| r.status == ApprovalStatus::Pending)
-                {
-                    state.run = Some(pending.run_id.clone());
-                    state.phase = Phase::Running;
-                    if let Some(session) = state.session.clone() {
-                        effects.watch(
-                            client.clone(),
-                            session,
-                            pending.run_id.clone(),
-                            state.cursor,
-                            generation,
-                            send.clone(),
-                        );
-                    }
-                }
-            }
             for record in records {
                 state.update_approval(record);
             }
@@ -258,7 +241,7 @@ pub(crate) fn apply(
             }
         }
         Event::Stream(event) => {
-            let finished = matches!(event, kyler_client::ClientEvent::Result(_));
+            let finished = matches!(event, crate::agent::AgentEvent::Result(_));
             state.stream(event);
             if finished {
                 if let Some(session) = state.session.clone() {
@@ -277,13 +260,14 @@ pub(crate) fn apply(
             }
         }
         Event::Error(error) => {
+            state.finish_reasoning();
             state.phase = Phase::Detached;
             state.notice(error);
         }
         Event::CancelError(error) => state.notice(error),
         Event::Cancelled => {
             if state.cancel_requested {
-                state.notice("Cancellation requested; waiting for server confirmation…");
+                state.notice("Cancellation requested; waiting for agent confirmation…");
             }
         }
     }

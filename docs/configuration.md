@@ -123,3 +123,20 @@ must be supplied explicitly. Extra filesystem roots from the global sandbox
 configuration do not expand this per-session boundary. The server limits each session to
 read-only or workspace-write containment, even when the host configuration permits
 unrestricted/external execution elsewhere.
+
+## Model thinking mode
+
+Agent requests automatically send `enable_thinking = true` for
+`deepseek-ai/DeepSeek-V4-Flash` on `api.siliconflow.cn` or `api.siliconflow.com`.
+Existing configurations without the setting use this default. Other model/provider
+combinations omit the provider-specific parameter unless explicitly configured.
+
+To disable it, set `enable_thinking = false` under `[llm]`. When named profiles are
+configured, set it under the corresponding `[models.profiles.<name>]` instead.
+An explicit `true` also supports compatible custom gateways. Model selection and
+reload retain the setting within the execution's immutable model snapshot.
+
+Streaming reasoning appears separately from the final answer. Current-turn tool
+continuations include the associated `reasoning_content` and count it in the input
+budget. Reasoning from prior turns is not resent. Thinking may increase response
+latency and token usage; this setting does not automatically raise reasoning effort.

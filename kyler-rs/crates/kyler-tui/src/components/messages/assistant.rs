@@ -90,3 +90,45 @@ impl AgentMessageCell {
         self.finished = true;
     }
 }
+
+/// Reasoning has a bounded live preview and retains its complete text for inspection.
+#[derive(Debug, Clone)]
+pub struct ReasoningCell {
+    pub content: String,
+    pub streaming: bool,
+    pub expanded: Option<bool>,
+    pub seconds: Option<u64>,
+    started: Option<std::time::Instant>,
+}
+impl ReasoningCell {
+    pub fn streaming(content: String) -> Self {
+        Self {
+            content,
+            streaming: true,
+            expanded: None,
+            seconds: None,
+            started: Some(std::time::Instant::now()),
+        }
+    }
+    pub fn complete(content: String) -> Self {
+        Self {
+            content,
+            streaming: false,
+            expanded: None,
+            seconds: None,
+            started: None,
+        }
+    }
+    pub fn open(&self) -> bool {
+        self.expanded.unwrap_or(self.streaming)
+    }
+    pub fn toggle(&mut self) {
+        self.expanded = Some(!self.open());
+    }
+    pub fn finish(&mut self) {
+        self.streaming = false;
+        if let Some(started) = self.started.take() {
+            self.seconds = Some(started.elapsed().as_secs());
+        }
+    }
+}

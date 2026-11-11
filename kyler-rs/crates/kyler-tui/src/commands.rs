@@ -1,17 +1,16 @@
 //! Dispatch local slash commands without sending them to the model.
+use crate::agent::AgentHandle;
 use crate::{
     components::composer,
     effects::{Effects, Sender},
     state::{Panel, State},
 };
 
-use kyler_client::Client;
-
 pub(crate) fn dispatch_command(
     name: &str,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) {
     let parent = (state.composer.lines().join("\n"), state.slash_selected);

@@ -16,6 +16,7 @@ impl RunManager {
         if existing.is_running() {
             return Err(ApiError::conflict());
         }
+        self.threads.close(id).await.map_err(ApiError::storage)?;
         let ids = registry
             .runs
             .iter()
@@ -131,9 +132,6 @@ impl RunManager {
                 let registry = self.registry.lock().await;
                 for entry in registry.runs.values() {
                     if !entry.info().status.is_terminal() {
-                        if let Some(approvals) = &self.approvals {
-                            approvals.cancel_run(&entry.info().run_id);
-                        }
                         entry.cancel.send_replace(true);
                     }
                 }
@@ -144,13 +142,18 @@ impl RunManager {
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
+            if self.threads.shutdown().await.is_err() {
+                return false;
+            }
             self.agent.shutdown().await;
+            self.processes.shutdown();
+            true
         };
         tokio::time::timeout(
             Duration::from_secs(self.settings.shutdown_grace_seconds),
             drain,
         )
         .await
-        .is_ok()
+        .unwrap_or(false)
     }
 }

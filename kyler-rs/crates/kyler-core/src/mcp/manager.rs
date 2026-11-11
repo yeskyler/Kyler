@@ -23,6 +23,7 @@ use kyler_config::{McpServerSettings, McpSettings, McpTransport};
 use kyler_protocol::api::mcp::{McpAction, McpServerInfo, McpStatus};
 
 pub(super) struct Slot {
+    pub(super) changes: tokio::sync::watch::Sender<u64>,
     pub(super) id: String,
     pub(super) settings: McpServerSettings,
     pub(super) package_root: Option<PathBuf>,
@@ -32,6 +33,7 @@ pub(super) struct Slot {
     pub(super) retired: AtomicBool,
 }
 pub struct McpManager {
+    pub(super) changes: tokio::sync::watch::Sender<u64>,
     pub(super) configured_ids: HashSet<String>,
     pub(super) settings: RwLock<McpSettings>,
     pub(super) system_environment: std::sync::OnceLock<Arc<ExecutionEnvironment>>,
@@ -46,6 +48,7 @@ impl McpManager {
         settings.validate()?;
         settings.validate_credentials()?;
         Ok(Self {
+            changes: tokio::sync::watch::channel(0).0,
             configured_ids: settings.servers.keys().cloned().collect(),
             settings: RwLock::new(settings),
             system_environment: std::sync::OnceLock::new(),
@@ -56,6 +59,11 @@ impl McpManager {
             stopping: AtomicBool::new(false),
         })
     }
+    /// Local subscribers refresh snapshots only when connector state changes.
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
     /// Definitions only: no process, connection, or environment is allocated.
     pub fn configured_servers(&self) -> Result<Vec<McpServerInfo>> {
         let settings = self
@@ -121,6 +129,7 @@ impl McpManager {
             .filter(|(_, s)| s.enabled)
             .map(|(id, settings)| {
                 Arc::new(Slot {
+                    changes: self.changes.clone(),
                     id: id.clone(),
                     settings: settings.clone(),
                     package_root: self.installed_package_root(&settings.command),

@@ -2,13 +2,13 @@ mod catalogs;
 mod permissions;
 mod runs;
 
+use crate::agent::{AgentEvent, AgentHandle};
 use crate::attachments::Paste;
 
 use std::path::PathBuf;
 
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use kyler_client::{Client, ClientEvent};
 use kyler_protocol::api::{
     ApiErrorBody, ServerInfo, SessionUsage,
     history::{HistoryEvent, HistoryExecution},
@@ -49,7 +49,7 @@ pub enum Event {
     SkillDetails(SkillDetails),
     SkillsError(String),
     Accepted(String),
-    Stream(ClientEvent),
+    Stream(AgentEvent),
     Usage(SessionUsage),
     Cancelled,
     CancelError(String),
@@ -82,7 +82,7 @@ impl Drop for Effects {
 impl Effects {
     pub fn tool_details(
         &mut self,
-        client: Client,
+        client: AgentHandle,
         session: String,
         call: String,
         generation: u64,
@@ -128,19 +128,25 @@ impl Effects {
         self.stream = Some(tokio::spawn(future));
     }
 
-    pub fn load(&mut self, client: Client, session: Option<String>, generation: u64, send: Sender) {
+    pub fn load(
+        &mut self,
+        client: AgentHandle,
+        session: Option<String>,
+        generation: u64,
+        send: Sender,
+    ) {
         self.spawn(async move {
             let result = async {
-                let mut info = client.info().await?;
                 let session = match session {
                     Some(id) => client.session(&id).await?,
                     None => {
                         let cwd = std::env::current_dir().map_err(|_| {
-                            kyler_client::Error::invalid("Cannot determine the current workspace.")
+                            anyhow::anyhow!("Cannot determine the current workspace.")
                         })?;
                         client.create_project_session_in(&cwd).await?
                     }
                 };
+                let mut info = client.info(&session.session_id).await?;
                 info.workspace_root = session.workspace_root.clone();
                 info.working_directory = session.working_directory.clone();
                 let usage = client.session_usage(&session.session_id).await?;
@@ -158,7 +164,7 @@ impl Effects {
                     }
                     if let Some(next) = page.next_cursor {
                         if next <= cursor {
-                            return Err(kyler_client::Error::protocol(
+                            return Err(anyhow::anyhow!(
                                 "Invalid history pagination cursor.",
                             ));
                         }
@@ -167,7 +173,7 @@ impl Effects {
                         break;
                     }
                 }
-                Ok::<_, kyler_client::Error>(Event::Loaded {
+                Ok::<_, anyhow::Error>(Event::Loaded {
                     session: session.session_id,
                     info,
                     usage,
@@ -181,7 +187,7 @@ impl Effects {
             let event = match result {
                 Ok(event) => event,
                 Err(error) => Event::Error(format!(
-                    "Unable to load server info or session: {error}. Restart the latest server and press F5 to retry."
+                    "Unable to initialize the local agent session: {error}. Check model credentials, workspace, and sandbox configuration; press F5 to retry."
                 )),
             };
             let _ = send.send((generation, event)).await;

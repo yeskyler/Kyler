@@ -1,3 +1,4 @@
+use crate::agent::AgentHandle;
 use crate::{
     effects::Effects,
     layout::View,
@@ -12,11 +13,20 @@ use crossterm::event::EventStream;
 use futures::StreamExt;
 use tokio::time::MissedTickBehavior;
 
-use kyler_client::Client;
-
 pub(crate) use crate::{input::handle_input, update::apply};
 
-pub async fn run(client: Client, session: Option<String>) -> Result<()> {
+pub async fn run(
+    config: kyler_config::AppConfig,
+    source: Option<std::path::PathBuf>,
+    session: Option<String>,
+) -> Result<()> {
+    let client = AgentHandle::new(config, source);
+    let result = run_terminal(client.clone(), session).await;
+    let cleanup = client.shutdown().await;
+    result.and(cleanup)
+}
+
+async fn run_terminal(client: AgentHandle, session: Option<String>) -> Result<()> {
     let (guard, mut terminal) = TerminalGuard::enter()?;
     let mut state = State::new(session);
     let mut view = View::default();
@@ -45,28 +55,16 @@ pub async fn run(client: Client, session: Option<String>) -> Result<()> {
                 state.advance_messages();
                 if state.cancel_deadline.is_some_and(|until|Instant::now()>=until) {
                     state.cancel_deadline=None;state.phase=Phase::Detached;
-                    state.notice("Cancellation not confirmed. F5 to check or F10 to exit; the task may still be running.");
+                    state.notice("The local task is still stopping. Wait for cleanup or press F10 to exit.");
                 }
                 if matches!(state.phase, Phase::Submitting | Phase::Running) { state.dirty = true; }
                 if state.dirty {terminal.draw(|frame|view.render(frame,&mut state))?;state.dirty=false;}
             }
         }
     }
-    // Restore before printing diagnostics; dropping subscriptions never cancels server work.
+    // Restore the terminal before joining local agent cleanup.
     drop(effects);
     drop(terminal);
     drop(guard);
-    if state.pending.is_some() || matches!(state.phase, Phase::Running | Phase::Cancelling) {
-        eprintln!(
-            "Exited TUI; task completion / cancellation unconfirmed. Session: {} · Run: {} · Request: {}",
-            state.session.as_deref().unwrap_or("—"),
-            state.run.as_deref().unwrap_or("unconfirmed"),
-            state
-                .pending
-                .as_ref()
-                .map(|p| p.key.as_str())
-                .unwrap_or("—")
-        );
-    }
     Ok(())
 }

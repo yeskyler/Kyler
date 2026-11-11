@@ -3,6 +3,7 @@ use super::{
     composer::clean,
     panel::{self, Position},
 };
+use crate::agent::AgentHandle;
 use crate::{
     effects::{Effects, Sender},
     state::{Entry, Panel, State},
@@ -16,7 +17,6 @@ use ratatui::{
     text::Line,
 };
 
-use kyler_client::Client;
 use kyler_protocol::api::permissions::{ApprovalDecision, PermissionMode, PermissionSelection};
 
 pub fn open(state: &mut State) {
@@ -34,7 +34,7 @@ pub fn handle_key(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) {
     match key.code {
@@ -82,7 +82,7 @@ pub fn handle_key(
                     .any(|option| option.mode == mode && option.available)
             }) {
                 state.permissions_error =
-                    Some("This preset is unavailable under the server policy.".into());
+                    Some("This preset is unavailable under the host policy.".into());
                 return;
             }
             if state.permissions.is_none() {
@@ -118,7 +118,7 @@ pub fn approval_key(
     key: KeyEvent,
     state: &mut State,
     effects: &mut Effects,
-    client: &Client,
+    client: &AgentHandle,
     send: &Sender,
 ) -> bool {
     let Some(index) = state.pending_approval() else {

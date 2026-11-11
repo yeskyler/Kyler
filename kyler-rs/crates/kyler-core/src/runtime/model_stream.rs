@@ -21,7 +21,7 @@ use async_openai::{
 };
 use futures::StreamExt;
 
-// Preserve optional provider-returned reasoning without enabling a reasoning mode.
+// Preserve provider-returned reasoning separately from answer text.
 #[derive(serde::Deserialize)]
 struct ModelChunk {
     #[serde(default)]
@@ -54,15 +54,27 @@ impl Agent {
             include_usage: Some(true),
             include_obfuscation: None,
         });
+        let mut timing = crate::diagnostics::ModelTiming::new(session);
         // Never retry after emitting deltas: replay would duplicate user-visible output.
         self.observe(super::observation::RuntimeObservation::ModelRequestStarted);
         request.stream = Some(true);
+        let request = crate::models::provider_request(request, session, self.thinking_mode())?;
+        if timing.is_some() {
+            use sha2::{Digest, Sha256};
+            let encoded = serde_json::to_vec(&request)?;
+            tracing::info!(target: "kyler_latency", session_id=%session.session_id,
+                request_bytes=encoded.len(), request_sha256=%format!("{:x}", Sha256::digest(&encoded)),
+                enable_thinking=?request.get("enable_thinking").and_then(|v| v.as_bool()), "model request fingerprint");
+        }
         let mut stream = tokio::time::timeout(
             Duration::from_secs(60),
             client.chat().create_stream_byot::<_, ModelChunk>(request),
         )
         .await
         .context("stream connection timed out")??;
+        if let Some(timing) = &timing {
+            timing.stage("response_headers");
+        }
         let mut text = String::new();
         let mut text_event: Option<usize> = None;
         let mut reasoning_event: Option<usize> = None;
@@ -71,16 +83,31 @@ impl Agent {
         let mut first_event = true;
         let mut reported = TokenUsage::default();
         loop {
+            let read_started = timing.as_ref().map(|_| std::time::Instant::now());
             let chunk = tokio::time::timeout(Duration::from_secs(60), stream.next())
                 .await
                 .context("model stream idle timeout")?;
+            if let (Some(timing), Some(started)) = (&mut timing, read_started) {
+                let elapsed = started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+                timing.read_wait_us += elapsed;
+                timing.max_read_wait_us = timing.max_read_wait_us.max(elapsed);
+            }
             let Some(chunk) = chunk else { break };
             let chunk = chunk?;
+            if let Some(timing) = &mut timing {
+                timing.chunks += 1;
+                if first_event {
+                    timing.stage("first_model_event");
+                }
+            }
             if first_event {
                 self.observe(super::observation::RuntimeObservation::FirstModelEvent);
                 first_event = false;
             }
             if let Some(usage) = chunk.usage {
+                if let Some(timing) = &mut timing {
+                    timing.usage = Some(serde_json::to_value(&usage)?);
+                }
                 // Chat Completions usage describes this request, not a per-chunk increment.
                 // Account only newly reported usage, retaining known usage on cancellation/error.
                 session.add_usage(
@@ -104,6 +131,12 @@ impl Agent {
                     .or(choice.delta.reasoning)
                     .filter(|text| !text.is_empty())
                 {
+                    if let Some(timing) = &mut timing {
+                        if timing.reasoning_bytes == 0 {
+                            timing.stage("first_reasoning");
+                        }
+                        timing.reasoning_bytes += delta.len();
+                    }
                     if let Some(index) = reasoning_event {
                         if let ContentItem::Reasoning { text } =
                             &mut session.events[index].content[0]
@@ -131,6 +164,12 @@ impl Agent {
                 if let Some(delta) = choice.delta.standard.content {
                     text.push_str(&delta);
                     if !delta.is_empty() {
+                        if let Some(timing) = &mut timing {
+                            if timing.text_bytes == 0 {
+                                timing.stage("first_text");
+                            }
+                            timing.text_bytes += delta.len();
+                        }
                         reasoning_event = None;
                         if let Some(index) = text_event {
                             if let ContentItem::Message { content, .. } =
@@ -168,6 +207,9 @@ impl Agent {
                             call.1.push_str(&name);
                         }
                         if let Some(arguments) = function.arguments {
+                            if let Some(timing) = &mut timing {
+                                timing.tool_argument_bytes += arguments.len();
+                            }
                             call.2.push_str(&arguments);
                         }
                     }
@@ -185,6 +227,9 @@ impl Agent {
                     finished = Some(reason);
                 }
             }
+        }
+        if let Some(timing) = &timing {
+            timing.stage("stream_ended");
         }
         // Calibrate once, against the final known input count, rather than each snapshot.
         session.memory.observe_prompt_tokens(reported.prompt_tokens);
@@ -211,6 +256,9 @@ impl Agent {
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
+        if let Some(timing) = &mut timing {
+            timing.complete = true;
+        }
         Ok((
             (!text.is_empty()).then_some(text),
             (!calls.is_empty()).then_some(calls),

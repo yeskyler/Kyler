@@ -2,7 +2,11 @@ mod events;
 
 use crate::{
     attachments::LocalAttachment,
-    components::{composer, messages::assistant::AgentMessageCell, model_config::ModelConfigForm},
+    components::{
+        composer,
+        messages::assistant::{AgentMessageCell, ReasoningCell},
+        model_config::ModelConfigForm,
+    },
 };
 
 use std::{
@@ -29,6 +33,7 @@ use kyler_protocol::{
 pub enum Entry {
     Compaction(kyler_protocol::api::compaction::CompactionInfo),
     Assistant(AgentMessageCell),
+    Reasoning(ReasoningCell),
     RunTiming {
         label: String,
         seconds: u64,
@@ -74,7 +79,6 @@ pub struct Submission {
     pub resume: bool,
     pub attachments: Vec<LocalAttachment>,
     pub input: String,
-    pub key: String,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Panel {
@@ -156,8 +160,8 @@ pub struct State {
     pub cancel_requested: bool,
     pub cancel_deadline: Option<Instant>,
     pub assistant: Option<usize>,
+    pub reasoning: Option<usize>,
     pub step: Option<u32>,
-    pub gap: bool,
     pub follow: bool,
     pub scroll: usize,
     pub max_scroll: usize,
@@ -236,8 +240,8 @@ impl State {
             cancel_requested: false,
             cancel_deadline: None,
             assistant: None,
+            reasoning: None,
             step: None,
-            gap: false,
             follow: true,
             scroll: 0,
             max_scroll: 0,
@@ -348,6 +352,34 @@ impl State {
         self.transcript_version += 1;
         self.dirty = true;
     }
+    pub fn finish_reasoning(&mut self) {
+        if let Some(index) = self.reasoning.take() {
+            if let Some(Entry::Reasoning(cell)) = self.entries.get_mut(index) {
+                cell.finish();
+                self.transcript_version += 1;
+                self.dirty = true;
+            }
+        }
+    }
+    pub fn toggle_reasoning(&mut self, index: usize) {
+        if let Some(Entry::Reasoning(cell)) = self.entries.get_mut(index) {
+            cell.toggle();
+            if cell.open() {
+                self.follow = false;
+            }
+            self.transcript_version += 1;
+            self.dirty = true;
+        }
+    }
+    pub fn toggle_latest_reasoning(&mut self) {
+        if let Some(index) = self
+            .entries
+            .iter()
+            .rposition(|entry| matches!(entry, Entry::Reasoning(_)))
+        {
+            self.toggle_reasoning(index);
+        }
+    }
     pub fn displayed_model(&self) -> &str {
         if matches!(
             self.phase,
@@ -417,6 +449,7 @@ impl State {
     pub fn history(&mut self, events: Vec<HistoryEvent>, executions: Vec<HistoryExecution>) {
         self.questions.reset_history();
         self.entries.clear();
+        self.reasoning = None;
         let mut calls = HashMap::new();
         let mut last_assistant = HashMap::new();
         let mut with_tools = HashSet::new();
@@ -458,10 +491,8 @@ impl State {
                 match item {
                     HistoryContent::ContextCompaction { compaction } => self.compaction(compaction),
                     HistoryContent::Reasoning { text } if !text.trim().is_empty() => {
-                        self.entries.push(Entry::Message {
-                            role: "thinking".into(),
-                            content: text,
-                        });
+                        self.entries
+                            .push(Entry::Reasoning(ReasoningCell::complete(text)));
                     }
                     HistoryContent::Message { role, text } if role == "assistant" => {
                         last_assistant.insert(event.execution_id.clone(), self.entries.len());
@@ -622,7 +653,6 @@ impl State {
             resume: input.trim() == "/resume",
             attachments: std::mem::take(&mut self.attachments),
             input: input.clone(),
-            key: uuid::Uuid::new_v4().to_string(),
         };
         self.transcript_version += 1;
         self.entries.push(Entry::Message {
@@ -649,7 +679,6 @@ impl State {
         self.cursor = 0;
         self.assistant = None;
         self.step = None;
-        self.gap = false;
         self.cancel_requested = false;
         self.cancel_deadline = None;
         self.follow = true;

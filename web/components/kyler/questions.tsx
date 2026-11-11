@@ -1,5 +1,13 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { CircleHelpIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +36,8 @@ export function usePendingQuestion() {
 }
 export function useQuestions(session: string) {
   const [records, setRecords] = useState<QuestionRecord[]>([]);
+  const reload = useRef<() => void>(() => {});
+  const refresh = useCallback(() => reload.current(), []);
   const update = useCallback((record: QuestionRecord) => {
     setRecords((items) => mergeQuestions(items, [record]));
   }, []);
@@ -43,21 +53,23 @@ export function useQuestions(session: string) {
         });
         if (!controller.signal.aborted) setRecords((items) => mergeQuestions(items, records));
       } catch {
-        /* SSE and the next poll can recover a temporary disconnect. */
+        /* SSE, reconnect, and window focus can recover a temporary disconnect. */
       } finally {
         busy = false;
       }
     };
     void load();
-    const timer = setInterval(load, 2000);
+    reload.current = () => {
+      void load();
+    };
     window.addEventListener("focus", load);
     return () => {
       controller.abort();
-      clearInterval(timer);
+      reload.current = () => {};
       window.removeEventListener("focus", load);
     };
   }, [session]);
-  return { records, update };
+  return { records, update, refresh };
 }
 export function QuestionCard({
   record,

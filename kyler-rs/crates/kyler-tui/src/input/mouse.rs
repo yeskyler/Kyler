@@ -2,9 +2,14 @@
 use super::scroll_panel;
 use crate::{layout::View, state::State};
 
-use crossterm::event::{MouseEvent, MouseEventKind};
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 pub(super) fn handle(mouse: MouseEvent, state: &mut State, view: &View) -> bool {
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        if let Some(index) = view.reasoning_at(mouse.column, mouse.row, state) {
+            state.toggle_reasoning(index);
+        }
+    }
     let delta = match mouse.kind {
         MouseEventKind::ScrollUp => -3,
         MouseEventKind::ScrollDown => 3,

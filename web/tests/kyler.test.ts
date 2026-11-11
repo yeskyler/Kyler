@@ -298,6 +298,7 @@ test("proxy forwards replay cursor and passes SSE bytes without buffering", asyn
 test("reconnecting replays only new sequence IDs without creating another run", async (t) => {
   let streams = 0;
   let admissions = 0;
+  let reconnects = 0;
   t.mock.method(globalThis, "fetch", async (path: string, init?: RequestInit) => {
     if (path.endsWith("/runs")) {
       admissions++;
@@ -316,13 +317,18 @@ test("reconnecting replays only new sequence IDs without creating another run", 
     throw new Error("Unexpected request");
   });
   const updates: ChatModelRunResult[] = [];
-  for await (const update of chatAdapter("s1", () => {}).run({
+  for await (const update of chatAdapter("s1", () => {}, undefined, {
+    onReconnect: () => {
+      reconnects++;
+    },
+  }).run({
     messages: [{ role: "user", content: [{ type: "text", text: "Hi" }], attachments: [] }],
     abortSignal: new AbortController().signal,
   } as never) as AsyncGenerator<ChatModelRunResult>)
     updates.push(update);
   assert.equal(admissions, 1);
   assert.equal(streams, 2);
+  assert.equal(reconnects, 1);
   assert.deepEqual(updates.at(-1)?.content, [{ type: "text", text: "Hello world" }]);
 });
 

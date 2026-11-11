@@ -4,57 +4,43 @@ use std::{
     time::Duration,
 };
 
-use axum::{
-    Json, Router,
-    body::Body,
-    extract::State,
-    response::Response,
-    routing::{get, post},
-};
+use axum::{Json, Router, body::Body, extract::State, response::Response, routing::post};
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, process::Command};
 
-const SESSION: &str = "00000000-0000-4000-8000-000000000001";
-const RUN: &str = "00000000-0000-4000-8000-000000000002";
-async fn accept(
+async fn completion(
     State(inputs): State<Arc<Mutex<Vec<String>>>>,
     Json(body): Json<Value>,
-) -> Json<Value> {
-    inputs
-        .lock()
+) -> Response {
+    let input = body["messages"]
+        .as_array()
         .unwrap()
-        .push(body["input"].as_str().unwrap().into());
-    Json(json!({"run_id":RUN,"session_id":SESSION,"status":"running","events_url":"unused"}))
-}
-async fn create_session(
-    State(inputs): State<Arc<Mutex<Vec<String>>>>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let workspace = body["workspace_root"].as_str().unwrap().to_owned();
-    inputs
-        .lock()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "user")
+        .unwrap()["content"]
+        .as_str()
         .unwrap()
-        .push(format!("workspace:{workspace}"));
-    Json(
-        json!({"session_id":SESSION,"created_at":0,"updated_at":0,"event_count":0,"execution_count":0,"status":null,"workspace_root":workspace,"working_directory":workspace}),
-    )
-}
-async fn events() -> Response {
-    let first = json!({"run_id":RUN,"execution_id":null,"seq":1,"timestamp_ms":0,"type":"text_delta","step":1,"text":"Hello from TUI"});
-    let last = json!({"run_id":RUN,"execution_id":null,"seq":2,"timestamp_ms":0,"type":"run_completed","output":"Hello from TUI","output_truncated":false,"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}});
-    Response::builder().header("content-type","text/event-stream").body(Body::from(format!("id: 1\nevent: text_delta\ndata: {first}\n\nid: 2\nevent: run_completed\ndata: {last}\n\n"))).unwrap()
+        .to_owned();
+    inputs.lock().unwrap().push(input);
+    let reasoning = json!({"id":"fixture","object":"chat.completion.chunk","created":0,"model":"fixture-model","choices":[{"index":0,"delta":{"reasoning_content":"Inspecting streamed reasoning"},"finish_reason":null}]});
+    let chunk = json!({"id":"fixture","object":"chat.completion.chunk","created":0,"model":"fixture-model","choices":[{"index":0,"delta":{"content":"Hello from TUI"},"finish_reason":null}]});
+    let end = json!({"id":"fixture","object":"chat.completion.chunk","created":0,"model":"fixture-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]});
+    Response::builder()
+        .header("content-type", "text/event-stream")
+        .body(Body::from_stream(async_stream::stream! {
+            yield Ok::<_, std::convert::Infallible>(format!("data: {reasoning}\n\n"));
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            yield Ok(format!("data: {chunk}\n\ndata: {end}\n\ndata: [DONE]\n\n"));
+        }))
+        .unwrap()
 }
 #[tokio::test]
 async fn actual_tui_accepts_chinese_paste_streams_and_restores_terminal_on_exit() {
     let inputs = Arc::new(Mutex::new(Vec::new()));
-    let app=Router::new()
-        .route("/v1/info",get(||async {Json(json!({"model":"fixture-model","context_window_tokens":128000,"sliding_window_tokens":76800,"workspace_root":"/project","working_directory":"/project"}))}))
-        .route("/v1/sessions",post(create_session))
-        .route("/v1/sessions/{id}/usage",get(||async {Json(json!({"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}))}))
-        .route("/v1/sessions/{id}/history",get(||async {Json(json!({"events":[],"executions":[],"next_cursor":null}))}))
-        .route("/v1/sessions/{id}/runs",post(accept))
-        .route("/v1/runs/{id}",get(||async {Json(json!({"run_id":RUN,"session_id":SESSION,"execution_id":null,"status":"running","created_at":0,"finished_at":null,"last_event_seq":2,"output":null,"usage":null,"error":null}))}))
-        .route("/v1/runs/{id}/events",get(events)).with_state(inputs.clone());
+    let app = Router::new()
+        .route("/v1/chat/completions", post(completion))
+        .with_state(inputs.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
@@ -62,20 +48,38 @@ async fn actual_tui_accepts_chinese_paste_streams_and_restores_terminal_on_exit(
     });
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("kyler.toml");
-    std::fs::write(&config, "").unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            r#"
+[llm]
+base_url = "{url}/v1"
+model = "fixture-model"
+api_key = "fixture-only"
+[session]
+enabled = true
+directory = "sessions"
+[sandbox]
+mode = "external-sandbox"
+external_sandbox_confirmed = true
+"#
+        ),
+    )
+    .unwrap();
     let script = r#"
 import os, pty, termios, fcntl, struct, subprocess, select, time, signal, sys
 master, slave=pty.openpty()
 fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',28,100,0,0))
 before=termios.tcgetattr(slave)
-env=os.environ.copy();env['TERM']='xterm-256color';env.pop('KYLER_INTERNAL_TOOL_WORKER',None)
-p=subprocess.Popen([sys.argv[1],'--config',sys.argv[2],'--server',sys.argv[3],'tui'],stdin=slave,stdout=slave,stderr=slave,env=env)
+env={k:v for k,v in os.environ.items() if not k.startswith('KYLER_') and k!='OPENAI_API_KEY'}
+env['TERM']='xterm-256color';env['HOME']=os.path.dirname(sys.argv[2])
+p=subprocess.Popen([sys.argv[1],'--config',sys.argv[2],'tui'],stdin=slave,stdout=slave,stderr=slave,env=env)
 output=b''
-def wait_for(marker):
+def wait_for(marker, start=0):
     global output
     until=time.monotonic()+10
     while time.monotonic()<until:
-        if marker in output:return
+        if marker in output[start:]:return
         if select.select([master],[],[],0.1)[0]:output+=os.read(master,65536)
         if p.poll() is not None:break
     raise AssertionError('terminal marker not found: '+repr(marker)+'; tail='+repr(output[-2000:]))
@@ -84,9 +88,15 @@ try:
     os.write(master,b'\x1b[200~'+'\u4f60\u597d\n\u7b2c\u4e8c\u884c'.encode()+b'\x1b[201~')
     time.sleep(0.15)
     os.write(master,b'\r')
+    wait_for(b'Inspecting')
+    assert b'Hello' not in output,'reasoning was buffered until the answer'
     wait_for(b'Hello')
     wait_for(b'from')
     wait_for(b'TUI')
+    wait_for(b'Worked for')
+    offset=len(output)
+    os.write(master,b'\x0f')
+    wait_for(b'Inspecting',offset)
     fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));os.kill(p.pid,signal.SIGWINCH)
     time.sleep(0.2)
     os.write(master,b'\x03')
@@ -124,10 +134,7 @@ finally:
     );
     assert_eq!(
         *inputs.lock().unwrap(),
-        vec![
-            format!("workspace:{}", dir.path().canonicalize().unwrap().display()),
-            "\u{4f60}\u{597d}\n\u{7b2c}\u{4e8c}\u{884c}".into()
-        ]
+        vec!["\u{4f60}\u{597d}\n\u{7b2c}\u{4e8c}\u{884c}".to_owned()]
     );
     let output = Command::new(env!("CARGO_BIN_EXE_kyler"))
         .arg("--config")

@@ -1,4 +1,5 @@
 use super::{ready, render};
+use crate::agent::AgentHandle;
 use crate::{
     app,
     components::{status, transcript},
@@ -12,8 +13,6 @@ use std::{collections::HashSet, time::Instant};
 use crossterm::event::{Event as Input, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
 
-use kyler_client::Client;
-use kyler_config::ClientSettings;
 use kyler_protocol::activity::ActivityKind;
 
 #[test]
@@ -96,7 +95,7 @@ fn welcome_logo_is_in_top_border_and_card_is_capped() {
 
 #[test]
 fn unicode_multiline_input_scrolls_with_visible_cursor_and_preserves_paste() {
-    let client = Client::new(ClientSettings::default()).unwrap();
+    let client = AgentHandle::new(Default::default(), None);
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(128);
     let mut state = ready();

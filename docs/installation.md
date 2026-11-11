@@ -169,3 +169,20 @@ Non-interactive setup accepts the environment overrides listed in
 [configuration](configuration.md). Installations always include the backend, Web UI,
 and Node.js runtime. `KYLER_REPOSITORY` selects the GitHub repository used for release
 downloads.
+
+### Local terminal agent
+
+Run `kyler tui` from your project directory. It loads local model credentials and
+executes the agent in the terminal process; backend and Web services do not need
+to be running. The backend access token and `--server` option are not used by TUI.
+
+Resume a local session with `kyler tui --session <session-id>`. Local TUI sessions
+are separate from Web sessions and normally live in `~/.kyler/tui/sessions`.
+The saved workspace must still exist and match the configured sandbox policy.
+
+Reasoning streams in a muted preview showing the latest six display lines. It
+collapses by default when the agent starts an answer or tool call. Click its
+heading or press `Ctrl+O` to toggle the latest reasoning block; expanding retains
+the full text. A manual disclosure choice stays in effect as new fragments arrive.
+Completed live blocks show their elapsed thinking time. Restored history starts
+collapsed and does not invent timing information that was not saved.

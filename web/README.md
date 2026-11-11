@@ -44,8 +44,10 @@ Public Web bindings require authentication; see [security guidance](../SECURITY.
 - Upload images/documents or paste screenshots into the composer; files use the
   same session attachment API as the TUI (20 MB per file).
 - Tool approvals show a preview with Allow once / Deny actions.
-- The current session is remembered in browser local storage. Reload restores
-  saved conversation text and reconnects to an active run without resubmitting it.
+- Selecting a conversation updates `/chat/<id>` in the URL. Reloading or opening
+  that link restores the conversation; browser Back and Forward switch conversations.
+  Opening the home URL without a session starts a new draft. Active runs reconnect
+  using browser-local recovery metadata without resubmitting the input.
   Attachment references appear as names in saved-message replay.
 - The sidebar places Plugins below New chat and groups saved chats
   by workspace. Empty projects can be removed without deleting local files.
@@ -196,9 +198,11 @@ Chat Completions streams may return textual `reasoning_content` or `reasoning`.
 Kyler forwards these as separate reasoning events and retains them in history.
 The Web UI renders a Thinking disclosure only when non-empty content arrives;
 it opens while streaming and collapses afterward. Ordinary text and tool activity
-do not create thinking content. Working remains the overall run status. No thinking
-mode or reasoning-effort parameter is enabled by this display feature. Retained
-reasoning is excluded from subsequent model messages and summary projections.
+do not create thinking content. Working remains the overall run status. The display
+feature does not choose reasoning effort. Agent thinking defaults and
+per-model overrides are described in [configuration](../docs/configuration.md#model-thinking-mode).
+Only active thinking-mode tool continuations resend the matching current-turn
+reasoning. Prior-turn reasoning and summary projections exclude it.
 
 ## Artifact preview panel
 

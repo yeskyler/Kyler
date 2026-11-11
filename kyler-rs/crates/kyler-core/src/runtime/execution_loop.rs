@@ -14,7 +14,11 @@ use crate::{
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use async_openai::{Client, config::OpenAIConfig, types::chat::CreateChatCompletionRequestArgs};
+use async_openai::{
+    Client,
+    config::OpenAIConfig,
+    types::chat::{CreateChatCompletionRequestArgs, CreateChatCompletionResponse},
+};
 use backon::{ExponentialBuilder, Retryable};
 
 impl Agent {
@@ -31,6 +35,7 @@ impl Agent {
         );
         let mut explicit_loaded = false;
         loop {
+            let preparing = crate::diagnostics::enabled().then(std::time::Instant::now);
             let step_agent = self.tool_snapshot(&session.session_id).await?;
             if !explicit_loaded {
                 step_agent
@@ -106,6 +111,11 @@ impl Agent {
             let messages = step_agent
                 .prepare_messages(session, &tools, &client, stream)
                 .await?;
+            if let Some(started) = preparing {
+                tracing::info!(target: "kyler_latency", session_id=%session.session_id,
+                    execution_id=%session.current_execution()?.execution_id,
+                    step=session.current_execution()?.current_step, elapsed_ms=started.elapsed().as_secs_f64()*1000.0, "step preparation latency");
+            }
             let mut builder = CreateChatCompletionRequestArgs::default();
             builder.model(&self.model).messages(messages);
             if !tools.is_empty() {
@@ -122,11 +132,16 @@ impl Agent {
                     .await
                     .map_err(ModelError::wrap)?
             } else {
+                let request =
+                    crate::models::provider_request(request, session, self.thinking_mode())?;
                 let response = tokio::time::timeout(
                     Duration::from_secs(60),
                     (|| async {
                         self.observe(super::observation::RuntimeObservation::ModelRequestStarted);
-                        client.chat().create(request.clone()).await
+                        client
+                            .chat()
+                            .create_byot::<_, serde_json::Value>(request.clone())
+                            .await
                     })
                     .retry(ExponentialBuilder::default().with_max_times(3)),
                 )
@@ -134,6 +149,15 @@ impl Agent {
                 .map_err(|error| ModelError::wrap(error.into()))?
                 .map_err(|error| ModelError::wrap(error.into()))?;
                 self.observe(super::observation::RuntimeObservation::FirstModelEvent);
+                if let Some(text) = response["choices"][0]["message"]["reasoning_content"]
+                    .as_str()
+                    .or(response["choices"][0]["message"]["reasoning"].as_str())
+                    .filter(|text| !text.is_empty())
+                {
+                    self.record(session, vec![ContentItem::Reasoning { text: text.into() }])?;
+                }
+                let response: CreateChatCompletionResponse = serde_json::from_value(response)
+                    .map_err(|error| ModelError::wrap(error.into()))?;
                 if let Some(u) = response.usage {
                     session.memory.observe_prompt_tokens(u.prompt_tokens);
                     session.add_usage(u.prompt_tokens, u.completion_tokens, u.total_tokens);

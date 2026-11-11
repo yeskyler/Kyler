@@ -58,6 +58,19 @@ pub async fn execute(args: Args) -> Result<()> {
     if let Some(Command::Serve(settings)) = &args.command {
         return serve::serve(args.config.as_deref(), settings).await;
     }
+    if let Some(Command::Tui { session }) = &args.command {
+        if args.server.is_some() {
+            return Err(CliError::new(
+                2,
+                "tui runs locally; --server is not supported",
+            ));
+        }
+        let config = kyler_config::loader::load_local(args.config.as_deref())
+            .map_err(|error| CliError::new(2, error.to_string()))?;
+        return kyler_tui::run(config, args.config.clone(), session.clone())
+            .await
+            .map_err(|error| CliError::new(3, format!("{error:#}")));
+    }
     let settings =
         kyler_config::loader::load_client(args.config.as_deref(), args.server.as_deref())
             .map_err(|e| CliError::new(2, e.to_string()))?;
@@ -65,9 +78,7 @@ pub async fn execute(args: Args) -> Result<()> {
     match args.command.unwrap_or(Command::Chat { session: None }) {
         Command::Skills { command } => skills::execute(&client, command, args.json).await,
         Command::Eval { suite, report } => eval::run(&client, &suite, &report).await,
-        Command::Tui { session } => kyler_tui::run(client, session)
-            .await
-            .map_err(|e| CliError::new(3, format!("{e:#}"))),
+        Command::Tui { .. } => unreachable!(),
         Command::Chat { session } => chat::chat(&client, session, args.json).await,
         Command::Run {
             session,

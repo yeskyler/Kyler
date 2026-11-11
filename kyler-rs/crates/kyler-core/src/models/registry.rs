@@ -43,7 +43,7 @@ impl ModelRegistry {
                         capabilities: profile.capabilities.clone(),
                         profile: name,
                         provider: profile.provider,
-                        model: profile.model,
+                        model: profile.model.clone(),
                         revision,
                         context_window_tokens: policy.context_tokens,
                         sliding_window_tokens: policy.sliding_window_tokens(),
@@ -51,6 +51,11 @@ impl ModelRegistry {
                     },
                     policy,
                     output_token_parameter: profile.output_token_parameter,
+                    enable_thinking: super::request::thinking_mode(
+                        &provider.base_url,
+                        &profile.model,
+                        profile.enable_thinking,
+                    ),
                     base_url: provider.base_url.clone(),
                     api_key: provider.api_key.clone(),
                 }),
@@ -242,6 +247,45 @@ tokenizer="cl100k_base"
         assert_eq!(
             model.info.capabilities.tokenizer,
             kyler_protocol::api::models::Tokenizer::Cl100kBase
+        );
+    }
+}
+
+#[cfg(test)]
+mod thinking_tests {
+    use super::ModelRegistry;
+    #[test]
+    fn legacy_and_named_profile_thinking_settings_bind_to_the_model_generation() {
+        let mut config = kyler_config::loader::parse(
+            r#"
+[llm]
+base_url="https://api.siliconflow.cn/v1"
+model="deepseek-ai/DeepSeek-V4-Flash"
+api_key="fixture"
+"#,
+        )
+        .unwrap();
+        let registry = ModelRegistry::new(&config).unwrap();
+        let old = registry.resolve(None).unwrap();
+        assert_eq!(old.enable_thinking, Some(true));
+        config.llm.enable_thinking = Some(false);
+        registry.reload(&config).unwrap();
+        assert_eq!(registry.resolve(None).unwrap().enable_thinking, Some(false));
+        assert_eq!(old.enable_thinking, Some(true));
+        config.models = config.effective_models();
+        config
+            .models
+            .profiles
+            .get_mut("default")
+            .unwrap()
+            .enable_thinking = Some(true);
+        assert_eq!(
+            ModelRegistry::new(&config)
+                .unwrap()
+                .resolve(None)
+                .unwrap()
+                .enable_thinking,
+            Some(true)
         );
     }
 }

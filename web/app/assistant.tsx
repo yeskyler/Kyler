@@ -16,6 +16,11 @@ import {
   runStorageKey,
 } from "@/lib/kyler/client";
 import { sessionTitle } from "@/lib/kyler/sessions";
+import {
+  navigateSession,
+  sessionFromUrl,
+  type NavigationMode,
+} from "@/lib/kyler/session-navigation";
 import { loadHistory } from "@/lib/kyler/history";
 import { createDraftSession, discardDraft } from "@/lib/kyler/drafts";
 import {
@@ -96,10 +101,15 @@ export function Assistant() {
   const infoRef = useRef<Info | null>(null);
   const activeKey = useRef<string | null>(null);
   const requestedSession = useRef<string | null>(null);
+  const navigationInitialized = useRef(false);
   const loading = useRef(0);
   useEffect(() => {
     let disposed = false;
     const sequence = ++loading.current;
+    if (!navigationInitialized.current) {
+      requestedSession.current = sessionFromUrl(window.location.href);
+      navigationInitialized.current = true;
+    }
     async function load() {
       // Opening the home page starts a draft; history requires an explicit selection.
       const saved = requestedSession.current;
@@ -178,7 +188,8 @@ export function Assistant() {
       Object.fromEntries(Object.entries(items).filter(([key]) => key !== loaded.key)),
     );
   };
-  const selectSession = (id: string) => {
+  const selectSession = (id: string, navigation: NavigationMode = "push") => {
+    navigateSession(id, navigation);
     requestedSession.current = id;
     if (loaded?.key !== id) releaseDraft();
     const cached = opened[id];
@@ -198,7 +209,11 @@ export function Assistant() {
     setError("");
     setGeneration((n) => n + 1);
   };
-  const createSession = async (workspace?: string | null, initialText = "") => {
+  const createSession = async (
+    workspace?: string | null,
+    initialText = "",
+    navigation: NavigationMode = "push",
+  ) => {
     const sequence = ++loading.current;
     const info = await api<Info>("info").catch((error) => {
       if (infoRef.current) return infoRef.current;
@@ -210,6 +225,7 @@ export function Assistant() {
       return;
     }
     infoRef.current = info;
+    navigateSession(null, navigation);
     releaseDraft();
     requestedSession.current = null;
     activeKey.current = session.session_id;
@@ -227,7 +243,11 @@ export function Assistant() {
     });
   };
   const admit = (key: string, id: string) => {
-    if (activeKey.current === key) localStorage.setItem(pendingSessionKey, id);
+    if (activeKey.current === key) {
+      localStorage.setItem(pendingSessionKey, id);
+      requestedSession.current = id;
+      navigateSession(id, "replace");
+    }
   };
   const publish = (key: string, id: string) => {
     const promote = (current: Loaded) => ({
@@ -237,6 +257,8 @@ export function Assistant() {
     setOpened((items) => (items[key] ? { ...items, [key]: promote(items[key]) } : items));
     updateLoaded((current) => (current?.key === key ? promote(current) : current));
     if (activeKey.current === key) {
+      requestedSession.current = id;
+      navigateSession(id, "replace");
       localStorage.setItem(storageKey, id);
       localStorage.removeItem(pendingSessionKey);
     }
@@ -247,10 +269,27 @@ export function Assistant() {
     setOpened((items) => Object.fromEntries(Object.entries(items).filter(([key]) => key !== id)));
     setLive((items) => Object.fromEntries(Object.entries(items).filter(([key]) => key !== id)));
     if (loaded?.session.session_id === id) {
-      if (fallback) selectSession(fallback);
-      else await createSession(loaded.session.workspace_root ?? undefined);
+      if (fallback) selectSession(fallback, "replace");
+      else await createSession(loaded.session.workspace_root ?? undefined, "", "replace");
     }
   };
+  useEffect(() => {
+    const restore = () => {
+      const session = sessionFromUrl(window.location.href);
+      if (session) {
+        selectSession(session, "none");
+      } else {
+        releaseDraft();
+        requestedSession.current = null;
+        activeKey.current = null;
+        setLoaded(undefined);
+        setError("");
+        setGeneration((value) => value + 1);
+      }
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  });
   const notice = error ? (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-8">
       <h1 className="text-xl font-semibold">Kyler</h1>
@@ -381,6 +420,7 @@ function Connected({
         loaded.recoverRun,
         {
           onQuestion: questions.update,
+          onReconnect: questions.refresh,
           onAdmitted: (id) => {
             if (!saved.current) admit(loaded.key, id);
           },
@@ -392,7 +432,7 @@ function Connected({
           },
         },
       ),
-    [ensureSession, loaded.key, loaded.recoverRun, questions.update],
+    [ensureSession, loaded.key, loaded.recoverRun, questions.update, questions.refresh],
   );
   const attachmentAdapter = useMemo(() => attachments(ensureSession), [ensureSession]);
   const runtime = useLocalRuntime(adapter, {

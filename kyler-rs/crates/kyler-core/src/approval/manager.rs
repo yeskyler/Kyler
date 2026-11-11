@@ -111,11 +111,12 @@ impl ApprovalManager {
     }
     pub fn update_policy(&self, session: &str, policy: PermissionSnapshot) {
         let mut state = self.state.lock().expect("approval state poisoned");
-        if state
-            .policies
-            .get(session)
-            .is_some_and(|sender| sender.borrow().revision == policy.revision)
-        {
+        if state.policies.get(session).is_some_and(|sender| {
+            let current = sender.borrow();
+            current.revision == policy.revision
+                && current.mode == policy.mode
+                && current.approval == policy.approval
+        }) {
             return;
         }
         state.grants.retain(|(id, _)| id != session);
@@ -130,6 +131,14 @@ impl ApprovalManager {
     }
     pub fn subscribe(&self) -> broadcast::Receiver<ApprovalRecord> {
         self.events.subscribe()
+    }
+    pub fn get(&self, id: &str) -> Option<ApprovalRecord> {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .records
+            .get(id)
+            .map(|pending| pending.record.clone())
     }
     pub fn list(&self, session: &str) -> Vec<ApprovalRecord> {
         let mut records: Vec<_> = self

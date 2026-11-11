@@ -90,6 +90,27 @@ configuration already exists. Setup writes user configuration; use explicit `--c
 with a separate file to isolate development settings. See
 [configuration](configuration.md) for path and override rules.
 
+## Agent latency diagnostics
+
+Set `KYLER_TRACE_LATENCY=1` when starting a development backend or TUI to enable
+the `kyler_latency` log target (at `info` level). Restart the process to change
+this setting. Diagnostics are disabled by default.
+
+The logs correlate sessions and executions with turn admission, step preparation,
+stream response headers, first model/reasoning/text events, and stream completion.
+Request fingerprints, byte counts, token usage, and provider-reported cached and
+reasoning tokens help compare equivalent requests without logging their contents.
+Channel summaries report send counts, total and maximum send wait in microseconds,
+and observations of a full queue. These summaries appear when the stream or
+thread is released; a hosted thread normally closes after each turn. Send wait
+includes scheduler time, and a full-queue observation is a point-in-time sample.
+Cancelled sends may not finish their timing sample. Incomplete model requests
+still produce a summary, including when a turn is cancelled.
+
+Compare repeated requests with the same fingerprint, thinking setting, output
+limit, cache usage, and output volume. The model read-wait measurement includes
+SDK stream waiting; it does not separately measure DNS, TLS, or provider queueing.
+
 ## Installer and release checks
 
 Build the CLI before running installer tests so integration cases are not skipped:

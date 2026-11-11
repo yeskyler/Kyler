@@ -705,3 +705,155 @@ async fn tool_preparation_is_visible_before_arguments_finish() {
     );
     server.await.unwrap();
 }
+
+async fn thinking_agent(
+    url: String,
+    toolbox: ToolBox,
+    directory: &std::path::Path,
+    enabled: bool,
+) -> Agent {
+    let mut config = kyler_config::AppConfig::default();
+    config.llm.base_url = url;
+    config.llm.api_key = kyler_config::SecretString::new("fixture");
+    config.llm.model = "fixture".into();
+    config.llm.enable_thinking = Some(enabled);
+    config.skills.enabled = false;
+    config.session.enabled = true;
+    config.session.directory = directory.join("sessions");
+    Agent::from_config_with_tools(&config, Arc::new(toolbox))
+        .await
+        .unwrap()
+}
+#[tokio::test]
+async fn enabled_thinking_is_sent_and_current_tool_reasoning_survives_only_its_turn() {
+    let response = vec![
+        chunk(json!({"reasoning_content":"Plan the echo."}), Value::Null),
+        chunk(
+            json!({"tool_calls":[{"index":0,"id":"echo-call","type":"function","function":{"name":"echo","arguments":"{\"text\":\"ok\"}"}}]}),
+            Value::Null,
+        ),
+        chunk(json!({}), json!("tool_calls")),
+    ];
+    let (url, server) = fixture(vec![response, answer("Done"), answer("Next")]).await;
+    let directory = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let agent = thinking_agent(
+        url,
+        ToolBox::from([(
+            "echo".into(),
+            Arc::new(Echo(calls.clone())) as Arc<dyn Tool>,
+        )]),
+        directory.path(),
+        true,
+    )
+    .await;
+    let mut stream = agent.run_stream("echo once").await.unwrap();
+    let mut thinking = String::new();
+    while let Some(event) = stream.next().await {
+        if let AgentStreamEvent::ReasoningDelta { text, .. } = event {
+            thinking.push_str(&text);
+        }
+    }
+    let first = stream.finish().await.unwrap();
+    assert_eq!(first.output, "Done");
+    assert_eq!(thinking, "Plan the echo.");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    agent
+        .run_stream_in_session(first.session, "new turn")
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    let requests = server.await.unwrap();
+    assert!(
+        requests
+            .iter()
+            .all(|request| request["enable_thinking"] == true)
+    );
+    let continuation = requests[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["tool_calls"].is_array())
+        .unwrap();
+    assert_eq!(continuation["reasoning_content"], "Plan the echo.");
+    assert!(
+        requests[2]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|message| message.get("reasoning_content").is_none())
+    );
+}
+#[tokio::test]
+async fn nonstreaming_thinking_and_tool_continuation_use_the_same_provider_parameters() {
+    use axum::{Json, Router, extract::State, routing::post};
+    let requests = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    async fn completion(
+        State(requests): State<Arc<std::sync::Mutex<Vec<Value>>>>,
+        Json(request): Json<Value>,
+    ) -> Json<Value> {
+        let continuation = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["role"] == "tool");
+        requests.lock().unwrap().push(request);
+        let message = if continuation {
+            json!({"role":"assistant","content":"Done"})
+        } else {
+            json!({"role":"assistant","content":null,"reasoning_content":"Plan nonstream echo.","tool_calls":[{"id":"call","type":"function","function":{"name":"echo","arguments":"{\"text\":\"ok\"}"}}]})
+        };
+        Json(
+            json!({"id":"fixture","object":"chat.completion","created":0,"model":"fixture","choices":[{"index":0,"message":message,"finish_reason":if continuation {"stop"} else {"tool_calls"}}]}),
+        )
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route("/v1/chat/completions", post(completion))
+        .with_state(requests.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let agent = thinking_agent(
+        url,
+        ToolBox::from([("echo".into(), Arc::new(Echo(calls)) as Arc<dyn Tool>)]),
+        directory.path(),
+        true,
+    )
+    .await;
+    assert_eq!(agent.run("echo once").await.unwrap().output, "Done");
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests
+            .iter()
+            .all(|request| request["enable_thinking"] == true)
+    );
+    let message = requests[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["tool_calls"].is_array())
+        .unwrap();
+    assert_eq!(message["reasoning_content"], "Plan nonstream echo.");
+    server.abort();
+}
+#[tokio::test]
+async fn explicit_thinking_disable_is_sent_as_false() {
+    let (url, server) = fixture(vec![answer("Done")]).await;
+    let directory = tempfile::tempdir().unwrap();
+    thinking_agent(url, ToolBox::new(), directory.path(), false)
+        .await
+        .run_stream("hello")
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    assert_eq!(server.await.unwrap()[0]["enable_thinking"], false);
+}

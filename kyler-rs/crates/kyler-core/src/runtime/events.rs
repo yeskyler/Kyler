@@ -101,6 +101,7 @@ impl AgentCancelHandle {
 pub(super) struct StreamControl {
     sender: mpsc::Sender<AgentStreamEvent>,
     cancel: watch::Receiver<bool>,
+    timing: crate::diagnostics::ChannelTiming,
 }
 
 impl StreamControl {
@@ -115,7 +116,7 @@ impl StreamControl {
         tokio::select! {
             biased;
             _ = self.cancelled() => anyhow::bail!("agent execution cancelled"),
-            result = self.sender.send(event) => result.map_err(|_| anyhow::anyhow!("stream consumer disconnected")),
+            result = self.timing.send(&self.sender, event) => result.map_err(|_| anyhow::anyhow!("stream consumer disconnected")),
         }
     }
 }
@@ -147,6 +148,10 @@ impl AgentStream {
             let control = StreamControl {
                 sender,
                 cancel: cancelled,
+                timing: crate::diagnostics::ChannelTiming::new(
+                    "agent_to_runner",
+                    &session.session_id,
+                ),
             };
             let result = agent.execute_turn(&mut session, turn, Some(&control)).await;
             let result = result.and_then(|output| {
@@ -226,6 +231,7 @@ pub(super) fn compaction_test_stream() -> (
         StreamControl {
             sender,
             cancel: cancelled,
+            timing: crate::diagnostics::ChannelTiming::new("agent_to_runner", "test"),
         },
         receiver,
         cancel,

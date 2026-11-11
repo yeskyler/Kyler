@@ -33,6 +33,23 @@ impl Agent {
             .map(|m| m.output_token_parameter)
             .unwrap_or(OutputTokenParameter::MaxTokens)
     }
+    pub(super) fn thinking_mode(&self) -> Option<bool> {
+        self.model_snapshot
+            .as_ref()
+            .map(|m| m.enable_thinking)
+            .unwrap_or_else(|| crate::models::thinking_mode(&self.base_url, &self.model, None))
+    }
+    pub(super) fn request_messages(
+        &self,
+        messages: Vec<async_openai::types::chat::ChatCompletionRequestMessage>,
+        session: &crate::Session,
+    ) -> Result<serde_json::Value> {
+        let mut value = serde_json::to_value(messages)?;
+        if self.thinking_mode() == Some(true) {
+            crate::models::attach_reasoning(&mut value, session);
+        }
+        Ok(value)
+    }
     pub fn model_info(&self) -> Option<ModelInfo> {
         self.model_snapshot.as_ref().map(|m| m.info.clone())
     }

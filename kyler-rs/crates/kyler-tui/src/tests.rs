@@ -1,8 +1,10 @@
 mod attachments;
 mod panels;
+mod reasoning;
 mod rendering;
 mod streaming;
 
+use crate::agent::AgentEvent;
 use crate::{
     layout::View,
     state::{Phase, State},
@@ -10,7 +12,6 @@ use crate::{
 
 use ratatui::{Terminal, backend::TestBackend};
 
-use kyler_client::ClientEvent;
 use kyler_protocol::api::{
     ApiErrorBody, ServerInfo, SessionUsage,
     event::{EventPayload, ServerEvent},
@@ -55,7 +56,7 @@ fn render(terminal: &mut Terminal<TestBackend>, view: &mut View, state: &mut Sta
         .join("\n")
 }
 fn server(state: &mut State, seq: u64, payload: EventPayload) {
-    state.stream(ClientEvent::Server(ServerEvent {
+    state.stream(AgentEvent::Event(ServerEvent {
         run_id: "run".into(),
         execution_id: None,
         seq,
@@ -63,8 +64,8 @@ fn server(state: &mut State, seq: u64, payload: EventPayload) {
         payload,
     }));
 }
-fn result(answer: &str) -> ClientEvent {
-    ClientEvent::Result(RunInfo {
+fn result(answer: &str) -> AgentEvent {
+    AgentEvent::Result(RunInfo {
         permissions: None,
         model: None,
         run_id: "run".into(),
@@ -80,8 +81,8 @@ fn result(answer: &str) -> ClientEvent {
     })
 }
 
-fn model_failure() -> ClientEvent {
-    let ClientEvent::Result(mut info) = result("") else {
+fn model_failure() -> AgentEvent {
+    let AgentEvent::Result(mut info) = result("") else {
         unreachable!()
     };
     info.status = RunStatus::Failed;
@@ -90,5 +91,5 @@ fn model_failure() -> ClientEvent {
         code: "model_image_unsupported".into(),
         message: "The selected model does not support image input. Use /model to select a vision-capable model, then resend.".into(),
     });
-    ClientEvent::Result(info)
+    AgentEvent::Result(info)
 }
