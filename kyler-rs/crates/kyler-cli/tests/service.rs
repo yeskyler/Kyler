@@ -573,7 +573,10 @@ async fn network_mode_starts_with_default_workspace_and_displays_connection_addr
     );
     let display = String::from_utf8_lossy(&started.stderr);
     assert!(display.contains("Local access:"));
-    assert!(display.contains("Local network access:"));
+    assert!(display.contains("Network access:"));
+    assert!(!display.contains("Local network access:"));
+    assert!(display.matches("  Interface:").count() <= 1);
+    assert!(!display.contains("Interface: utun"));
     assert!(display.contains(&h.url));
     assert!(!display.contains("http://0.0.0.0"));
     assert!(!display.contains("service-token"));
