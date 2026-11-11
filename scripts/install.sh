@@ -92,39 +92,6 @@ prepare_linux_sandbox() {
     fi
     bubblewrap_ready || fail 'Bubblewrap >= 0.5.0 is still unavailable after installation.'
 }
-show_public_web() {
-    web_bind=$(awk '
-        /^[[:space:]]*\[/ {web=($0 ~ /^[[:space:]]*\[web\][[:space:]]*(#.*)?$/)}
-        web && /^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true([[:space:]]|$)/ {enabled=1}
-        web && /^[[:space:]]*bind[[:space:]]*=/ {
-            value=$0; sub(/^[^=]*=[[:space:]]*/, "", value)
-            quote=substr(value,1,1)
-            if (quote=="\"" || quote==sprintf("%c",39)) {value=substr(value,2); split(value,parts,quote); address=parts[1]}
-        }
-        END {if (enabled) print address}
-    ' "$config_path")
-    case "$web_bind" in
-        0.0.0.0:*) public_port=${web_bind##*:} ;;
-        *) return 0 ;;
-    esac
-    public_host=${KYLER_PUBLIC_HOST:-}
-    if [ -z "$public_host" ]; then
-        printf '\nDetecting public IPv4 address (optional, up to 5 seconds)...\n'
-        public_host=$(curl -4 --fail --silent --show-error --proto '=https' --tlsv1.2 --connect-timeout 3 --max-time 5 https://api.ipify.org 2>/dev/null) || public_host=
-        if ! "$bundle/runtime/node" -e 'process.exit(require("node:net").isIP(process.argv[1])===4 ? 0 : 1)' "$public_host"; then public_host=; fi
-    fi
-    if [ -n "$public_host" ] && "$bundle/runtime/node" -e '
-        const host=process.argv[1];
-        process.exit(require("node:net").isIP(host)===4 || /^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(host) ? 0 : 1);
-    ' "$public_host"; then
-        printf '\nPublic Web address: http://%s:%s\n' "$public_host" "$public_port"
-        printf 'Use your Web access password. Public access requires the cloud security group and firewall to allow TCP %s.\n' "$public_port"
-        printf 'This is a suggested address; external reachability has not been verified.\n'
-    else
-        printf '\nPublic Web address: http://YOUR_SERVER_PUBLIC_IP:%s\n' "$public_port"
-        printf 'Automatic detection was unavailable. Set KYLER_PUBLIC_HOST to your public IPv4 address or domain when running the installer.\n'
-    fi
-}
 transfer() {
     curl --fail --location --show-error --proto '=https' --proto-redir '=https' --tlsv1.2 \
         --connect-timeout 15 --speed-limit 1024 --speed-time 60 --retry 2 --retry-delay 2 "$@"
@@ -373,7 +340,6 @@ if [ "$start_server" = true ]; then
     fi
     printf '\nKyler · Service status and management\n\n'
     installed_service service status
-    show_public_web
 else printf '\nKyler · Service status and management\n\nServices not started.\n'; fi
 printf '\nInstallation complete.\n'
 printf '\nConfiguration: %s\n' "$config_path"
