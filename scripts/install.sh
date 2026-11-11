@@ -1,6 +1,9 @@
 #!/bin/sh
 # Install a complete release bundle for the current platform.
 set -eu
+# Namespace/firewall tools are commonly installed in sbin on Linux.
+PATH=${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin
+export PATH
 usage() {
     cat <<'HELP'
 Usage: sh install.sh [OPTIONS]
@@ -14,8 +17,9 @@ Local installation: sh install.sh --bundle /path/to/kyler-platform.tar.gz
 Complete bundles include the backend, Web UI and Node.js runtime.
 Installation automatically adds ~/.local/bin to PATH for new terminals.
 Defaults: Backend 127.0.0.1:30001; Web 127.0.0.1:30002.
-Setup accepts custom listening addresses and backend connection URLs.
-Existing values are kept with Enter. Passwords are hidden.
+Setup offers local-only or local-network access. Web access uses a generated token.
+Existing values are kept with Enter. API keys are hidden.
+Sandbox dependencies and real execution are checked before activation.
 HELP
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
@@ -69,28 +73,74 @@ check_manifest() {
     else (cd "$1" && sha256sum -c SHA256SUMS >/dev/null) || fail 'Bundle checksum mismatch.'; fi
 }
 step() { printf '\n[%s/6] %s\n' "$1" "$2"; }
+check_system() {
+    host_os=$(uname -s)
+    case "$host_os" in Darwin) os=apple-darwin ;; Linux) os=unknown-linux-gnu ;; *) fail 'Kyler release bundles currently support macOS and Linux only.' ;; esac
+    case "$(uname -m)" in arm64|aarch64) arch=aarch64 ;; x86_64|amd64) arch=x86_64 ;; *) fail 'Unsupported architecture; use an x86_64 or ARM64 host.' ;; esac
+    printf 'Platform: %s %s\n' "$host_os" "$arch"
+    if [ "$host_os" = Linux ]; then
+        # Parse display metadata only; never execute os-release as shell code.
+        if [ -r /etc/os-release ]; then
+            distribution=$(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '\042\047' | head -n 1)
+            printf 'Distribution: %s\n' "${distribution:-unknown}"
+        fi
+        libc=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+        case "$libc" in glibc\ *) printf 'Runtime: %s (bundle execution will verify compatibility)\n' "$libc" ;;
+            *) fail 'Current Linux bundles require glibc. musl/Alpine and unidentified runtimes need a separately compatible build; no system libraries were changed.' ;; esac
+    fi
+    for utility in tar awk sed find mktemp; do
+        command -v "$utility" >/dev/null 2>&1 || fail "Required command is missing: $utility"
+    done
+    command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail 'Install shasum or sha256sum first.'
+}
 prepare_linux_sandbox() {
-    [ "$(uname -s)" = Linux ] || return 0
-    printf 'Checking Linux sandbox dependency (Bubblewrap >= 0.5.0)...\n'
+    [ "$(uname -s)" = Linux ] || { printf 'Backend: system Seatbelt (no additional download).\n'; return 0; }
+    printf 'Checking Linux sandbox dependencies (Bubblewrap >= 0.5.0 and isolated networking)...\n'
     bubblewrap_ready() {
         command -v bwrap >/dev/null 2>&1 || return 1
         bwrap_version=$(bwrap --version) || return 1
         printf '%s\n' "$bwrap_version"
-        printf '%s\n' "$bwrap_version" | awk '{split($NF,v,"."); exit !(v[1]+0 > 0 || v[2]+0 >= 5)}'
+        printf '%s\n' "$bwrap_version" | awk 'NF==2 && $1=="bubblewrap" && $2 ~ /^[0-9]+\.[0-9]+\.[0-9]+$/ {split($2,v,"."); ok=(v[1]+0 > 0 || v[2]+0 >= 5)} END {exit !ok}'
     }
-    if bubblewrap_ready; then
-        printf 'Reusing installed Bubblewrap.\n'
+    dependencies_ready() {
+        missing=
+        bubblewrap_ready || missing=bwrap
+        for tool in slirp4netns ip unshare nsenter iptables ip6tables iptables-restore ip6tables-restore sh sleep; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+        done
+        [ -z "$missing" ]
+    }
+    if dependencies_ready; then
+        printf 'Reusing installed Bubblewrap and networking tools.\n'
         return 0
     fi
-    command -v apt >/dev/null 2>&1 || fail 'Install Bubblewrap >= 0.5.0 with your Linux package manager, then rerun this installer.'
-    printf 'Installing Bubblewrap. Administrator access may be required.\n'
-    if [ "$(id -u)" = 0 ]; then
-        apt update && apt install -y bubblewrap || fail 'Cannot install Bubblewrap. Run apt update and apt install -y bubblewrap, then retry.'
-    else
-        command -v sudo >/dev/null 2>&1 || fail 'sudo is required. Ask an administrator to install Bubblewrap >= 0.5.0.'
-        sudo apt update && sudo apt install -y bubblewrap || fail 'Cannot install Bubblewrap. Run sudo apt update and sudo apt install -y bubblewrap, then retry.'
+    printf 'Missing or outdated: %s\n' "$missing"
+    manager=
+    for candidate in apt-get dnf yum pacman zypper; do
+        if command -v "$candidate" >/dev/null 2>&1; then manager=$candidate; break; fi
+    done
+    case "$manager" in
+        apt-get) packages='bubblewrap slirp4netns iproute2 util-linux iptables'; instruction="apt-get update && apt-get install -y $packages" ;;
+        dnf|yum) packages='bubblewrap slirp4netns iproute util-linux iptables'; instruction="$manager install -y $packages" ;;
+        pacman) packages='bubblewrap slirp4netns iproute2 util-linux iptables'; instruction="pacman -S --needed --noconfirm $packages" ;;
+        zypper) packages='bubblewrap slirp4netns iproute2 util-linux iptables'; instruction="zypper --non-interactive install $packages" ;;
+        *) fail "No supported package manager found. Ask an administrator to install Bubblewrap >= 0.5.0 and these tools: $missing. Then rerun the installer." ;;
+    esac
+    if [ "$(id -u)" = 0 ]; then elevated=; else
+        command -v sudo >/dev/null 2>&1 || fail "Administrator access is required. Ask an administrator to run: $instruction"
+        elevated=sudo
     fi
-    bubblewrap_ready || fail 'Bubblewrap >= 0.5.0 is still unavailable after installation.'
+    printf 'Preparing dependencies using %s. Administrator access may be required.\nManual command (as administrator): %s\n' "$manager" "$instruction"
+    # Package names are fixed above; no repository metadata is executed as a command.
+    case "$manager" in
+        apt-get)
+            $elevated apt-get update && $elevated apt-get install -y $packages || fail "Dependency installation failed. Run as administrator: $instruction" ;;
+        dnf|yum) $elevated "$manager" install -y $packages || fail "Dependency installation failed. Run as administrator: $instruction" ;;
+        pacman) $elevated pacman -S --needed --noconfirm $packages || fail "Dependency installation failed. Run as administrator: $instruction" ;;
+        zypper) $elevated zypper --non-interactive install $packages || fail "Dependency installation failed. Run as administrator: $instruction" ;;
+    esac
+    dependencies_ready || fail "Dependencies remain unavailable: $missing. The system repository may be too old or commands may be missing from PATH. No third-party repositories were added."
+    printf 'Dependency commands ready; native sandbox execution will be checked after unpacking.\n'
 }
 transfer() {
     curl --fail --location --show-error --proto '=https' --proto-redir '=https' --tlsv1.2 \
@@ -114,13 +164,14 @@ manual_help() {
 printf '\nKyler installer\n\nInstall location: %s/.local/share/kyler\nConfiguration: %s/.kyler/config.toml\n' "$HOME" "$HOME"
 printf 'Existing configuration can be kept with Enter. API keys are hidden.\n'
 printf 'Already downloaded a bundle? Run: sh install.sh --bundle /path/to/kyler-platform.tar.gz\n'
-step 1 'Check environment and release version'
+step 1 'Check system compatibility'
+check_system
+step 2 'Prepare sandbox dependencies'
 prepare_linux_sandbox
+step 3 'Download and verify bundle'
 if [ -z "$bundle" ]; then
     command -v curl >/dev/null 2>&1 || fail 'curl is required.'
     command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail 'Install shasum or sha256sum first.'
-    case "$(uname -s)" in Darwin) os=apple-darwin ;; Linux) os=unknown-linux-gnu ;; *) fail 'This platform has no release bundle.' ;; esac
-    case "$(uname -m)" in arm64|aarch64) arch=aarch64 ;; x86_64|amd64) arch=x86_64 ;; *) fail 'Unsupported architecture.' ;; esac
     repository=${KYLER_REPOSITORY:-yeskyler/Kyler}
     case "$repository" in *[!a-zA-Z0-9_./-]*|*..*|/*|*/|*/*/*) fail 'Invalid release repository.' ;; esac
     mirror=https://www.kyler.work/releases
@@ -140,7 +191,6 @@ if [ -z "$bundle" ]; then
     case "$requested_version" in v*) ;; *) requested_version=v$requested_version ;; esac
     asset=kyler-$requested_version-$arch-$os.tar.gz
     github_release=https://github.com/$repository/releases/download/$requested_version
-    step 2 'Download release bundle'
     printf 'Version: %s\nPlatform: %s-%s\nFile: %s\n' "$requested_version" "$arch" "$os" "$asset"
     cache_dir=${XDG_CACHE_HOME:-$HOME/.cache}/kyler/downloads/$requested_version
     mkdir -p "$cache_dir"
@@ -188,14 +238,12 @@ if [ -z "$bundle" ]; then
         manual_help
         fail 'Both download sources failed. Existing installation was kept.'
     fi
-    step 3 'Verify checksums and unpack bundle'
     expected=$(awk -v name="$asset" '$2==name || $2=="*"name {print $1}' "$scratch/release-checksums")
     [ -n "$expected" ] && [ "$expected" = "$(checksum "$bundle")" ] || fail 'Release checksum mismatch. Installation stopped.'
     printf 'Release SHA256 checksum verified.\n'
 else
-    step 2 'Use local bundle (download skipped)'
+    printf 'Use local bundle (download skipped).\n'
     printf 'Bundle: %s\n' "$bundle"
-    step 3 'Verify checksums and unpack bundle'
 fi
 if [ -n "$bundle" ]; then
     case "$bundle" in /*) ;; *) bundle=$PWD/$bundle ;; esac
@@ -218,7 +266,7 @@ if [ -n "$bundle" ]; then
 fi
 case "$local_binary" in /*) ;; *) local_binary=$PWD/$local_binary ;; esac
 [ -f "$local_binary" ] && [ -r "$local_binary" ] || fail "Binary not found or unreadable: $local_binary"
-step 4 'Install application files'
+step 4 'Check application and sandbox'
 install_dir=$HOME/.local/bin
 installed_binary=$install_dir/kyler
 config_dir=$HOME/.kyler
@@ -226,14 +274,15 @@ config_path=$config_dir/config.toml
 data_dir=$HOME/.local/share/kyler
 [ ! -d "$installed_binary" ] || fail "$installed_binary is a directory."
 [ ! -d "$config_path" ] || fail "$config_path is a directory."
-mkdir -p "$install_dir" "$config_dir"
-binary_stage=$(mktemp "$install_dir/.kyler-install.XXXXXX")
+binary_stage=$(mktemp "$scratch/kyler-check.XXXXXX")
 cp "$local_binary" "$binary_stage"; chmod 755 "$binary_stage"
 unset KYLER_INTERNAL_TOOL_WORKER KYLER_STARTUP_TRACE
 version=$("$binary_stage" --version) || fail 'The new binary cannot run on this machine; installed version was kept.'
 case "$version" in 'kyler '[0-9]*) ;; *) fail 'File did not report a kyler version.' ;; esac
 case "${version#kyler }" in *[!a-zA-Z0-9.+-]*) fail 'Invalid binary version.' ;; esac
-"$bundle/runtime/node" --version >/dev/null || fail 'Bundled Node.js cannot run on this machine.'
+"$bundle/runtime/node" --version || fail 'Bundled Node.js cannot run on this machine; check its architecture and runtime requirements. Previous installation was kept.'
+printf 'Checking native sandbox with the new binary as the current user...\n'
+"$binary_stage" doctor || fail 'Sandbox self-check failed. Previous installation and configuration were kept. Inspect the diagnostic above; check Linux user namespaces, AppArmor or container restrictions with your administrator.'
 mkdir -p "$data_dir/versions"
 [ ! -e "$data_dir/current" ] || [ -L "$data_dir/current" ] || fail 'current must be a version symlink.'
 bundle_id=$(checksum "$bundle/SHA256SUMS")
@@ -244,7 +293,8 @@ else
     cp -R "$bundle/." "$version_stage/"
     mv "$version_stage" "$version_dir"; version_stage=
 fi
-step 5 'Configure model and services'
+step 5 'Configure and install'
+mkdir -p "$install_dir" "$config_dir"
 if [ ! -e "$config_path" ]; then
     cat > "$config_path" <<'CONFIG'
 [llm]
@@ -349,5 +399,5 @@ if [ "$start_server" = true ]; then
 else printf '\nKyler · Service status and management\n\nServices not started.\n'; fi
 printf '\nInstallation complete.\n'
 printf '\nConfiguration: %s\n' "$config_path"
-printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n  Token:    kyler service token\n'
+printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n  Token:    kyler service token\n  Diagnose: kyler doctor\n'
 printf '\nRun in your project:\n  kyler tui\n'

@@ -1,6 +1,7 @@
 mod access;
 mod chat;
 mod configure;
+mod doctor;
 mod eval;
 mod run;
 mod serve;
@@ -52,6 +53,9 @@ pub async fn execute(args: Args) -> Result<()> {
             *addresses,
             output.as_deref(),
         );
+    }
+    if matches!(&args.command, Some(Command::Doctor)) {
+        return doctor::execute(args.json).await;
     }
     if let Some(Command::Service { command }) = &args.command {
         return service::execute(args.config.as_deref(), command, args.json).await;
@@ -174,6 +178,9 @@ pub async fn execute(args: Args) -> Result<()> {
                 }
             }
         },
-        Command::Serve(_) | Command::Configure { .. } | Command::Service { .. } => unreachable!(),
+        Command::Doctor
+        | Command::Serve(_)
+        | Command::Configure { .. }
+        | Command::Service { .. } => unreachable!(),
     }
 }

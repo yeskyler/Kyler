@@ -58,10 +58,13 @@ def local_bundle(root, binary):
 def sandbox_fixture(root, environment):
     tools = root / "sandbox-tools"
     tools.mkdir()
-    bwrap = tools / "bwrap"
-    bwrap.write_text("#!/bin/sh\nprintf 'bubblewrap 0.9.0\\n'\n")
-    bwrap.chmod(0o755)
+    # Never permit these tests to mutate host packages, even on a Linux test runner.
+    for manager in ("apt-get", "dnf", "yum", "pacman", "zypper"):
+        script = tools / manager
+        script.write_text('#!/bin/sh\necho "Tests cannot install host packages; prepare sandbox dependencies first." >&2\nexit 1\n')
+        script.chmod(0o755)
     environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
+
 
 
 class InstallTests(unittest.TestCase):
@@ -624,7 +627,7 @@ else:
         self.assertIn('api_key = "REPLACEMENT_TEST_KEY"', config.read_text())
 
     def test_server_start_failure_shows_reason_and_recovery_commands(self):
-        self.source.write_text("#!/bin/sh\ncase \"$*\" in\n*--version*) echo 'kyler 0.1.0' ;;\n*service*stop*) exit 0 ;;\n*configure*) exit 0 ;;\n*) echo 'Server address is in use.' >&2; exit 2 ;;\nesac\n")
+        self.source.write_text("#!/bin/sh\ncase \"$*\" in\n*--version*) echo 'kyler 0.1.0' ;;\n*service*stop*) exit 0 ;;\n*doctor*) exit 0 ;;\n*configure*) exit 0 ;;\n*) echo 'Server address is in use.' >&2; exit 2 ;;\nesac\n")
         result = subprocess.run(
             ["sh", str(INSTALLER), "--bundle", str(local_bundle(self.root, self.source)), "--no-configure"],
             env=self.env, capture_output=True, text=True, timeout=10,
@@ -641,6 +644,25 @@ else:
         self.env["SHELL"] = "/bin/sh"
         self.install()
         self.assertTrue((self.home / ".profile").is_file())
+
+
+    def test_failed_doctor_preserves_existing_installation_and_configuration(self):
+        self.install()
+        installed = self.home / ".local/bin/kyler"
+        current = self.home / ".local/share/kyler/current"
+        config = self.home / ".kyler/config.toml"
+        before = (installed.resolve(), current.resolve(), config.read_bytes())
+        self.source.write_text('#!/bin/sh\nif [ "$1" = doctor ]; then echo "namespace denied" >&2; exit 1; fi\nprintf "kyler 0.2.0\\n"\n')
+        result = self.install(success=False)
+        self.assertIn("Sandbox self-check failed", result.stderr)
+        self.assertEqual(before, (installed.resolve(), current.resolve(), config.read_bytes()))
+        self.assertNotIn("[5/6]", result.stdout)
+
+    def test_failed_doctor_on_first_install_does_not_create_configuration(self):
+        self.source.write_text('#!/bin/sh\nif [ "$1" = doctor ]; then exit 1; fi\nprintf "kyler 0.1.0\\n"\n')
+        self.install(success=False)
+        self.assertFalse((self.home / ".kyler/config.toml").exists())
+        self.assertFalse((self.home / ".local/bin/kyler").exists())
 
 
 @unittest.skipUnless((KYLER_BINARY).is_file() and shutil.which("node"), "requires kyler binary and Node")
@@ -727,6 +749,24 @@ class BundleTests(unittest.TestCase):
         self.assertFalse(self.status("stop")["running"])
         self.assertFalse(self.status("status")["web"]["running"])
 
+    def test_doctor_failure_keeps_running_services_and_configuration(self):
+        self.install(self.bundle("doctor-first"))
+        before = self.status("status")
+        current = (self.home / ".local/share/kyler/current").resolve()
+        config = self.home / ".kyler/config.toml"
+        contents = config.read_bytes()
+        broken = self.bundle("doctor-failure")
+        (broken / "bin/kyler").write_text('#!/bin/sh\nif [ "$1" = doctor ]; then echo "sandbox unavailable" >&2; exit 1; fi\nexec ' + shlex.quote(str(KYLER_BINARY)) + ' "$@"\n')
+        self.manifest(broken)
+        result = self.install(broken, success=False)
+        self.assertIn("Sandbox self-check failed", result.stderr)
+        self.assertEqual((self.home / ".local/share/kyler/current").resolve(), current)
+        self.assertEqual(config.read_bytes(), contents)
+        after = self.status("status")
+        self.assertTrue(after["running"])
+        self.assertEqual(before["backend"]["pid"], after["backend"]["pid"])
+        self.assertEqual(before["web"]["pid"], after["web"]["pid"])
+
     @unittest.skipUnless(os.name == "posix", "requires PTY")
     def test_interactive_bundle_uses_three_stages_and_starts_services(self):
         self.env.pop("KYLER_SERVER_BIND")
@@ -762,8 +802,42 @@ class BundleTests(unittest.TestCase):
         self.assertFalse(self.binary.exists())
 
 
+class SystemCompatibilityTests(unittest.TestCase):
+    def check(self, system="Linux", architecture="x86_64", libc="glibc 2.31"):
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory)
+            for name, body in {
+                "uname": 'if [ "$1" = -s ]; then echo "$TEST_SYSTEM"; else echo "$TEST_ARCH"; fi',
+                "getconf": 'printf "%s\\n" "$TEST_LIBC"',
+            }.items():
+                path = tools / name
+                path.write_text("#!/bin/sh\n" + body + "\n")
+                path.chmod(0o755)
+            text = INSTALLER.read_text()
+            function = text[text.index("check_system() {"):text.index("prepare_linux_sandbox() {")]
+            env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ["PATH"], TEST_SYSTEM=system, TEST_ARCH=architecture, TEST_LIBC=libc)
+            return subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\ncheck_system'], env=env, capture_output=True, text=True, timeout=5)
+
+    def test_supported_platforms_and_architecture_aliases(self):
+        for system, architecture in (("Linux", "x86_64"), ("Linux", "aarch64"), ("Darwin", "arm64"), ("Darwin", "x86_64")):
+            with self.subTest(system=system, architecture=architecture):
+                result = self.check(system, architecture)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_musl_or_unidentified_runtime_stops_before_download(self):
+        for libc in ("musl", ""):
+            result = self.check(libc=libc)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("require glibc", result.stderr)
+
+    def test_unsupported_host_or_architecture_stops(self):
+        for kwargs in ({"system": "FreeBSD"}, {"architecture": "armv7l"}):
+            result = self.check(**kwargs)
+            self.assertNotEqual(result.returncode, 0)
+
+
 class SandboxSetupTests(unittest.TestCase):
-    def check(self, version="0.9.0", sudo=True, fail_install=False):
+    def check(self, version="0.9.0", manager="apt-get", root_user=False, sudo=True, fail_install=False, missing_network=False, upgrade=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             tools = root / "bin"
@@ -772,40 +846,74 @@ class SandboxSetupTests(unittest.TestCase):
             marker = root / "installed"
             scripts = {
                 "uname": "echo Linux",
-                "id": "echo 1000",
-                "bwrap": 'if [ -f "$SANDBOX_MARKER" ]; then echo "bubblewrap 0.9.0"; else echo "bubblewrap $SANDBOX_VERSION"; fi',
+                "id": "echo " + ("0" if root_user else "1000"),
+                "bwrap": 'if [ -f "$SANDBOX_MARKER" ] && [ "$UPGRADE" = yes ]; then echo "bubblewrap 0.9.0"; else echo "bubblewrap $SANDBOX_VERSION"; fi',
                 "sudo": 'printf "sudo %s\\n" "$*" >> "$SANDBOX_LOG"; exec "$@"',
-                "apt": 'printf "apt %s\\n" "$*" >> "$SANDBOX_LOG"; [ "$FAIL_INSTALL" != yes ] || exit 1; if [ "$1" = install ]; then touch "$SANDBOX_MARKER"; fi',
             }
+            if manager:
+                scripts[manager] = 'printf "%s %s\\n" "${0##*/}" "$*" >> "$SANDBOX_LOG"; [ "$FAIL_INSTALL" != yes ] || exit 1; touch "$SANDBOX_MARKER"'
+            for tool in ("slirp4netns", "ip", "unshare", "nsenter", "iptables", "ip6tables", "iptables-restore", "ip6tables-restore", "sleep"):
+                if not missing_network: scripts[tool] = "exit 0"
             for name, body in scripts.items():
                 if name == "sudo" and not sudo: continue
                 path = tools / name
                 path.write_text("#!/bin/sh\n" + body + "\n")
                 path.chmod(0o755)
+            # A closed PATH ensures tests can never invoke the host package manager or sudo.
+            for utility in ("awk", "touch", "sh"):
+                (tools / utility).symlink_to(shutil.which(utility))
             text = INSTALLER.read_text()
             function = text[text.index("prepare_linux_sandbox() {"):text.index("transfer() {")]
-            env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ["PATH"], SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no")
-            result = subprocess.run(["sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\nprepare_linux_sandbox'], env=env, capture_output=True, text=True, timeout=10)
+            env = dict(os.environ, PATH=str(tools), SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no", UPGRADE="yes" if upgrade else "no")
+            result = subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\nprepare_linux_sandbox'], env=env, capture_output=True, text=True, timeout=10)
             return result, log.read_text() if log.exists() else ""
 
-    def test_recent_bubblewrap_is_reused_without_apt(self):
+    def test_recent_bubblewrap_and_network_tools_are_reused(self):
         result, commands = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(commands, "")
         self.assertIn("Reusing installed Bubblewrap", result.stdout)
 
-    def test_old_bubblewrap_is_upgraded_and_version_checked(self):
-        result, commands = self.check("0.4.0")
+    def test_package_managers_upgrade_and_recheck(self):
+        for manager in ("apt-get", "dnf", "yum", "pacman", "zypper"):
+            with self.subTest(manager=manager):
+                result, commands = self.check("0.4.0", manager=manager)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("sudo " + manager, commands)
+                self.assertIn("bubblewrap slirp4netns", commands)
+                self.assertIn("bubblewrap 0.9.0", result.stdout)
+                if manager == "apt-get": self.assertIn("sudo apt-get update", commands)
+                if manager == "pacman": self.assertNotIn("-Sy", commands)
+
+    def test_root_does_not_require_sudo(self):
+        result, commands = self.check("0.4.0", root_user=True, sudo=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("sudo apt update", commands)
-        self.assertIn("sudo apt install -y bubblewrap", commands)
-        self.assertIn("bubblewrap 0.9.0", result.stdout)
+        self.assertNotIn("sudo", commands)
 
     def test_failed_package_install_stops_with_manual_commands(self):
         result, commands = self.check("0.4.0", fail_install=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("sudo apt update", result.stderr)
-        self.assertNotIn("apt install -y bubblewrap", commands)
+        self.assertIn("apt-get update", result.stderr)
+        self.assertNotIn("apt-get install", commands)
+
+    def test_unsupported_manager_or_missing_privileges_stop(self):
+        for kwargs in ({"manager": None}, {"sudo": False}):
+            result, commands = self.check("0.4.0", **kwargs)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(commands, "")
+            self.assertIn("administrator", result.stderr.lower())
+
+    def test_old_repository_and_missing_network_tools_fail_recheck(self):
+        for kwargs in ({"version": "0.4.0", "upgrade": False}, {"missing_network": True}):
+            result, commands = self.check(**kwargs)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("remain unavailable", result.stderr)
+            self.assertIn("install", commands)
+
+    def test_invalid_bubblewrap_version_is_not_accepted(self):
+        result, commands = self.check("unknown", manager=None)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(commands, "")
 
 
 if __name__ == "__main__":

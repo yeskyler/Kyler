@@ -51,6 +51,7 @@ async fn execute(
     let cwd = &request.environment.working_directory;
     let fs = &request.filesystem;
     match request.tool.as_str() {
+        "sandbox_diagnostics" => super::diagnostics::probe(request.arguments).await,
         "review_git" => {
             ensure!(
                 !request.allow_commands && request.filesystem.readwrite_paths.is_empty(),

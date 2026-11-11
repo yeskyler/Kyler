@@ -23,10 +23,11 @@ it downloads both files again from GitHub for the same version. Checksum failure
 stop installation; they do not silently switch sources. `--version VERSION` skips
 latest-version discovery.
 
-Six numbered steps cover environment checks, download, verification, installation,
-configuration, and service startup. Downloads show the source, file, size, speed, and
-remaining time. Failed downloads display manual download and local installation
-commands. Local bundles skip release downloads.
+Six numbered steps cover system compatibility, sandbox dependencies, download and
+verification, native self-checks, configuration and installation, then service startup.
+Downloads show the source, file, size, speed, and remaining time. Failed downloads
+display manual download and local installation commands. Local bundles skip release
+downloads but still undergo compatibility and sandbox checks.
 
 Verified downloads are kept in `${XDG_CACHE_HOME:-$HOME/.cache}/kyler/downloads/vVERSION/`.
 Before downloading an archive, the installer fetches the selected source's current
@@ -34,11 +35,69 @@ checksums and checks both this cache and the current directory. Matching archive
 are reused; corrupt or replaced versions are downloaded again. The cache survives
 configuration or startup failures.
 
-On Linux, environment checks require Bubblewrap 0.5.0 or newer. A compatible installed
-version is reused. On apt-based systems, missing or outdated Bubblewrap is installed
-using `sudo apt update` and `sudo apt install -y bubblewrap` (without sudo when root),
-then checked with `bwrap --version`. Other distributions receive manual installation
-instructions. Host user-namespace restrictions can still prevent sandbox startup.
+### Host compatibility and sandbox dependencies
+
+The installer recognizes macOS/Linux and x86_64/ARM64. A release must contain the
+matching architecture. Current Linux download targets use glibc; musl-based systems
+such as Alpine are rejected before downloading and require a separate compatible
+build. `/etc/os-release` is read for display, not executed. A detected glibc version
+is informational: execution of both the bundled Kyler and Node.js is the final ABI
+compatibility check. There is no universal minimum glibc guarantee across locally
+built bundles, and the installer does not upgrade system libraries.
+
+On Linux, Bubblewrap >= 0.5.0 and the networking tools required by the pinned MXC
+adapter are checked before download: `slirp4netns`, `ip`, `unshare`, `nsenter`,
+`iptables`, `ip6tables`, their `-restore` commands, `sh`, and `sleep`. Compatible
+installed tools are reused. Missing dependencies use the first available supported
+package manager:
+
+| Package manager | Packages |
+| --- | --- |
+| `apt-get` | `bubblewrap slirp4netns iproute2 util-linux iptables` |
+| `dnf` / `yum` | `bubblewrap slirp4netns iproute util-linux iptables` |
+| `pacman` | `bubblewrap slirp4netns iproute2 util-linux iptables` |
+| `zypper` | `bubblewrap slirp4netns iproute2 util-linux iptables` |
+
+Commands and package-manager output remain visible. Non-root users need `sudo` to
+install missing packages; root invokes the manager directly. Unknown managers,
+insufficient privileges, failed installations and insufficient repository versions
+stop with manual instructions. No third-party repository is added. Arch installation
+uses `pacman -S --needed` without a partial repository refresh; maintain the host
+through its normal full-system update procedure if repository versions are outdated.
+Package-manager recognition is not a certification of every distribution/version.
+
+macOS uses the system Seatbelt sandbox without downloading a separate sandbox runtime.
+Windows is not currently supported by Kyler's adapter, regardless of MXC's wider
+platform support.
+
+### Native sandbox self-check
+
+After verification, before replacing the old installation or stopping services, the
+new binary runs `kyler doctor` as the installing user. It uses temporary fixtures and
+a disposable local TCP listener, without reading application configuration, contacting
+a model or using an API key. Both offline and outbound sandbox policies must launch
+successfully and enforce workspace writes, protected/denied/outside paths and denial
+of host loopback access. A child shell is also executed inside each sandbox. Worker
+execution uses the same MXC supervision and cleanup as application tools.
+
+The check exercises network-policy setup and local isolation; it does not verify
+public internet reachability or every possible destination. Linux user namespaces,
+AppArmor, namespace tooling versions, firewall backends, kernel modules and container
+host restrictions can prevent execution even when packages are installed. Failures
+stop before activation and preserve the previous installation/configuration. The
+installer never disables host security or falls back to unrestricted execution.
+For a restricted container or cloud image, ask its administrator to resolve the
+reported policy/kernel limitation rather than running Kyler as root to bypass it.
+
+Run checks independently, including before starting a source build:
+
+```sh
+kyler doctor
+kyler --json doctor
+```
+
+Older bundles without `doctor` cannot pass this installer; use a newly built complete
+bundle. Updating only `install.sh` does not update an existing release binary.
 
 Unauthenticated download URLs require a publicly accessible repository. Private release
 assets require authenticated download followed by local bundle installation.

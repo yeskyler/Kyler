@@ -15,7 +15,9 @@ Rust workspace is inside `kyler-rs/`; the repository root has no Cargo manifest.
 
 On macOS, install command-line build tools with `xcode-select --install`. Ubuntu and
 Debian builds require `build-essential`, `pkg-config`, and `libssl-dev`; native Linux
-sandbox tests also need `bubblewrap` and a host that permits its user namespaces.
+sandbox tests also need Bubblewrap and isolated-network dependencies listed in
+[installation](installation.md#host-compatibility-and-sandbox-dependencies), plus a host
+that permits user namespaces.
 Additional native libraries are determined by the build dependencies. Install Python
 through your operating system or the official Python distribution. Verify the
 development tools before building:
@@ -39,6 +41,7 @@ cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
 cargo fmt --manifest-path kyler-rs/Cargo.toml --all -- --check
 cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-config
 cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-cli --test service
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-cli --test doctor
 ```
 
 Run the affected crate tests for scoped changes. Changes spanning multiple crates
