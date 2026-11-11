@@ -264,7 +264,11 @@ export function chatAdapter(
             else content.push({ type: "text", text: event.text ?? "" });
             step = event.step;
             yield update();
-          } else if (event.type === "tool_queued" || event.type === "tool_started") {
+          } else if (
+            event.type === "tool_call_delta" ||
+            event.type === "tool_queued" ||
+            event.type === "tool_started"
+          ) {
             const existing = content.findIndex(
               (part) => part.type === "tool-call" && part.toolCallId === event.call_id,
             );
@@ -278,15 +282,17 @@ export function chatAdapter(
               providerMetadata: {
                 kyler: {
                   ...(batch !== undefined ? { batch } : {}),
-                  activity: event.activity ?? "tool",
-                  summary: event.summary ?? event.name ?? "Used tool",
                   ...(previous?.type === "tool-call" ? previous.providerMetadata?.kyler : {}),
+                  activity: event.activity ?? "tool",
+                  summary: event.summary ?? event.name ?? "Preparing tool call",
                   state:
-                    event.type === "tool_queued"
-                      ? approvalStates.get(event.call_id!) === "pending"
-                        ? "approval"
-                        : "queued"
-                      : "running",
+                    event.type === "tool_call_delta"
+                      ? "preparing"
+                      : event.type === "tool_queued"
+                        ? approvalStates.get(event.call_id!) === "pending"
+                          ? "approval"
+                          : "queued"
+                        : "running",
                   ...(event.type === "tool_started"
                     ? { startedAt: event.timestamp_ms ?? Date.now() }
                     : {}),
@@ -302,7 +308,7 @@ export function chatAdapter(
             else if (
               previous?.type === "tool-call" &&
               previous.result === undefined &&
-              event.type === "tool_started"
+              ["tool_call_delta", "tool_queued", "tool_started"].includes(event.type)
             )
               content[existing] = tool;
             yield update();

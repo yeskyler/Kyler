@@ -287,6 +287,9 @@ async fn fragmented_tool_arguments_events_usage_and_followup() {
         Some(AgentStreamEvent::Started { .. })
     ));
     let start=events.iter().position(|e|matches!(e,AgentStreamEvent::ToolStarted{arguments,..} if arguments==&json!({"text":"\u{4f60}\u{597d}"}))).unwrap();
+    let preparing = events.iter().position(|e| matches!(e, AgentStreamEvent::ToolCallDelta { call_id, name } if call_id == "call1" && name == "ec")).unwrap();
+    let named = events.iter().position(|e| matches!(e, AgentStreamEvent::ToolCallDelta { call_id, name } if call_id == "call1" && name == "echo")).unwrap();
+    assert!(preparing < named && named < start);
     let end = events
         .iter()
         .position(
@@ -657,6 +660,48 @@ async fn tool_batch_is_queued_before_first_tool_finishes_and_execution_stays_ser
             "started:b",
             "finished:b"
         ]
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn tool_preparation_is_visible_before_arguments_finish() {
+    let (url, server) = fixture(vec![vec![
+        chunk(json!({"tool_calls":[{"index":0,"id":"partial","function":{"name":"echo","arguments":"{"}}]}), Value::Null),
+        json!({"_stall": true}),
+    ]]).await;
+    let count = Arc::new(AtomicUsize::new(0));
+    let tools = ToolBox::from([(
+        "echo".into(),
+        Arc::new(Echo(count.clone())) as Arc<dyn Tool>,
+    )]);
+    let mut stream = agent(url, tools).run_stream("prepare").await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match stream.next().await.unwrap() {
+                AgentStreamEvent::ToolCallDelta { call_id, name } => {
+                    assert_eq!(call_id, "partial");
+                    assert_eq!(name, "echo");
+                    break;
+                }
+                AgentStreamEvent::ToolStarted { .. } => {
+                    panic!("Incomplete arguments must never execute")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    stream.cancel();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), stream.finish_with_session())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        outcome.session.execution.unwrap().status,
+        ExecutionStatus::Cancelled
     );
     server.await.unwrap();
 }

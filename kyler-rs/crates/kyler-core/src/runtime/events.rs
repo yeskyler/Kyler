@@ -36,6 +36,10 @@ pub enum AgentStreamEvent {
         step: u32,
         text: String,
     },
+    ToolCallDelta {
+        call_id: String,
+        name: String,
+    },
     ToolQueued {
         call_id: String,
         name: String,

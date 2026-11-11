@@ -80,6 +80,29 @@ impl State {
                             self.entries.push(Entry::Assistant(cell));
                         }
                     }
+                    EventPayload::ToolCallDelta { call_id, name } => {
+                        self.finish_assistant();
+                        if let Some(Entry::Tool { name: current, .. }) =
+                            self.entries.iter_mut().rev().find(
+                                |entry| matches!(entry, Entry::Tool { id, .. } if id == &call_id),
+                            )
+                        {
+                            *current = name;
+                        } else {
+                            self.entries.push(Entry::Tool {
+                                id: call_id,
+                                name,
+                                status: "preparing".into(),
+                                started: Instant::now(),
+                                seconds: None,
+                                activity: None,
+                                source: Default::default(),
+                                output_bytes: None,
+                                error: None,
+                                summary: None,
+                            });
+                        }
+                    }
                     EventPayload::ToolQueued {
                         call_id,
                         name,
@@ -96,12 +119,25 @@ impl State {
                     } => {
                         self.finish_assistant();
                         if let Some(Entry::Tool {
-                            status, started, ..
+                            status,
+                            started,
+                            name: current_name,
+                            activity: current_activity,
+                            source: current_source,
+                            summary: current_summary,
+                            ..
                         }) =
                             self.entries.iter_mut().rev().find(
                                 |entry| matches!(entry, Entry::Tool { id, .. } if id == &call_id),
                             )
                         {
+                            *current_name = name;
+                            *current_activity = Some(activity);
+                            *current_source = source;
+                            *current_summary = summary;
+                            if queued && status == "preparing" {
+                                *status = "queued".into();
+                            }
                             if !queued {
                                 *status = "running".into();
                                 *started = Instant::now();
@@ -223,7 +259,10 @@ impl State {
                     .take_while(|entry| !matches!(entry, Entry::RunTiming { .. }))
                 {
                     if let Entry::Tool { status, .. } = entry {
-                        if matches!(status.as_str(), "running" | "queued" | "pending") {
+                        if matches!(
+                            status.as_str(),
+                            "preparing" | "running" | "queued" | "pending"
+                        ) {
                             *status = if result.status == RunStatus::Cancelled {
                                 "cancelled"
                             } else {
