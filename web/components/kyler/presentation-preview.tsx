@@ -1,5 +1,7 @@
 "use client";
 
+import { randomUuid } from "@/lib/kyler/random-uuid";
+
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { presentationAssets, presentationFrameDocument } from "@/lib/kyler/presentation-frame";
@@ -21,7 +23,7 @@ export function PresentationPreview({ bytes }: { bytes: Uint8Array }) {
     let prepared: ArrayBuffer;
     let worker: Worker | undefined;
     const controller = new AbortController();
-    const id = crypto.randomUUID();
+    const id = randomUuid();
     channel.current = id;
     setHtml("");
     setError("");

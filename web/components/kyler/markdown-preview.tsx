@@ -1,5 +1,7 @@
 "use client";
 
+import { randomUuid } from "@/lib/kyler/random-uuid";
+
 import { isValidElement, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -35,7 +37,7 @@ function Diagram({ code }: { code: string }) {
         });
         if (code.length > 50000) throw new Error("Diagram exceeds preview limit");
         await mermaid.parse(code);
-        const { svg } = await mermaid.render(`diagram-${crypto.randomUUID()}`, code);
+        const { svg } = await mermaid.render(`diagram-${randomUuid()}`, code);
         if (active) setHtml(svg);
       })
       .catch(() => {
