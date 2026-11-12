@@ -21,6 +21,11 @@ pub struct Args {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Show the last 100 lines and follow managed service logs; Ctrl+C exits.
+    Logs {
+        #[arg(value_enum, default_value = "backend")]
+        target: LogTarget,
+    },
     /// Check native sandbox execution without credentials or model requests.
     Doctor,
     /// Install, inspect or remove user skills without a model call.
@@ -90,6 +95,12 @@ pub enum Command {
     /// Start the local HTTP/SSE server; requires complete application configuration.
     Serve(ServeArgs),
 }
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum LogTarget {
+    Backend,
+    Web,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum SkillCommand {
     /// Upload a local directory containing SKILL.md to the server's user skills.

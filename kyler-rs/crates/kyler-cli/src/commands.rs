@@ -3,6 +3,7 @@ mod chat;
 mod configure;
 mod doctor;
 mod eval;
+mod logs;
 mod run;
 mod serve;
 mod service;
@@ -53,6 +54,15 @@ pub async fn execute(args: Args) -> Result<()> {
             *addresses,
             output.as_deref(),
         );
+    }
+    if let Some(Command::Logs { target }) = &args.command {
+        if args.json {
+            return Err(CliError::new(
+                2,
+                "--json cannot be combined with logs; logs preserves the original file content",
+            ));
+        }
+        return logs::execute(args.config.as_deref(), *target).await;
     }
     if matches!(&args.command, Some(Command::Doctor)) {
         return doctor::execute(args.json).await;
@@ -178,7 +188,8 @@ pub async fn execute(args: Args) -> Result<()> {
                 }
             }
         },
-        Command::Doctor
+        Command::Logs { .. }
+        | Command::Doctor
         | Command::Serve(_)
         | Command::Configure { .. }
         | Command::Service { .. } => unreachable!(),

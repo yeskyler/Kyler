@@ -187,6 +187,8 @@ is **http://127.0.0.1:30002**.
 | Operation | Command |
 | --- | --- |
 | Inspect status | `kyler service status` |
+| Follow backend logs | `kyler logs backend` |
+| Follow Web logs | `kyler logs web` |
 | Stop services | `kyler service stop` |
 | Start services | `kyler service start` |
 | Restart services | `kyler service start --restart` |
@@ -194,6 +196,14 @@ is **http://127.0.0.1:30002**.
 | Rotate Web token | `kyler service token --reset` |
 | Reconfigure model and access scope | `kyler configure --web` |
 | Open the terminal interface | `kyler tui` |
+
+`kyler logs backend` and `kyler logs web` show the last 100 lines, then continuously
+follow new output. `kyler logs` defaults to the backend. Press Ctrl+C to exit the viewer without stopping the service. The commands
+read `logs/server.log` or `logs/web.log` beside the selected configuration file;
+`--config` and `KYLER_CONFIG` use the same path rules as service management. No API key,
+valid model configuration, or running backend is required. Missing logs produce a clear
+path message. Following handles log replacement and truncation without an external
+`tail` dependency. Output is the original log content; `--json` is not supported.
 
 Restart services after changing listener settings. Web token rotation takes effect
 without restarting. Installation automatically
