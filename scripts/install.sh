@@ -399,5 +399,5 @@ if [ "$start_server" = true ]; then
 else printf '\nKyler · Service status and management\n\nServices not started.\n'; fi
 printf '\nInstallation complete.\n'
 printf '\nConfiguration: %s\n' "$config_path"
-printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n  Token:    kyler service token\n  Diagnose: kyler doctor\n'
+printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n  Token:    kyler service token\n  Diagnose: kyler doctor\n  Logs:     kyler logs backend\n  Web logs: kyler logs web\n'
 printf '\nRun in your project:\n  kyler tui\n'
