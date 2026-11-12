@@ -45,8 +45,6 @@ export type Connector = {
   error: string | null;
 };
 
-export type ModelConnectionSettings = { url: string; model: string; key_configured: boolean };
-
 export type Workspace = { id: string; path: string; title: string };
 
 export type AttachmentInfo = {

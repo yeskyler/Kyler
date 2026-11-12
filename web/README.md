@@ -80,14 +80,11 @@ Both local and network Web access require token sign-in; see [security guidance]
   or ellipsis. There is no user/profile footer in the sidebar. It docks at the bottom
   after the first message. The interface uses neutral light/dark palettes, follows
   the system preference initially, and remembers the appearance toggle in the upper-right corner locally.
-- Model settings are inside the composer with URL, Model, and Key fields for
-  OpenAI-compatible Chat Completions. Saves update the selected profile in the
-  Kyler configuration and take effect on the next turn without restarting.
-  URL accepts the API base URL or a complete `/chat/completions` endpoint.
-  Key input is hidden; leaving it blank keeps the current key. Existing keys are
-  never sent back to the browser. Config files are saved atomically with private
-  permissions. Explicit startup overrides must be removed before editing the
-  corresponding fields through the UI.
+- The composer displays the current model name as read-only text. There is no model
+  configuration dialog or URL/Key form in the Web UI. Change the backend model using
+  `kyler configure`, then restart the managed service with
+  `kyler service start --restart` and reload the page. Foreground servers must also
+  update any explicit model overrides before restarting.
 - Directory and sandbox controls sit below the composer. Changing the directory
   creates a new session; sandbox choices reflect the server's host policy.
 - Plugins opens a management page with Skills and Connectors tabs.
