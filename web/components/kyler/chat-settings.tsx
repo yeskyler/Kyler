@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { ShieldIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -13,12 +12,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/kyler/client";
-import {
-  permissionLabels,
-  type ModelConnectionSettings,
-  type Permissions,
-  type PermissionMode,
-} from "@/lib/kyler/types";
+import { permissionLabels, type Permissions, type PermissionMode } from "@/lib/kyler/types";
 
 import { useChatSettings } from "./chat-settings-context";
 import { ComposerPlan } from "./composer-plan";
@@ -27,161 +21,15 @@ import { SessionInspectorControls } from "./session-inspector";
 import { WorkspacePicker } from "./workspace-picker";
 export { ChatSettingsProvider } from "./chat-settings-context";
 
-export function ModelControl() {
-  const { session, initialModel } = useChatSettings();
-  const connectionPath = session.session_id.startsWith("draft-")
-    ? "models/settings"
-    : `sessions/${session.session_id}/model/settings`;
-  const running = useAuiState((state) => state.thread.isRunning);
-  const [settings, setSettings] = useState<ModelConnectionSettings>();
-  const [url, setUrl] = useState("");
-  const [model, setModel] = useState("");
-  const [key, setKey] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    let disposed = false;
-    setLoading(true);
-    api<ModelConnectionSettings>(connectionPath)
-      .then((value) => {
-        if (!disposed) {
-          setSettings(value);
-          setUrl(value.url);
-          setModel(value.model);
-          setError("");
-        }
-      })
-      .catch((error: Error) => {
-        if (!disposed) setError(error.message);
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [connectionPath, open]);
-  async function save() {
-    setBusy(true);
-    setError("");
-    try {
-      const value = await api<ModelConnectionSettings>(connectionPath, {
-        method: "PUT",
-        body: JSON.stringify({
-          url: url.trim(),
-          model: model.trim(),
-          ...(key.trim() ? { key: key.trim() } : {}),
-        }),
-      });
-      setSettings(value);
-      setUrl(value.url);
-      setModel(value.model);
-      setKey("");
-      setOpen(false);
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
+export function ModelLabel() {
+  const { initialModel } = useChatSettings();
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(value) => {
-        if (!busy) {
-          setOpen(value);
-          setKey("");
-        }
-      }}
+    <span
+      className="min-w-0 max-w-full shrink px-3 py-2 text-left text-sm leading-5 break-all whitespace-normal text-muted-foreground"
+      title={initialModel}
     >
-      <DialogTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-auto min-w-0 max-w-full shrink whitespace-normal text-left leading-5 text-muted-foreground"
-          />
-        }
-      >
-        <span className="break-all">{settings?.model ?? initialModel}</span>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogTitle>Model settings</DialogTitle>
-        <DialogDescription>
-          OpenAI-compatible Chat Completions. Saved to the selected Kyler profile and applied to the
-          next turn.
-        </DialogDescription>
-        <label className="space-y-1.5 text-sm" htmlFor="model-url">
-          URL
-          <Input
-            id="model-url"
-            type="url"
-            value={url}
-            disabled={loading || busy}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://api.openai.com/v1"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </label>
-        <label className="space-y-1.5 text-sm" htmlFor="model-name">
-          Model
-          <Input
-            id="model-name"
-            value={model}
-            disabled={loading || busy}
-            maxLength={256}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder="Model identifier"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </label>
-        <label className="space-y-1.5 text-sm" htmlFor="model-key">
-          Key
-          <Input
-            id="model-key"
-            type="password"
-            value={key}
-            disabled={loading || busy}
-            maxLength={4096}
-            onChange={(event) => setKey(event.target.value)}
-            placeholder={
-              settings?.key_configured ? "Leave blank to keep the current key" : "Enter API key"
-            }
-            autoComplete="new-password"
-            spellCheck={false}
-          />
-        </label>
-        <p className="text-xs text-muted-foreground">
-          Use the API base URL. Existing keys are never displayed.
-        </p>
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <Button
-          type="button"
-          disabled={
-            loading ||
-            busy ||
-            running ||
-            !settings ||
-            !url.trim() ||
-            !model.trim() ||
-            (!settings.key_configured && !key.trim())
-          }
-          onClick={save}
-        >
-          {busy ? "Saving…" : "Save"}
-        </Button>
-      </DialogContent>
-    </Dialog>
+      {initialModel}
+    </span>
   );
 }
 

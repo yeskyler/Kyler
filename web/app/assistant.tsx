@@ -32,7 +32,7 @@ import {
   ChatSettingsProvider,
   ComposerSettings,
   ComposerStatus,
-  ModelControl,
+  ModelLabel,
 } from "@/components/kyler/chat-settings";
 import { ArtifactsProvider, ArtifactBrowserLayout } from "@/components/kyler/artifacts";
 import { QuestionCard, QuestionsProvider, useQuestions } from "@/components/kyler/questions";
@@ -605,7 +605,7 @@ function Connected({
                           components={{
                             Welcome: NewChatWelcome,
                             AssistantMessage,
-                            ComposerExtra: ModelControl,
+                            ComposerExtra: ModelLabel,
                             ComposerMenu,
                             ComposerHeader: ComposerStatus,
                             ComposerFooter: ComposerSettings,
