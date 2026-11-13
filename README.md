@@ -26,7 +26,7 @@ with Web, TUI, and CLI interfaces powered by a shared Rust runtime. Models conne
 through OpenAI-compatible Chat Completions endpoints.
 
 ## Demo
-https://github.com/user-attachments/assets/a3c30faf-fc88-4414-9916-643834cd35ea
+https://github.com/user-attachments/assets/465709d2-ddc2-4ce1-a77d-3ef427dfc7ca
 
 ## Capabilities
 
