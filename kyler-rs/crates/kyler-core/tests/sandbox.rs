@@ -943,7 +943,7 @@ async fn project_command_environment_survives_calls_and_is_shared_with_backgroun
         environment: Some(&env),
     };
     use kyler_core::tools::Tool;
-    let tool = kyler_core::tools::command::RunCommandTool;
+    let tool = kyler_core::tools::shell::RunCommandTool;
     let mut arguments = arguments;
     arguments["yield_time_ms"] = json!(0);
     let started: Value = serde_json::from_str(
@@ -983,7 +983,7 @@ async fn project_command_environment_survives_calls_and_is_shared_with_backgroun
 
 #[tokio::test]
 async fn unified_commands_complete_yield_accept_input_and_preserve_valid_large_results() {
-    use kyler_core::tools::command::RunCommandArgs;
+    use kyler_core::tools::shell::RunCommandArgs;
     let root = tempfile::tempdir().unwrap();
     let root = root.path().canonicalize().unwrap();
     let env = environment(
@@ -1160,4 +1160,227 @@ async fn native_review_reads_git_with_no_command_tool_or_repository_helpers() {
         "pub fn value() -> u32 { 2 }\n"
     );
     model.abort();
+}
+
+#[tokio::test]
+async fn exec_and_stdin_manage_incremental_output_eof_and_completed_sessions() {
+    use kyler_core::tools::{exec_command::WriteStdinArgs, shell::RunCommandArgs};
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let env = environment(
+        &root,
+        &root,
+        SandboxPolicy::workspace_write("exec-stdin", &root),
+    );
+    let manager = ProcessManager::default();
+    let command = |text: &str, wait: u32| {
+        serde_json::from_value::<RunCommandArgs>(
+            json!({"program":"/bin/sh","args":["-c",text],"yield_time_ms":wait}),
+        )
+        .unwrap()
+    };
+    let follow = |id: &str, chars: &str, wait: u32| {
+        serde_json::from_value::<WriteStdinArgs>(
+            json!({"session_id":id,"chars":chars,"yield_time_ms":wait}),
+        )
+        .unwrap()
+    };
+    let quick = manager
+        .exec_command(
+            "owner",
+            (*env).clone(),
+            command("printf done; exit 7", 5000),
+        )
+        .await
+        .unwrap();
+    assert_eq!(quick["status"], "completed");
+    assert_eq!(quick["exit_code"], 7);
+    assert_eq!(quick["output"], "done");
+    assert!(quick["session_id"].is_null());
+    let text = "printf ready; read value; printf 'received:%s' \"$value\"";
+    let running = manager
+        .exec_command("owner", (*env).clone(), command(text, 1000))
+        .await
+        .unwrap();
+    assert_eq!(running["output"], "ready");
+    let id = running["session_id"].as_str().unwrap();
+    assert!(
+        manager
+            .continue_command("other", follow(id, "", 0))
+            .await
+            .is_err()
+    );
+    let duplicate = manager
+        .exec_command("owner", (*env).clone(), command(text, 0))
+        .await
+        .unwrap_err();
+    assert!(duplicate.to_string().contains(id));
+    let empty = manager
+        .continue_command("owner", follow(id, "", 20))
+        .await
+        .unwrap();
+    assert_eq!(empty["output"], "");
+    assert_eq!(empty["input_sent"], false);
+    assert_eq!(empty["status"], "running");
+    let mut input = follow(id, "hello\n", 5000);
+    input.close_stdin = true;
+    let mut done = manager.continue_command("owner", input).await.unwrap();
+    let mut output = done["output"].as_str().unwrap().to_owned();
+    while done["status"] == "running" {
+        done = manager
+            .continue_command("owner", follow(id, "", 5000))
+            .await
+            .unwrap();
+        output.push_str(done["output"].as_str().unwrap());
+    }
+    assert_eq!(output, "received:hello");
+    assert_eq!(done["exit_code"], 0);
+    let ended = manager
+        .continue_command("owner", follow(id, "more", 0))
+        .await
+        .unwrap();
+    assert_eq!(ended["input_sent"], false);
+    assert!(ended["input_error"].as_str().unwrap().contains("ended"));
+    assert_eq!(ended["output"], "");
+    let eof = manager
+        .exec_command("owner", (*env).clone(), command("cat; printf eof", 20))
+        .await
+        .unwrap();
+    let mut input = follow(eof["session_id"].as_str().unwrap(), "body", 5000);
+    input.close_stdin = true;
+    let mut done = manager.continue_command("owner", input).await.unwrap();
+    let mut output = done["output"].as_str().unwrap().to_owned();
+    while done["status"] == "running" {
+        done = manager
+            .continue_command(
+                "owner",
+                follow(eof["session_id"].as_str().unwrap(), "", 5000),
+            )
+            .await
+            .unwrap();
+        output.push_str(done["output"].as_str().unwrap());
+    }
+    assert_eq!(output, "bodyeof");
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn stdin_reads_serialize_and_termination_stops_side_effects() {
+    use kyler_core::tools::{exec_command::WriteStdinArgs, shell::RunCommandArgs};
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let env = environment(
+        &root,
+        &root,
+        SandboxPolicy::workspace_write("stdin-concurrency", &root),
+    );
+    let manager = ProcessManager::default();
+    let command = |text: &str| {
+        serde_json::from_value::<RunCommandArgs>(
+            json!({"program":"/bin/sh","args":["-c",text],"yield_time_ms":0}),
+        )
+        .unwrap()
+    };
+    let follow = |id: &str| {
+        serde_json::from_value::<WriteStdinArgs>(json!({"session_id":id,"yield_time_ms":5000}))
+            .unwrap()
+    };
+    let running = manager
+        .exec_command("owner", (*env).clone(), command("sleep 0.2; printf later"))
+        .await
+        .unwrap();
+    let id = running["session_id"].as_str().unwrap();
+    let (a, b) = tokio::join!(
+        manager.continue_command("owner", follow(id)),
+        manager.continue_command("owner", follow(id))
+    );
+    let combined = format!(
+        "{}{}",
+        a.unwrap()["output"].as_str().unwrap(),
+        b.unwrap()["output"].as_str().unwrap()
+    );
+    assert_eq!(combined, "later");
+    let running = manager
+        .exec_command(
+            "owner",
+            (*env).clone(),
+            command("sleep 1; touch must-not-run"),
+        )
+        .await
+        .unwrap();
+    let mut stop = follow(running["session_id"].as_str().unwrap());
+    stop.terminate = true;
+    let stopped = manager.continue_command("owner", stop).await.unwrap();
+    assert_eq!(stopped["status"], "cancelled");
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(!root.join("must-not-run").exists());
+    manager.shutdown();
+}
+
+#[tokio::test]
+async fn shell_waits_returns_tail_output_times_out_and_cleans_private_sessions() {
+    use kyler_core::{
+        context::ExecutionContext,
+        tools::{Tool, ToolContext, shell::ShellTool},
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let env = environment(
+        &root,
+        &root,
+        SandboxPolicy::workspace_write("one-shot-shell", &root),
+    );
+    let manager = ProcessManager::default();
+    let mut execution = ExecutionContext::new();
+    let mut state = std::collections::HashMap::new();
+    let mut context = ToolContext {
+        processes: Some(&manager),
+        execution: &mut execution,
+        state: &mut state,
+        session_id: "owner",
+        tool_call_id: "shell",
+        subagents: None,
+        environment: Some(env.as_ref()),
+    };
+    let output = ShellTool
+        .execute(
+            r#"{"command":["/bin/sh","-c","printf done; printf warning >&2; exit 7"]}"#,
+            &mut context,
+        )
+        .await
+        .unwrap();
+    let value: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(value["status"], "completed");
+    assert_eq!(value["exit_code"], 7);
+    assert_eq!(value["stdout"], "done");
+    assert_eq!(value["stderr"], "warning");
+    assert!(value.get("session_id").is_none());
+    assert!(manager.list("owner").is_empty());
+    let eof = ShellTool
+        .execute(
+            r#"{"command":["/bin/cat"],"timeout_ms":5000}"#,
+            &mut context,
+        )
+        .await
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&eof).unwrap()["exit_code"], 0);
+    let output = ShellTool.execute(r#"{"command":["/bin/sh","-c","printf partial; sleep 2; touch must-not-run-shell"],"timeout_ms":500}"#,&mut context).await.unwrap();
+    let value: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(value["status"], "timed_out");
+    assert_eq!(value["stdout"], "partial");
+    assert!(manager.list("owner").is_empty());
+    tokio::time::sleep(Duration::from_millis(2100)).await;
+    assert!(!root.join("must-not-run-shell").exists());
+    let future = ShellTool.execute(
+        r#"{"command":["/bin/sh","-c","sleep 1; touch cancelled-shell"]}"#,
+        &mut context,
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), future)
+            .await
+            .is_err()
+    );
+    assert!(manager.list("owner").is_empty());
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert!(!root.join("cancelled-shell").exists());
 }

@@ -15,6 +15,7 @@ enum Kind {
     Timeout,
     Unavailable,
     InvalidResponse,
+    PatchGenerationLimit,
     Request,
 }
 
@@ -28,6 +29,9 @@ impl ModelError {
         let kind = source
             .chain()
             .find_map(|error| {
+                if error.is::<crate::tools::apply_patch::PatchGenerationLimit>() {
+                    return Some(Kind::PatchGenerationLimit);
+                }
                 if error.is::<Elapsed>() {
                     return Some(Kind::Timeout);
                 }
@@ -102,6 +106,10 @@ impl ModelError {
             Kind::InvalidResponse => (
                 "model_invalid_response",
                 "The model provider returned an invalid or incomplete response. Retry or check the provider's Chat Completions compatibility.",
+            ),
+            Kind::PatchGenerationLimit => (
+                "model_patch_generation_limit",
+                "Patch generation exceeded the 16 KiB argument or 120-second generation budget. Automatic retries were exhausted. Request smaller, complete file edits.",
             ),
             Kind::Request => (
                 "model_request_failed",

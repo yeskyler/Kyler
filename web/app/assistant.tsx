@@ -33,9 +33,10 @@ import {
   ComposerSettings,
   ComposerStatus,
   ModelLabel,
+  ThinkingControl,
 } from "@/components/kyler/chat-settings";
 import { ArtifactsProvider, ArtifactBrowserLayout } from "@/components/kyler/artifacts";
-import { QuestionCard, QuestionsProvider, useQuestions } from "@/components/kyler/questions";
+import { QuestionsProvider, useQuestions } from "@/components/kyler/questions";
 import { ApprovalCard } from "@/components/kyler/approval-card";
 import { AssistantMessage } from "@/components/kyler/assistant-message";
 import { ComposerMenu } from "@/components/kyler/composer-menu";
@@ -398,7 +399,6 @@ function Connected({
     return () => document.removeEventListener("keydown", close);
   }, [mobileNavigation]);
   const questions = useQuestions(loaded.session.session_id);
-  const pendingQuestion = questions.records.find((record) => record.status === "pending");
   const [approvals, setApprovals] = useState(
     loaded.approvals.filter((item) => item.status === "pending"),
   );
@@ -494,7 +494,11 @@ function Connected({
   };
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <QuestionsProvider records={questions.records}>
+      <QuestionsProvider
+        records={questions.records}
+        session={loaded.session.session_id}
+        onUpdate={questions.update}
+      >
         {/* The provider owns runtime lifecycle; only foreground views may unmount. */}
         {active && (
           <ChatSettingsProvider
@@ -593,19 +597,13 @@ function Connected({
                                 error={error}
                                 onDecision={(decision) => decide(approvals[0], decision)}
                               />
-                            ) : pendingQuestion ? (
-                              <QuestionCard
-                                key={pendingQuestion.id}
-                                record={pendingQuestion}
-                                session={loaded.session.session_id}
-                                onUpdate={questions.update}
-                              />
                             ) : null
                           }
                           components={{
                             Welcome: NewChatWelcome,
                             AssistantMessage,
                             ComposerExtra: ModelLabel,
+                            ComposerEnd: ThinkingControl,
                             ComposerMenu,
                             ComposerHeader: ComposerStatus,
                             ComposerFooter: ComposerSettings,

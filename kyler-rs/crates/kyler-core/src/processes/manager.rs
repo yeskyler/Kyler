@@ -3,7 +3,7 @@ use super::{output::publish, store::persist};
 use crate::{
     environment::ExecutionEnvironment,
     sandbox::{ProcessChunk, ProcessInput},
-    tools::command::RunCommandArgs,
+    tools::shell::RunCommandArgs,
 };
 
 use std::{
@@ -27,6 +27,9 @@ pub(super) struct Entry {
     pub(super) info: ProcessInfo,
     pub(super) input: SyncSender<ProcessInput>,
     pub(super) abort: Option<AbortHandle>,
+    pub(super) interaction: Arc<tokio::sync::Mutex<u64>>,
+    pub(super) command_key: Option<String>,
+    pub(super) stdin_closed: bool,
 }
 pub(super) struct Inner {
     pub(super) root: Option<PathBuf>,
@@ -65,6 +68,16 @@ impl ProcessManager {
         environment: ExecutionEnvironment,
         command: RunCommandArgs,
     ) -> Result<Value> {
+        self.run_command_inner(session, environment, command, false)
+            .await
+    }
+    pub(super) async fn run_command_inner(
+        &self,
+        session: &str,
+        environment: ExecutionEnvironment,
+        command: RunCommandArgs,
+        deduplicate: bool,
+    ) -> Result<Value> {
         command.validate()?;
         ensure!(
             environment.policy().process.allow_commands,
@@ -82,7 +95,12 @@ impl ProcessManager {
         }
         let wait = command.yield_time_ms;
         let mut events = self.subscribe();
-        let id = self.start(session, environment, serde_json::to_value(&command)?)?;
+        let id = self.start_inner(
+            session,
+            environment,
+            serde_json::to_value(&command)?,
+            deduplicate,
+        )?;
         let mut pending = PendingCommand {
             manager: self.clone(),
             session: session.into(),
@@ -100,8 +118,10 @@ impl ProcessManager {
         .await;
         let info = self.read(session, &id, 0)?;
         pending.armed = false;
-        if let Some(error) = info.error {
-            anyhow::bail!("command failed: {error}");
+        if !deduplicate {
+            if let Some(error) = &info.error {
+                anyhow::bail!("command failed: {error}");
+            }
         }
         let mut result = if let Some(result) = info.result {
             serde_json::from_str::<Value>(&result).context("Invalid command result")?
@@ -129,6 +149,15 @@ impl ProcessManager {
         session: &str,
         environment: ExecutionEnvironment,
         args: Value,
+    ) -> Result<String> {
+        self.start_inner(session, environment, args, false)
+    }
+    fn start_inner(
+        &self,
+        session: &str,
+        environment: ExecutionEnvironment,
+        args: Value,
+        deduplicate: bool,
     ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let mut command = args["program"]
@@ -161,6 +190,29 @@ impl ProcessManager {
         };
         let (input, receive) = std::sync::mpsc::sync_channel(32);
         let mut entries = self.inner.entries.lock().unwrap();
+        use sha2::{Digest, Sha256};
+        let command_key = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&serde_json::json!([
+                args["program"],
+                args["args"],
+                metadata.working_directory,
+                args["environment"]
+            ]))?)
+        );
+        if deduplicate {
+            if let Some(entry) = entries.values().find(|entry| {
+                entry.session == session
+                    && entry.info.status == "running"
+                    && entry.command_key.as_ref() == Some(&command_key)
+            }) {
+                anyhow::bail!(
+                    "The same command is already running in process session {}. Use write_stdin with that session_id to read output or terminate it; do not restart it.",
+                    entry.info.id
+                );
+            }
+        }
+
         ensure!(
             entries
                 .values()
@@ -189,6 +241,9 @@ impl ProcessManager {
                 session: session.into(),
                 input,
                 abort: None,
+                interaction: Arc::new(tokio::sync::Mutex::new(0)),
+                command_key: Some(command_key),
+                stdin_closed: false,
                 info: ProcessInfo {
                     metadata: Some(metadata),
                     id: id.clone(),
@@ -299,19 +354,22 @@ impl ProcessManager {
     }
     pub fn write(&self, session: &str, id: &str, input: ProcessInput) -> Result<()> {
         ensure!(input.data.len() <= 8192, "Process input exceeds 8 KiB");
-        let entries = self.inner.entries.lock().unwrap();
+        let mut entries = self.inner.entries.lock().unwrap();
         let entry = entries
-            .get(id)
+            .get_mut(id)
             .filter(|entry| entry.session == session)
             .context("Process is unavailable")?;
         ensure!(
             entry.info.status == "running",
             "Process is no longer running"
         );
+        ensure!(!entry.stdin_closed, "Process stdin is already closed");
+        let closing = input.close;
         entry
             .input
             .try_send(input)
             .context("Process input queue is full or closed")?;
+        entry.stdin_closed |= closing;
         Ok(())
     }
     pub fn stop(&self, session: &str, id: &str) -> Result<()> {
@@ -330,6 +388,17 @@ impl ProcessManager {
             }
             let _ = persist(&self.inner, entry);
         }
+        let status = entry.info.status.clone();
+        drop(entries);
+        publish(
+            &self.inner,
+            id,
+            session,
+            ProcessChunk {
+                stream: "status".into(),
+                text: status,
+            },
+        );
         Ok(())
     }
     pub fn stop_session(&self, session: &str) {
@@ -340,6 +409,21 @@ impl ProcessManager {
             .collect::<Vec<_>>();
         for id in ids {
             let _ = self.stop(session, &id);
+        }
+    }
+    pub(crate) fn forget_process(&self, session: &str, id: &str) {
+        if self.stop(session, id).is_err() {
+            return;
+        }
+        let mut entries = self.inner.entries.lock().unwrap();
+        if entries
+            .get(id)
+            .is_some_and(|entry| entry.session == session)
+        {
+            entries.remove(id);
+            if let Some(root) = &self.inner.root {
+                let _ = std::fs::remove_file(root.join(format!("{id}.json")));
+            }
         }
     }
     pub fn forget_session(&self, session: &str) {

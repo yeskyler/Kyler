@@ -8,7 +8,7 @@ use crate::{
     models::error::ModelError,
     session::Session,
     subagent::SubagentScope,
-    tools::{ToolExecutionMode, is_subagent_management},
+    tools::{ToolExecutionMode, apply_patch::PatchGenerationLimit, is_subagent_management},
 };
 
 use std::time::Duration;
@@ -17,7 +17,10 @@ use anyhow::{Context, Result};
 use async_openai::{
     Client,
     config::OpenAIConfig,
-    types::chat::{CreateChatCompletionRequestArgs, CreateChatCompletionResponse},
+    types::chat::{
+        ChatCompletionRequestSystemMessageArgs, CreateChatCompletionRequestArgs,
+        CreateChatCompletionResponse,
+    },
 };
 use backon::{ExponentialBuilder, Retryable};
 
@@ -34,6 +37,8 @@ impl Agent {
                 .with_api_key(&self.api_key),
         );
         let mut explicit_loaded = false;
+        let mut patch_retries = 0;
+        let mut patch_recovery: Option<String> = None;
         loop {
             let preparing = crate::diagnostics::enabled().then(std::time::Instant::now);
             let step_agent = self.tool_snapshot(&session.session_id).await?;
@@ -53,8 +58,10 @@ impl Agent {
                 })
                 .filter(|tool| {
                     step_agent.environment.as_ref().is_none_or(|environment| {
-                        !matches!(tool.name(), "run_command" | "write_process")
-                            || environment.policy().process.allow_commands
+                        !matches!(
+                            tool.name(),
+                            "shell" | "exec_command" | "run_command" | "write_process"
+                        ) || environment.policy().process.allow_commands
                     })
                 })
                 .map(|tool| {
@@ -108,13 +115,21 @@ impl Agent {
                     })
                     .await?;
             }
-            let messages = step_agent
+            let mut messages = step_agent
                 .prepare_messages(session, &tools, &client, stream)
                 .await?;
             if let Some(started) = preparing {
                 tracing::info!(target: "kyler_latency", session_id=%session.session_id,
                     execution_id=%session.current_execution()?.execution_id,
                     step=session.current_execution()?.current_step, elapsed_ms=started.elapsed().as_secs_f64()*1000.0, "step preparation latency");
+            }
+            if let Some(instruction) = &patch_recovery {
+                messages.push(
+                    ChatCompletionRequestSystemMessageArgs::default()
+                        .content(instruction.clone())
+                        .build()?
+                        .into(),
+                );
             }
             let mut builder = CreateChatCompletionRequestArgs::default();
             builder.model(&self.model).messages(messages);
@@ -128,12 +143,34 @@ impl Agent {
                 self.context_policy.output_tokens,
             );
             let (content, tool_calls) = if let Some(stream) = stream {
-                self.streaming_response(&client, request, session, stream)
+                match self
+                    .streaming_response(&client, request, session, stream)
                     .await
-                    .map_err(ModelError::wrap)?
+                {
+                    Ok(response) => {
+                        patch_recovery = None;
+                        response
+                    }
+                    Err(error)
+                        if error.downcast_ref::<PatchGenerationLimit>().is_some()
+                            && patch_retries < 2 =>
+                    {
+                        patch_retries += 1;
+                        tracing::warn!(
+                            retry = patch_retries,
+                            "apply_patch generation budget exceeded; requesting a smaller complete call"
+                        );
+                        // No calls from the rejected batch have executed. Never replay side effects.
+                        patch_recovery = Some(format!(
+                            "Host feedback: the previous model response was interrupted before any tool in that response executed. {} Return a smaller complete tool call for just one named section or function, targeting at most 40 changed lines and about 2 KiB of JSON arguments. Do not regenerate or resend the rejected full-file patch. If the target file exists, read its relevant section and use Update File; otherwise create only a concise runnable structure and add the rest in later patches. Do not minify code, bypass the budget with shell/exec_command, or repeat already completed work. After all parts are implemented, validate the full result and register the final artifacts.",
+                            error
+                        ));
+                        continue;
+                    }
+                    Err(error) => return Err(ModelError::wrap(error).into()),
+                }
             } else {
-                let request =
-                    crate::models::provider_request(request, session, self.thinking_mode())?;
+                let request = self.provider_request(request, session)?;
                 let response = tokio::time::timeout(
                     Duration::from_secs(60),
                     (|| async {

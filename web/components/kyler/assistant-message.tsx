@@ -19,7 +19,7 @@ import {
   XCircleIcon,
   ShieldQuestionIcon,
 } from "lucide-react";
-import { QuestionHistory, usePendingQuestion } from "./questions";
+import { MessageQuestion, QuestionHistory, usePendingQuestion } from "./questions";
 import { api } from "@/lib/kyler/client";
 import { useChatSettings } from "./chat-settings-context";
 import { ArtifactMarkdown, MessageArtifacts } from "./artifacts";
@@ -35,6 +35,7 @@ import {
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import {
   formatRunDuration,
+  isVisibleMessagePart,
   partitionAssistantParts,
   groupProcessParts,
   groupToolCategories,
@@ -140,10 +141,6 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
             {source}
           </span>
         )}
-        {preparing && <span className="shrink-0 text-[10px]">Preparing call</span>}
-        {queued && <span className="shrink-0 text-[10px]">Queued</span>}
-        {cancelled && <span className="shrink-0 text-[10px]">Cancelled</span>}
-        {waiting && <span className="shrink-0 text-[10px]">Approval required</span>}
         {elapsed && (
           <span className="ml-auto shrink-0 text-[10px] tabular-nums opacity-60">{elapsed}</span>
         )}
@@ -361,9 +358,11 @@ export function AssistantMessage() {
   const { process, answer } = partitionAssistantParts(message.content);
   const sections = executionSections(message.content, process);
   const details = process.filter((index) => !isCompactionPart(message.content[index]));
-  const toolCount = message.content.filter((part) => part.type === "tool-call").length;
+  const toolCount = message.content.filter(
+    (part) => part.type === "tool-call" && isVisibleMessagePart(part),
+  ).length;
   const failedTools = message.content.filter(
-    (part) => part.type === "tool-call" && part.isError,
+    (part) => part.type === "tool-call" && part.isError && isVisibleMessagePart(part),
   ).length;
   const timing = message.metadata.custom.kylerRun as
     | { startedAt?: number; finishedAt?: number }
@@ -422,7 +421,7 @@ export function AssistantMessage() {
               · {failedTools} {failedTools === 1 ? "tool failed" : "tools failed"}
             </span>
           )}
-          {!!details.length && (
+          {!!details.length && label !== "Working" && (
             <ChevronDownIcon
               aria-hidden
               className={`size-3.5 transition-transform ${open ? "rotate-180" : ""}`}
@@ -463,6 +462,7 @@ export function AssistantMessage() {
           <MessagePrimitive.PartByIndex key={index} index={index} components={components} />
         ))}
       </div>
+      <MessageQuestion />
       <MessagePrimitive.Error>
         <ErrorPrimitive.Root
           role="alert"

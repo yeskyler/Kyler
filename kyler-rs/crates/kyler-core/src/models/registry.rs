@@ -51,6 +51,7 @@ impl ModelRegistry {
                     },
                     policy,
                     output_token_parameter: profile.output_token_parameter,
+                    thinking_level: None,
                     enable_thinking: super::request::thinking_mode(
                         &provider.base_url,
                         &profile.model,

@@ -1,5 +1,5 @@
 use super::operation::ToolOperation;
-use crate::tools::{ToolSource, command::RunCommandArgs};
+use crate::tools::{ToolSource, shell::RunCommandArgs};
 
 use serde_json::Value;
 
@@ -80,6 +80,13 @@ pub(crate) fn review_in_environment(
                     })
             }),
         ("run_command", ToolOperation::Command) => ordinary_command(environment, arguments),
+        ("shell", ToolOperation::Command) => {
+            serde_json::from_value::<crate::tools::shell::ShellArgs>(arguments.clone())
+                .ok()
+                .and_then(|args| args.into_command().ok())
+                .and_then(|args| serde_json::to_value(args).ok())
+                .is_some_and(|args| ordinary_command(environment, &args))
+        }
         _ => false,
     };
     if allowed {
@@ -286,7 +293,7 @@ mod tests {
     use crate::{
         ExecutionEnvironment,
         sandbox::{Sandbox, SandboxPolicy, SandboxRequest, WorkerResponse},
-        tools::{Tool, apply_patch::ApplyPatchTool, command::RunCommandTool},
+        tools::{Tool, apply_patch::ApplyPatchTool, shell::RunCommandTool},
     };
 
     use std::{path::Path, sync::Arc};
@@ -374,7 +381,7 @@ mod tests {
         );
     }
     #[test]
-    fn asks_for_destructive_sensitive_large_and_unknown_operations() {
+    fn asks_for_destructive_sensitive_and_unknown_operations_and_rejects_oversized_patches() {
         let (_root, environment) = environment();
         for input in [
             "*** Begin Patch\n*** Delete File: existing.txt\n*** End Patch",
@@ -426,9 +433,13 @@ mod tests {
             "*** Begin Patch\n*** Add File: big.txt\n+{}\n*** End Patch",
             "a".repeat(128 * 1024)
         );
-        assert_eq!(
-            assess(&environment, &ApplyPatchTool, json!({"input":large})),
-            ApprovalStatus::Pending
+        let error = ApplyPatchTool
+            .approval_requirement(&json!({"input":large}))
+            .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<crate::tools::apply_patch::PatchGenerationLimit>()
+                .is_some()
         );
         let many = format!(
             "*** Begin Patch\n{}*** End Patch",

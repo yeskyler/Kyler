@@ -14,7 +14,7 @@ use kyler_config::{AppConfig, ServerSettings};
 use kyler_core::{
     Agent, ExecutionEnvironment, SessionStore,
     approval::ApprovalManager,
-    tools::{ToolExecutionMode, build_toolbox, command::RunCommandTool},
+    tools::{ToolExecutionMode, build_toolbox, exec_command::ExecCommandTool, shell::ShellTool},
 };
 
 pub struct Server {
@@ -84,7 +84,8 @@ impl Server {
                 tools.remove("apply_patch");
             }
             if policy.process.allow_commands {
-                tools.insert("run_command".into(), Arc::new(RunCommandTool));
+                tools.insert("exec_command".into(), Arc::new(ExecCommandTool));
+                tools.insert("shell".into(), Arc::new(ShellTool));
             }
         }
         if let Some(factory) = &factory {

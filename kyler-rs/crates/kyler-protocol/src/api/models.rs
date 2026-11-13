@@ -67,3 +67,44 @@ pub struct ModelConnectionUpdate {
     #[serde(default)]
     pub key: Option<String>,
 }
+
+/// Per-session reasoning intent, independent of provider-specific request parameters.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingLevel {
+    Off,
+    High,
+    Max,
+}
+impl ThinkingLevel {
+    pub fn from_enabled(enabled: bool) -> Self {
+        if enabled { Self::High } else { Self::Off }
+    }
+    pub fn enabled(self) -> bool {
+        self != Self::Off
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkingState {
+    pub enabled: bool,
+    pub supported: bool,
+    pub level: ThinkingLevel,
+    pub levels: Vec<ThinkingLevel>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThinkingSelection {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub level: Option<ThinkingLevel>,
+}
+impl ThinkingSelection {
+    pub fn selected_level(&self) -> Result<ThinkingLevel, &'static str> {
+        match (self.level, self.enabled) {
+            (Some(level), None) => Ok(level),
+            (None, Some(enabled)) => Ok(ThinkingLevel::from_enabled(enabled)),
+            _ => Err("Provide exactly one thinking level or legacy enabled flag"),
+        }
+    }
+}

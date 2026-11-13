@@ -120,23 +120,25 @@ export function previewFiles(outputs: Artifact[], inputs: WorkspaceInput[]): Pre
   ];
 }
 
-/** Only a newly retained explicit primary deliverable may open the browser automatically. */
+/** Open new retained outputs, preferring a primary or previewable deliverable. */
 export function autoPreview(
   files: PreviewFile[],
   known: Set<string>,
   session: string,
   state: BrowserState,
 ) {
-  const candidate = files.find(
+  const candidates = files.filter(
     (file) =>
       !known.has(file.key) &&
       file.group === "generated" &&
       file.session === session &&
       file.available &&
-      !file.resource &&
-      file.primary === true &&
-      file.kind !== "unsupported",
+      !file.resource,
   );
+  const candidate =
+    candidates.find((file) => file.primary === true && file.kind !== "unsupported") ??
+    candidates.find((file) => file.kind !== "unsupported") ??
+    candidates[0];
   return candidate && !state.open && !state.dismissed
     ? { ...state, selected: candidate.key, open: true, width: 70 }
     : state;

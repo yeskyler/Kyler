@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  pendingMessageQuestion,
   questionResponse,
   mergeQuestions,
   answerLabel,
@@ -104,4 +105,12 @@ test("question identifiers cannot access or mutate object prototypes", () => {
     JSON.stringify(response),
     '{"action":"submit","answers":{"__proto__":{"selected":["pdf"],"text":""}}}',
   );
+});
+
+test("pending questions appear only in their originating assistant message", () => {
+  assert.equal(pendingMessageQuestion([record], "e1", []), record);
+  assert.equal(pendingMessageQuestion([record], "older", [record.tool_call_id]), undefined);
+  assert.equal(pendingMessageQuestion([record], undefined, [record.tool_call_id]), record);
+  assert.equal(pendingMessageQuestion([record], undefined, []), undefined);
+  assert.equal(pendingMessageQuestion([{ ...record, status: "answered" }], "e1", []), undefined);
 });

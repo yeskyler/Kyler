@@ -101,7 +101,7 @@ impl ExecutionEnvironment {
         }
         let arguments: serde_json::Value = serde_json::from_str(args_json)?;
         if tool == "run_command" {
-            let command: crate::tools::command::RunCommandArgs =
+            let command: crate::tools::shell::RunCommandArgs =
                 serde_json::from_value(arguments.clone())?;
             command.validate()?;
             command.directory(&self.snapshot.working_directory, &filesystem)?;

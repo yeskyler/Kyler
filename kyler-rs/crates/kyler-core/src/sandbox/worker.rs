@@ -3,10 +3,10 @@ use crate::{
     attachments::AttachmentStore,
     tools::{
         apply_patch::{ApplyPatchArgs, apply_patch_in, validate_patch_access},
-        command::RunCommandArgs,
         grep_files::{GrepFilesArgs, grep_files},
         list_dir::{ListDirArgs, list_dir},
         read_file::{ReadFileArgs, read_file},
+        shell::RunCommandArgs,
     },
 };
 

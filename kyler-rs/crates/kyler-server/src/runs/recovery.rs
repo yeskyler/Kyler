@@ -36,6 +36,11 @@ impl RunManager {
             Err(e) if e.kind() == ErrorKind::NotFound => {}
             Err(e) => return Err(ApiError::storage(e.into())),
         }
+        match tokio::fs::remove_file(self.root.join(format!("{id}.thinking"))).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(ApiError::storage(error.into())),
+        }
         if let Some(approvals) = &self.approvals {
             approvals.forget_session(id);
         }

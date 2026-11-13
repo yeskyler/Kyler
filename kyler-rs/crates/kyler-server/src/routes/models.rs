@@ -66,3 +66,22 @@ pub async fn update_global_connection(
         .await
         .map(Json)
 }
+
+pub async fn thinking(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<kyler_protocol::api::models::ThinkingState>, ApiError> {
+    state.runs.session_thinking(&id, None).await.map(Json)
+}
+pub async fn select_thinking(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(selection): Json<kyler_protocol::api::models::ThinkingSelection>,
+) -> Result<Json<kyler_protocol::api::models::ThinkingState>, ApiError> {
+    let level = selection.selected_level().map_err(ApiError::bad)?;
+    state
+        .runs
+        .session_thinking_level(&id, level)
+        .await
+        .map(Json)
+}

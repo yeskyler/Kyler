@@ -10,6 +10,36 @@ use kyler_config::loader::LlmOverrides;
 use kyler_protocol::api::models::{ModelCatalog, ModelSelection, SessionModel};
 
 impl RunManager {
+    pub async fn session_thinking(
+        &self,
+        id: &str,
+        enabled: Option<bool>,
+    ) -> ApiResult<kyler_protocol::api::models::ThinkingState> {
+        valid_id(id)?;
+        let _registry = self.registry.lock().await;
+        let session = self.store.load(id).await.map_err(ApiError::storage)?;
+        self.core_thread(&session)
+            .await?
+            .handle
+            .thinking(enabled)
+            .await
+            .map_err(|error| ApiError::bad(&error.to_string()))
+    }
+    pub async fn session_thinking_level(
+        &self,
+        id: &str,
+        level: kyler_protocol::api::models::ThinkingLevel,
+    ) -> ApiResult<kyler_protocol::api::models::ThinkingState> {
+        valid_id(id)?;
+        let _registry = self.registry.lock().await;
+        let session = self.store.load(id).await.map_err(ApiError::storage)?;
+        self.core_thread(&session)
+            .await?
+            .handle
+            .thinking_level(Some(level))
+            .await
+            .map_err(|error| ApiError::bad(&error.to_string()))
+    }
     /// Only trusted startup code chooses the reload source, never API input.
     pub fn set_model_source(&self, path: PathBuf, overrides: LlmOverrides) {
         *self.model_source.write().expect("model source poisoned") = Some((path, overrides));

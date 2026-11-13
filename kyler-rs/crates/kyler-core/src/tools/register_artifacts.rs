@@ -11,7 +11,46 @@ use serde_json::Value;
 
 #[derive(Deserialize, JsonSchema)]
 struct RegisterArtifactsArgs {
-    files: Vec<Deliverable>,
+    files: Vec<ArtifactInput>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ArtifactInput {
+    path: String,
+    /// Defaults to the source filename. A missing extension is appended from the source.
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    primary: bool,
+}
+
+impl ArtifactInput {
+    fn into_deliverable(self) -> anyhow::Result<Deliverable> {
+        let decoded = percent_encoding::percent_decode_str(
+            self.path.split(['?', '#']).next().unwrap_or(&self.path),
+        )
+        .decode_utf8()?;
+        let source = std::path::Path::new(decoded.as_ref());
+        let mut name = match self.name {
+            Some(name) => name,
+            None => source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .context("invalid deliverable path")?
+                .to_owned(),
+        };
+        if !name.trim().is_empty() && std::path::Path::new(&name).extension().is_none() {
+            if let Some(extension) = source.extension().and_then(|extension| extension.to_str()) {
+                name.push('.');
+                name.push_str(extension);
+            }
+        }
+        Ok(Deliverable {
+            path: self.path,
+            name,
+            primary: self.primary,
+        })
+    }
 }
 
 pub struct RegisterArtifactsTool;
@@ -22,7 +61,7 @@ impl Tool for RegisterArtifactsTool {
         "register_artifacts"
     }
     fn description(&self) -> &str {
-        "Replace this execution's final deliverable list. Use local workspace-relative URL-encoded paths, display names including the actual extensions, and at most one primary file for automatic preview. Only register completed deliverables, never intermediate files or secrets. An empty list clears registration. Files are validated now and retained by the host at task completion."
+        "Replace this execution's final deliverable list. Use local workspace-relative URL-encoded paths, optional display names (default source filename; missing source extensions are appended, conflicting extensions are rejected), and at most one primary file for automatic preview. Only register completed deliverables, never intermediate files or secrets. An empty list clears registration. Files are validated now and retained by the host at task completion."
     }
     fn parameters(&self) -> Value {
         serde_json::to_value(schema_for!(RegisterArtifactsArgs)).expect("valid artifact schema")
@@ -40,15 +79,20 @@ impl Tool for RegisterArtifactsTool {
     ) -> anyhow::Result<String> {
         let args: RegisterArtifactsArgs =
             serde_json::from_str(args_json).context("invalid artifact registration")?;
-        validate_deliverables(&args.files)?;
-        if !args.files.is_empty() {
+        let files = args
+            .files
+            .into_iter()
+            .map(ArtifactInput::into_deliverable)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        validate_deliverables(&files)?;
+        if !files.is_empty() {
             let environment = context.environment.context("no authorized workspace")?;
-            for file in &args.files {
+            for file in &files {
                 read_source(&file.path, environment).map_err(|_| anyhow::anyhow!("Deliverable unavailable: check its path, permissions, and size (20 MiB maximum)."))?;
             }
         }
-        let count = args.files.len();
-        context.execution.deliverables = args.files;
+        let count = files.len();
+        context.execution.deliverables = files;
         Ok(serde_json::json!({"registered": count, "retention": "pending_completion"}).to_string())
     }
 }
@@ -61,6 +105,42 @@ mod tests {
         sandbox::direct::DirectSandbox,
     };
     use std::{collections::HashMap, sync::Arc};
+
+    #[test]
+    fn registration_names_are_derived_without_changing_persistent_contracts() {
+        for (input, expected) in [
+            (r#"{"path":"./snake_game.html"}"#, "snake_game.html"),
+            (
+                r#"{"path":"./snake_game.html","name":"贪吃蛇游戏"}"#,
+                "贪吃蛇游戏.html",
+            ),
+            (
+                r#"{"path":"./snake_game.html","name":"Game.HTML"}"#,
+                "Game.HTML",
+            ),
+            (r#"{"path":"./my%20game.html"}"#, "my game.html"),
+            (r#"{"path":"./LICENSE"}"#, "LICENSE"),
+        ] {
+            let file = serde_json::from_str::<ArtifactInput>(input)
+                .unwrap()
+                .into_deliverable()
+                .unwrap();
+            assert_eq!(file.name, expected);
+            assert!(!file.primary);
+            validate_deliverables(&[file]).unwrap();
+        }
+        for input in [
+            r#"{"path":"./game.html","name":"Game.txt"}"#,
+            r#"{"path":"./game.html","name":""}"#,
+            r#"{"path":"./game.html","name":"../Game"}"#,
+        ] {
+            let file = serde_json::from_str::<ArtifactInput>(input)
+                .unwrap()
+                .into_deliverable()
+                .unwrap();
+            assert!(validate_deliverables(&[file]).is_err());
+        }
+    }
 
     #[tokio::test]
     async fn registration_validates_before_replacing_execution_state() {
@@ -94,6 +174,25 @@ mod tests {
         .await
         .unwrap();
         assert!(context.execution.deliverables[0].primary);
+        for (input, expected) in [
+            (r#"{"files":[{"path":"./final.txt"}]}"#, "final.txt"),
+            (
+                r#"{"files":[{"path":"./final.txt","name":"Final"}]}"#,
+                "Final.txt",
+            ),
+        ] {
+            tool.execute(input, &mut context).await.unwrap();
+            assert_eq!(context.execution.deliverables[0].name, expected);
+        }
+        assert!(
+            tool.execute(
+                r#"{"files":[{"path":"./final.txt","name":"Final.html"}]}"#,
+                &mut context
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(context.execution.deliverables[0].name, "Final.txt");
         for path in [
             "./missing.txt",
             "../outside.txt",

@@ -8,13 +8,17 @@ use crate::{
     mcp::McpManager,
     memory::{MemoryStore, MemoryTool},
     models::ModelRegistry,
-    processes::{ProcessManager, ProcessTool},
+    processes::ProcessManager,
     session::{Session, SessionStore},
     skills::SkillManager,
     subagent::{SubagentConfig, SubagentManager},
     tools::{
-        Tool, ToolBox, ToolOutputBudget, attachment::AttachmentTool, build_toolbox,
-        command::RunCommandTool, subagent_tools,
+        Tool, ToolBox, ToolOutputBudget,
+        attachment::AttachmentTool,
+        build_toolbox,
+        exec_command::{ExecCommandTool, WriteStdinTool},
+        shell::ShellTool,
+        subagent_tools,
     },
 };
 
@@ -171,15 +175,16 @@ impl Agent {
     }
     pub fn with_processes(mut self, manager: Arc<ProcessManager>) -> Self {
         self.process_manager = Some(manager.clone());
-        for action in ["read_process", "write_process", "stop_process"] {
-            Arc::make_mut(&mut self.toolbox).insert(
-                action.into(),
-                Arc::new(ProcessTool {
-                    manager: manager.clone(),
-                    action,
-                }),
-            );
+        let tools = Arc::make_mut(&mut self.toolbox);
+        for legacy in [
+            "run_command",
+            "read_process",
+            "write_process",
+            "stop_process",
+        ] {
+            tools.remove(legacy);
         }
+        tools.insert("write_stdin".into(), Arc::new(WriteStdinTool));
         self
     }
     pub fn with_project_memory(mut self, store: Arc<MemoryStore>, session: &Session) -> Self {
@@ -227,7 +232,8 @@ impl Agent {
                 self = self.with_processes(Arc::new(ProcessManager::default()));
             }
             let mut tools = self.toolbox.as_ref().clone();
-            tools.insert("run_command".into(), Arc::new(RunCommandTool));
+            tools.insert("exec_command".into(), Arc::new(ExecCommandTool));
+            tools.insert("shell".into(), Arc::new(ShellTool));
             self.toolbox = Arc::new(tools);
         }
         self.environment = Some(environment);

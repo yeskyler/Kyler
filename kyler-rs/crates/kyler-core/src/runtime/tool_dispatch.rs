@@ -114,12 +114,13 @@ impl Agent {
                             arguments: old,
                         } = item
                         {
-                            let same_command =
-                                matches!(name.as_str(), "start_process" | "run_command")
-                                    && matches!(
-                                        f.function.name.as_str(),
-                                        "start_process" | "run_command"
-                                    );
+                            let same_command = matches!(
+                                name.as_str(),
+                                "start_process" | "run_command" | "exec_command" | "shell"
+                            ) && matches!(
+                                f.function.name.as_str(),
+                                "start_process" | "run_command" | "exec_command" | "shell"
+                            );
                             (name == &f.function.name || same_command)
                                 && old == &arguments
                                 && session.events.iter().flat_map(|event| &event.content).any(

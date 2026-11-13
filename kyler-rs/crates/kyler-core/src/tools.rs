@@ -3,9 +3,9 @@ mod arguments;
 pub mod ask_question;
 pub mod attachment;
 pub mod cancel_task;
-pub mod command;
 mod context;
 pub mod delegate_task;
+pub mod exec_command;
 pub mod get_task;
 pub mod grep_files;
 pub mod install_skill;
@@ -17,6 +17,7 @@ pub mod plan;
 pub mod read_file;
 pub mod register_artifacts;
 pub mod save_skill;
+pub mod shell;
 pub mod skills_resource;
 pub mod wait_tasks;
 
@@ -166,7 +167,7 @@ pub fn subagent_tools() -> Vec<Arc<dyn Tool>> {
 
 #[cfg(test)]
 mod activity_tests {
-    use super::{Tool, build_toolbox, command, subagent_tools};
+    use super::{Tool, build_toolbox, shell, subagent_tools};
 
     use kyler_protocol::activity::ActivityKind;
 
@@ -182,10 +183,7 @@ mod activity_tests {
         ] {
             assert_eq!(tools[name].activity_kind(), expected, "{name}");
         }
-        assert_eq!(
-            command::RunCommandTool.activity_kind(),
-            ActivityKind::Execute
-        );
+        assert_eq!(shell::RunCommandTool.activity_kind(), ActivityKind::Execute);
         for tool in subagent_tools() {
             assert_eq!(tool.activity_kind(), ActivityKind::Think);
         }

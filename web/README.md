@@ -85,6 +85,10 @@ Both local and network Web access require token sign-in; see [security guidance]
   `kyler configure`, then restart the managed service with
   `kyler service start --restart` and reload the page. Foreground servers must also
   update any explicit model overrides before restarting.
+- Tool cards appear when execution starts. Argument-generation and queued events
+  stay internal; approvals remain available in the dedicated approval card. Tool
+  status uses the leading icon and accessible hover text, without trailing status
+  words. Execution results and failures remain inspectable.
 - Directory and sandbox controls sit below the composer. Changing the directory
   creates a new session; sandbox choices reflect the server's host policy.
 - Plugins opens a management page with Skills and Connectors tabs.
@@ -202,8 +206,11 @@ Chat Completions streams may return textual `reasoning_content` or `reasoning`.
 Kyler forwards these as separate reasoning events and retains them in history.
 The Web UI renders a Thinking disclosure only when non-empty content arrives;
 it opens while streaming and collapses afterward. Ordinary text and tool activity
-do not create thinking content. Working remains the overall run status. The display
-feature does not choose reasoning effort. Agent thinking defaults and
+do not create thinking content. Working remains the overall run status, without a trailing disclosure icon.
+Pending `ask_question` forms appear inside their originating assistant message,
+outside collapsed execution details, and retain submit/cancel behavior. The display
+feature only displays returned reasoning; the separate composer level menu chooses
+request effort where supported. Agent thinking defaults and
 per-model overrides are described in [configuration](../docs/configuration.md#model-thinking-mode).
 Only active thinking-mode tool continuations resend the matching current-turn
 reasoning. Prior-turn reasoning and summary projections exclude it.
@@ -217,11 +224,11 @@ the composer header, with step status and completion count. Session
 inspection controls remain below the composer.
 On desktop, opening Preview splits the session into 30% conversation and 70% preview.
 The preview retains rounded borders and its browser-style toolbar. Narrow screens
-use an overlay. It opens automatically when a session has a previewable
-generated file. The window includes file-history navigation, refresh, a path bar,
+use an overlay. It opens automatically for available generated files, preferring a previewable
+primary file and then another previewable output. Download-only outputs also open the panel. The window includes file-history navigation, refresh, a path bar,
 download and close controls, an Inputs/Outputs tree, and a compact status bar.
 Files and retained copies are isolated per session, even when conversations use
-the same workspace. New previewable outputs open after a run finishes; manually
+the same workspace. New outputs open after a run finishes; manually
 closing the window suppresses reopening for that run. Escape also closes it.
 
 The file tree supports name and path search and reveals matching folders. It starts
@@ -269,3 +276,11 @@ configured MCP browser tools.
 HTML localStorage is virtualized per session/artifact and persisted through a
 validated parent-frame bridge (64 KiB, 256 keys). sessionStorage is scoped to the
 current frame. Neither grants access to application cookies or application storage.
+
+The composer action row keeps the read-only model label on the left beside the
+attachment button. The separate thinking-level menu sits immediately left of the
+send button, inside the input border. Clicking High or Max opens an upward menu; only
+the backend saves explicit selections independently of model-name recognition. The choice is saved per session for subsequent
+turns and disabled during generation. SiliconFlow DeepSeek-V4-Flash sends distinct
+`reasoning_effort: high/max` values. High is the default; Off is not offered. Unknown model names do not hide or disable the menu; the provider remains responsible
+for validating explicitly requested parameters. Older disabled preferences are treated as High without rewriting historical data. Project and permission controls remain outside the input border.

@@ -50,7 +50,7 @@ impl Tool for InstallSkillTool {
         "install_skill"
     }
     fn description(&self) -> &str {
-        "Install a local skill directory containing SKILL.md into configured user (default) or project skills. Copies validated resources including binary assets, rejects symlinks, and never executes scripts. To install from Git, fetch the user-selected repository with run_command first. Updates require the installed expected_fingerprint."
+        "Install a local skill directory containing SKILL.md into configured user (default) or project skills. Copies validated resources including binary assets, rejects symlinks, and never executes scripts. To install from Git, fetch the user-selected repository with exec_command first. Updates require the installed expected_fingerprint."
     }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{"path":{"type":"string"},"scope":{"type":"string","enum":["user","project"]},"expected_fingerprint":{"type":["string","null"]}},"required":["path"],"additionalProperties":false})

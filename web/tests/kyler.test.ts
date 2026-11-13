@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chooseLocalDirectory } from "../lib/kyler/local-directory.ts";
 import { readEvents } from "../lib/kyler/events.ts";
-import { latestDisplayPlan } from "../lib/kyler/assistant-display.ts";
+import { isVisibleMessagePart, latestDisplayPlan } from "../lib/kyler/assistant-display.ts";
 import { api, attachments, chatAdapter } from "../lib/kyler/client.ts";
 import { permittedPath, serverSettings, proxyRequest } from "../lib/kyler/server.ts";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -54,6 +54,9 @@ test("SSE reports expired replay instead of silently ending", async () => {
 
 test("proxy exposes conversation operations but never service control or traversal", () => {
   assert.equal(permittedPath("sessions/s1/runs", "POST"), true);
+  assert.equal(permittedPath("sessions/s1/thinking", "GET"), true);
+  assert.equal(permittedPath("sessions/s1/thinking", "PUT"), true);
+  assert.equal(permittedPath("sessions/s1/thinking", "POST"), false);
   assert.equal(permittedPath("sessions/s1/workspace-files", "GET"), true);
   assert.equal(permittedPath("sessions/s1/workspace-files", "POST"), false);
   assert.equal(permittedPath("runs/r1/events", "GET"), true);
@@ -70,6 +73,61 @@ test("proxy exposes conversation operations but never service control or travers
   ])
     assert.equal(permittedPath(path, "POST"), false);
   assert.equal(permittedPath("runs/r1/cancel", "GET"), false);
+});
+
+test("tool call paths accept provider IDs without weakening session or path validation", () => {
+  for (const id of [
+    "call_123",
+    "functions.apply_patch:0",
+    "functions.read_file:1",
+    "3acc2ea0-e158-4fc8-ac99-2dbc6c9ac92a",
+    "a".repeat(512),
+  ]) {
+    assert.equal(permittedPath(`sessions/s1/tool-calls/${id}`, "GET"), true);
+    assert.equal(permittedPath(`sessions/s1/tool-calls/${id}`, "POST"), false);
+  }
+  for (const id of [
+    "",
+    ".",
+    "..",
+    "../info",
+    "a/b",
+    "a\\b",
+    "a%2Fb",
+    "a?b",
+    "a#b",
+    "a".repeat(513),
+  ]) {
+    assert.equal(permittedPath(`sessions/s1/tool-calls/${id}`, "GET"), false);
+  }
+  assert.equal(permittedPath("sessions/s.1/tool-calls/call:0", "GET"), false);
+});
+
+test("tool detail proxy encodes provider IDs and preserves the upstream response", async (t) => {
+  const previous = { ...process.env };
+  t.after(() => {
+    process.env = previous;
+  });
+  process.env.KYLER_CONFIG = join(tmpdir(), `kyler-no-config-${crypto.randomUUID()}.toml`);
+  process.env.KYLER_CLIENT_SERVER_URL = "http://127.0.0.1:30001";
+  t.mock.method(globalThis, "fetch", async (target: URL) => {
+    assert.equal(target.pathname, "/v1/sessions/s1/tool-calls/functions.apply_patch%3A0");
+    assert.equal(decodeURIComponent(target.pathname.split("/").at(-1)!), "functions.apply_patch:0");
+    return Response.json({ call_id: "functions.apply_patch:0", status: "success" });
+  });
+  const response = await proxyRequest(
+    new Request(
+      "http://localhost:30002/api/kyler/sessions/s1/tool-calls/functions.apply_patch%3A0",
+    ),
+    ["sessions", "s1", "tool-calls", "functions.apply_patch:0"],
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).call_id, "functions.apply_patch:0");
+  const blocked = await proxyRequest(
+    new Request("http://localhost:30002/api/kyler/sessions/s1/tool-calls/invalid"),
+    ["sessions", "s1", "tool-calls", "../info"],
+  );
+  assert.equal(blocked.status, 404);
 });
 
 test("proxy reuses installed TOML endpoint and token with explicit workspace", async (t) => {
@@ -1344,7 +1402,7 @@ test("history orders recent activity first after merging saved and pending sessi
   assert.equal(refreshed[0].updated_at, 500);
 });
 
-test("tool preparation and running render before a gated tool result without duplicate cards", async (t) => {
+test("tool execution becomes visible before its result while preparation stays hidden", async (t) => {
   let finish!: () => void;
   const gate = new Promise<void>((resolve) => {
     finish = resolve;
@@ -1394,6 +1452,10 @@ test("tool preparation and running render before a gated tool result without dup
       if (tool.type !== "tool-call") throw new Error("Expected tool");
       const state = tool.providerMetadata?.kyler?.state;
       states.push(state);
+      assert.equal(
+        tools.filter(isVisibleMessagePart).length,
+        state === "preparing" || state === "queued" ? 0 : 1,
+      );
       if (state === "running") {
         assert.equal(tool.result, undefined);
         assert.equal(tool.toolName, "read_file");

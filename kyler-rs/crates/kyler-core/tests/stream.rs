@@ -857,3 +857,92 @@ async fn explicit_thinking_disable_is_sent_as_false() {
         .unwrap();
     assert_eq!(server.await.unwrap()[0]["enable_thinking"], false);
 }
+
+struct PatchProbe(Arc<AtomicUsize>);
+#[async_trait]
+impl Tool for PatchProbe {
+    fn name(&self) -> &str {
+        "apply_patch"
+    }
+    fn description(&self) -> &str {
+        "patch execution counter"
+    }
+    fn parameters(&self) -> Value {
+        json!({"type":"object"})
+    }
+    async fn execute(&self, _: &str, _: &mut ToolContext<'_>) -> anyhow::Result<String> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok("Applied".into())
+    }
+}
+fn oversized_patch_chunks() -> Vec<Value> {
+    vec![
+        chunk(
+            json!({"tool_calls":[{"index":0,"id":"large","function":{"name":"apply_patch","arguments":"x".repeat(17000)}}]}),
+            Value::Null,
+        ),
+        json!({"_stall":true}),
+    ]
+}
+
+#[tokio::test]
+async fn oversized_patch_stream_is_aborted_and_recovered_without_executing_partial_calls() {
+    let (url, server) = fixture(vec![
+        oversized_patch_chunks(),
+        vec![chunk(json!({"tool_calls":[{"index":0,"id":"small","function":{"name":"apply_patch","arguments":"{}"}}]}), json!("tool_calls"))],
+        answer("Done"),
+    ]).await;
+    let count = Arc::new(AtomicUsize::new(0));
+    let tools = ToolBox::from([(
+        "apply_patch".into(),
+        Arc::new(PatchProbe(count.clone())) as Arc<dyn Tool>,
+    )]);
+    let outcome = agent(url, tools)
+        .run_stream("edit")
+        .await
+        .unwrap()
+        .finish_with_session()
+        .await
+        .unwrap();
+    assert!(outcome.result.is_ok());
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let requests = server.await.unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests[1]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["role"] == "system"
+                && message["content"].as_str().is_some_and(
+                    |text| text.contains("Host feedback:") && text.contains("smaller complete")
+                ))
+    );
+    assert!(!requests[1].to_string().contains(&"x".repeat(100)));
+}
+
+#[tokio::test]
+async fn repeated_oversized_patch_streams_stop_after_two_retries() {
+    let (url, server) = fixture(vec![
+        oversized_patch_chunks(),
+        oversized_patch_chunks(),
+        oversized_patch_chunks(),
+    ])
+    .await;
+    let count = Arc::new(AtomicUsize::new(0));
+    let tools = ToolBox::from([(
+        "apply_patch".into(),
+        Arc::new(PatchProbe(count.clone())) as Arc<dyn Tool>,
+    )]);
+    let outcome = agent(url, tools)
+        .run_stream("edit")
+        .await
+        .unwrap()
+        .finish_with_session()
+        .await
+        .unwrap();
+    let error = outcome.result.unwrap_err();
+    assert!(error.to_string().contains("generation budget"));
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    assert_eq!(server.await.unwrap().len(), 3);
+}
