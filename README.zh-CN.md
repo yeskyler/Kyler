@@ -26,7 +26,7 @@ OpenAI Chat Completions 的接口连接模型服务。
 
 ## 演示
 
-https://github.com/user-attachments/assets/a3c30faf-fc88-4414-9916-643834cd35ea
+https://github.com/user-attachments/assets/465709d2-ddc2-4ce1-a77d-3ef427dfc7ca
 
 ## 主要能力
 
@@ -49,7 +49,8 @@ curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-按提示配置模型、API 地址、密钥和服务地址，前后端服务会自动启动。
+按提示配置模型、API 地址、密钥，并选择仅本机或局域网访问。
+前后端服务会自动启动。
 在浏览器打开安装结束时显示的 Web 地址，粘贴自动生成的 Web token 登录。
 使用 `kyler service token` 查看 token。
 
