@@ -139,7 +139,22 @@ reload retain the setting within the execution's immutable model snapshot.
 Streaming reasoning appears separately from the final answer. Current-turn tool
 continuations include the associated `reasoning_content` and count it in the input
 budget. Reasoning from prior turns is not resent. Thinking may increase response
-latency and token usage; this setting does not automatically raise reasoning effort.
+latency and token usage.
+
+The Web composer offers High and Max inside the input border. The saved session
+choice overrides the configuration default and applies at the next turn without a
+service restart; active executions keep their captured setting. For the known
+SiliconFlow DeepSeek model, High/Max send `reasoning_effort: "high"/"max"` with
+thinking enabled, and enables thinking for both levels. Sessions default to High; old saved Off or
+boolean false preferences resolve to High. Off is no longer a selectable session
+setting. Lower-level provider configuration remains available to embedded callers. A bound model accepts explicit High/Max preferences without requiring a local
+model-name allowlist. Explicit High/Max send the corresponding effort value.
+Provider compatibility is validated by the provider; unsupported request parameters
+remain errors rather than being silently ignored or mapped to identical requests.
+
+Editing the configuration file still requires model reload or restart. Reload updates
+model defaults, while an existing session override retains precedence. See the
+[SiliconFlow request parameters](https://docs.siliconflow.cn/docs/api/chat-completions-post).
 
 Web access uses `[web].access_token` in both local and network modes. Setup generates
 it automatically; `kyler service token` displays it and `--reset` rotates it. The

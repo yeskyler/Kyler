@@ -4,7 +4,10 @@ use crate::{
     tools::{ActivityKind, Tool, ToolContext, ToolExecutionMode},
 };
 
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Component, Path, PathBuf},
+};
 
 use anyhow::Context;
 use schemars::{JsonSchema, schema_for};
@@ -12,10 +15,35 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::fs;
 
+pub(crate) const MAX_PATCH_ARGUMENT_BYTES: usize = 16 * 1024;
+pub(crate) const PATCH_GENERATION_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(120);
+
+#[derive(Debug)]
+pub(crate) struct PatchGenerationLimit(pub &'static str);
+impl std::fmt::Display for PatchGenerationLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "apply_patch {}. The next patch should change only one named section or function, at most about 40 changed lines and 2 KiB of JSON arguments. The hard argument limit remains 16384 UTF-8 bytes. Read existing files when state is uncertain and update only changed sections; do not resend the rejected whole-file patch or bypass the budget through shell commands.",
+            self.0
+        )
+    }
+}
+impl std::error::Error for PatchGenerationLimit {}
+
+pub(crate) fn check_argument_size(bytes: usize) -> anyhow::Result<()> {
+    if bytes > MAX_PATCH_ARGUMENT_BYTES {
+        return Err(PatchGenerationLimit("arguments exceeded the 16 KiB limit").into());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ApplyPatchArgs {
-    /// Literal patch text, not JSON or a shell command. Example to create a file:
+    /// Literal patch text. Keep the entire JSON argument object within 16 KiB of UTF-8 bytes;
+    /// aim for 50–80 changed lines and about 4 KiB or less per call. Example to create a file:
     /// *** Begin Patch
     /// *** Add File: notes.txt
     /// +Hello
@@ -36,24 +64,38 @@ pub async fn apply_patch(args: ApplyPatchArgs) -> anyhow::Result<String> {
 pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<String> {
     let patch = parse_patch(input)?;
     let mut changed_paths = Vec::with_capacity(patch.operations.len());
+    let mut staged = BTreeMap::<PathBuf, Option<String>>::new();
+    let mut prepared = Vec::new();
 
     for operation in patch.operations {
         match operation {
             FileOperation::Add { path, lines } => {
                 let path = resolve_path(root, &path)?;
                 anyhow::ensure!(
-                    fs::try_exists(&path).await? == false,
-                    "cannot add `{}` because it already exists",
+                    !staged_exists(&staged, &path).await?,
+                    "cannot add `{}` because it already exists; read the file and use Update File instead",
                     path.display()
                 );
-                write_lines(&path, &lines, !lines.is_empty()).await?;
+                let trailing_newline = !lines.is_empty();
+                stage_write(&mut staged, &mut prepared, &path, lines, trailing_newline);
                 changed_paths.push(path);
             }
             FileOperation::Delete { path } => {
                 let path = resolve_path(root, &path)?;
-                fs::remove_file(&path)
-                    .await
-                    .with_context(|| format!("failed to delete {}", path.display()))?;
+                anyhow::ensure!(
+                    staged_exists(&staged, &path).await?,
+                    "cannot delete `{}` because it does not exist; inspect current file state before retrying",
+                    path.display()
+                );
+                if !staged.contains_key(&path) {
+                    anyhow::ensure!(
+                        fs::metadata(&path).await?.is_file(),
+                        "cannot delete `{}`: expected a file",
+                        path.display()
+                    );
+                }
+                staged.insert(path.clone(), None);
+                prepared.push(PreparedOperation::Remove(path.clone()));
                 changed_paths.push(path);
             }
             FileOperation::Update {
@@ -62,14 +104,22 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
                 hunks,
             } => {
                 let source_path = resolve_path(root, &path)?;
-                let source = fs::read_to_string(&source_path)
-                    .await
-                    .with_context(|| format!("failed to read {}", source_path.display()))?;
+                let source = match staged.get(&source_path) {
+                    Some(Some(content)) => content.clone(),
+                    Some(None) => anyhow::bail!("cannot update `{}` because an earlier operation removed it", source_path.display()),
+                    None => fs::read_to_string(&source_path).await.with_context(|| format!("failed to read `{}` for Update File; read the current file before retrying", source_path.display()))?,
+                };
                 let ends_with_newline = source.ends_with('\n');
                 let mut lines = split_lines(&source);
 
-                for hunk in hunks {
-                    apply_hunk(&mut lines, &hunk)?;
+                for (index, hunk) in hunks.into_iter().enumerate() {
+                    apply_hunk(&mut lines, &hunk).with_context(|| {
+                        format!(
+                            "patch verification failed for `{}` at hunk {}",
+                            source_path.display(),
+                            index + 1
+                        )
+                    })?;
                 }
 
                 let destination_path = match move_path {
@@ -79,20 +129,42 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
 
                 if destination_path != source_path {
                     anyhow::ensure!(
-                        fs::try_exists(&destination_path).await? == false,
+                        !staged_exists(&staged, &destination_path).await?,
                         "cannot move `{}` to `{}` because the destination exists",
                         source_path.display(),
                         destination_path.display()
                     );
                 }
 
-                write_lines(&destination_path, &lines, ends_with_newline).await?;
+                stage_write(
+                    &mut staged,
+                    &mut prepared,
+                    &destination_path,
+                    lines,
+                    ends_with_newline,
+                );
                 if destination_path != source_path {
-                    fs::remove_file(&source_path).await.with_context(|| {
-                        format!("failed to remove moved source {}", source_path.display())
-                    })?;
+                    staged.insert(source_path.clone(), None);
+                    prepared.push(PreparedOperation::Remove(source_path));
                 }
                 changed_paths.push(destination_path);
+            }
+        }
+    }
+
+    // Validate every operation before the first mutation. I/O failures during commit
+    // can still be partial; this is not a filesystem transaction.
+    for operation in prepared {
+        match operation {
+            PreparedOperation::Write {
+                path,
+                lines,
+                trailing_newline,
+            } => {
+                write_lines(&path, &lines, trailing_newline).await?;
+            }
+            PreparedOperation::Remove(path) => {
+                fs::remove_file(&path).await.with_context(|| format!("failed to remove `{}` during patch commit; inspect file state before retrying", path.display()))?;
             }
         }
     }
@@ -106,6 +178,44 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
         files.len(),
         files.join(", ")
     ))
+}
+
+enum PreparedOperation {
+    Write {
+        path: PathBuf,
+        lines: Vec<String>,
+        trailing_newline: bool,
+    },
+    Remove(PathBuf),
+}
+
+async fn staged_exists(
+    staged: &BTreeMap<PathBuf, Option<String>>,
+    path: &Path,
+) -> anyhow::Result<bool> {
+    match staged.get(path) {
+        Some(content) => Ok(content.is_some()),
+        None => Ok(fs::try_exists(path).await?),
+    }
+}
+
+fn stage_write(
+    staged: &mut BTreeMap<PathBuf, Option<String>>,
+    prepared: &mut Vec<PreparedOperation>,
+    path: &Path,
+    lines: Vec<String>,
+    trailing_newline: bool,
+) {
+    let mut content = lines.join("\n");
+    if trailing_newline {
+        content.push('\n');
+    }
+    staged.insert(path.to_owned(), Some(content));
+    prepared.push(PreparedOperation::Write {
+        path: path.to_owned(),
+        lines,
+        trailing_newline,
+    });
 }
 
 pub(crate) fn validate_patch_access(
@@ -251,7 +361,7 @@ fn apply_hunk(lines: &mut Vec<String>, hunk: &Hunk) -> anyhow::Result<()> {
 
     anyhow::ensure!(
         matches.len() == 1,
-        "patch hunk matched {} locations; expected exactly one",
+        "patch hunk matched {} locations; expected exactly one. Read the current file, use exact context, and add surrounding lines if the match is ambiguous",
         matches.len()
     );
 
@@ -278,7 +388,7 @@ fn parse_patch(input: &str) -> anyhow::Result<Patch> {
     );
     anyhow::ensure!(
         lines.last() == Some(&"*** End Patch"),
-        "patch must end with `*** End Patch`"
+        "patch must end with `*** End Patch`; resend a complete patch, splitting large changes into smaller complete calls"
     );
 
     let mut operations = Vec::new();
@@ -408,11 +518,69 @@ enum HunkLine {
 #[cfg(test)]
 mod tests {
     use super::apply_patch_in;
+    use crate::tools::Tool;
 
     use std::path::PathBuf;
 
     fn temporary_directory(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("kyler-apply-patch-{name}-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn patch_argument_budget_counts_utf8_bytes_and_protects_direct_calls() {
+        assert!(super::check_argument_size(super::MAX_PATCH_ARGUMENT_BYTES).is_ok());
+        assert!(super::check_argument_size(super::MAX_PATCH_ARGUMENT_BYTES + 1).is_err());
+        let arguments = serde_json::json!({"input":"界".repeat(6000)});
+        let error = super::ApplyPatchTool
+            .approval_requirement(&arguments)
+            .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<super::PatchGenerationLimit>()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn verifies_all_file_operations_before_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("existing.txt"), "original\n").unwrap();
+        for invalid in [
+            "*** Update File: existing.txt\n@@\n-missing\n+replacement",
+            "*** Add File: existing.txt\n+replacement",
+            "*** Delete File: missing.txt",
+            "*** Add File: ../outside.txt\n+outside",
+        ] {
+            let patch =
+                format!("*** Begin Patch\n*** Add File: first.txt\n+new\n{invalid}\n*** End Patch");
+            let error = apply_patch_in(directory.path(), &patch).await.unwrap_err();
+            assert!(!directory.path().join("first.txt").exists(), "{error:#}");
+            assert_eq!(
+                std::fs::read_to_string(directory.path().join("existing.txt")).unwrap(),
+                "original\n"
+            );
+        }
+        let error = apply_patch_in(
+            directory.path(),
+            "*** Begin Patch\n*** Update File: existing.txt\n@@\n-missing\n+new\n*** End Patch",
+        )
+        .await
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("existing.txt"));
+        assert!(error.contains("hunk 1"));
+        assert!(error.contains("Read the current file"));
+    }
+
+    #[tokio::test]
+    async fn preflight_preserves_ordered_changes_to_the_same_file() {
+        let directory = tempfile::tempdir().unwrap();
+        apply_patch_in(directory.path(), "*** Begin Patch\n*** Add File: first.txt\n+old\n*** Update File: first.txt\n*** Move to: final.txt\n@@\n-old\n+new\n*** Update File: final.txt\n@@\n-new\n+done\n*** End Patch").await.unwrap();
+        assert!(!directory.path().join("first.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("final.txt")).unwrap(),
+            "done\n"
+        );
     }
 
     #[tokio::test]
@@ -604,6 +772,7 @@ pub struct ApplyPatchTool;
 #[async_trait::async_trait]
 impl Tool for ApplyPatchTool {
     fn approval_requirement(&self, arguments: &Value) -> anyhow::Result<ToolOperation> {
+        check_argument_size(serde_json::to_vec(arguments)?.len())?;
         let args: ApplyPatchArgs = serde_json::from_value(arguments.clone()).context(
             "invalid apply_patch arguments; provide an input string containing the patch",
         )?;
@@ -640,8 +809,11 @@ impl Tool for ApplyPatchTool {
     fn description(&self) -> &str {
         "Create, update, move or delete files using literal patch text in the input argument. \
          Required format: *** Begin Patch\n*** Add File: notes.txt\n+Hello\n*** End Patch. \
+         Hard limit: 16 KiB of UTF-8 JSON arguments per call. Aim for 50–80 changed lines and about 4 KiB or less, not the hard maximum. For large new files add a concise runnable structure first, then update one function/style/section at a time. Do not generate a whole application in the first Add File or minify code to fit. \
+         Prefer small coherent edits; related file operations may share a patch. Split large new files into complete patches when useful; do not repeat unchanged content. \
+         Add File never overwrites: if the file exists, read it and use Update File. After a malformed patch, inspect file state and retry a smaller complete patch. After a size/time interruption, the next complete patch should address one named part, at most about 40 changed lines and 2 KiB; do not resend the full rejected patch or move it into shell arguments. \
          For edits, read the file first, then use *** Update File: notes.txt\n@@\n-old text\n+new text. \
-         Context lines start with one space; added/removed lines start with +/-. \
+         Normally include three unchanged lines before and after each edit, enough to identify exactly one location. Do not duplicate overlapping context between adjacent edits; combine them into one hunk. Context lines start with one space; added/removed lines start with +/-. \
          Every added line, including blank lines, must start with +; use + alone for an empty line. \
          Use *** Delete File: path to delete and *** Move to: path after an Update header to rename. \
          Paths are relative to workspace_root, or absolute paths inside that workspace. \
@@ -658,6 +830,7 @@ impl Tool for ApplyPatchTool {
         args_json: &str,
         _context: &mut ToolContext<'_>,
     ) -> anyhow::Result<String> {
+        check_argument_size(args_json.len())?;
         if let Some(environment) = _context.environment {
             return environment.run_tool(self.name(), args_json).await;
         }

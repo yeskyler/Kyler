@@ -67,6 +67,7 @@ api_key = "PRIVATE_MODEL_KEY"
 capabilities = {{ tokenizer = "cl100k_base" }}
 provider = "fixture"
 model = "fast-v1"
+enable_thinking = true
 context_tokens = 32000
 output_tokens = 1024
 [models.profiles.slow]
@@ -169,6 +170,98 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .unwrap();
     let id = session["session_id"].as_str().unwrap();
     let selection = format!("{url}/v1/sessions/{id}/model");
+    let thinking_url = format!("{url}/v1/sessions/{id}/thinking");
+    std::fs::write(
+        config
+            .session
+            .directory
+            .join("_runs")
+            .join(format!("{id}.thinking")),
+        "false",
+    )
+    .unwrap();
+    assert_eq!(
+        reqwest::Client::new()
+            .get(&thinking_url)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    let thinking: Value = client
+        .get(&thinking_url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        thinking,
+        json!({"enabled":true,"supported":true,"level":"high","levels":["high","max"]})
+    );
+    assert_eq!(
+        client
+            .put(&thinking_url)
+            .json(&json!({"enabled":false}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    assert_eq!(
+        client
+            .put(&thinking_url)
+            .json(&json!({"level":"max"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    client
+        .put(&thinking_url)
+        .json(&json!({"level":"high"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    assert_eq!(
+        client
+            .put(&thinking_url)
+            .json(&json!({"level":"off"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    assert_eq!(
+        client
+            .put(&thinking_url)
+            .json(&json!({"level":"invalid"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        422
+    );
+    assert_eq!(
+        client
+            .put(&thinking_url)
+            .json(&json!({"level":"high","enabled":true}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+
     let other: Value = client
         .post(format!("{url}/v1/sessions"))
         .json(&json!({}))
@@ -180,6 +273,16 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .unwrap();
     let other_id = other["session_id"].as_str().unwrap();
     let other_selection = format!("{url}/v1/sessions/{other_id}/model");
+    let other_thinking: Value = client
+        .get(format!("{url}/v1/sessions/{other_id}/thinking"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(other_thinking["enabled"], true);
+
     client
         .put(&other_selection)
         .json(&json!({"profile":"slow"}))
@@ -188,6 +291,16 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .unwrap()
         .error_for_status()
         .unwrap();
+    assert_eq!(
+        client
+            .put(format!("{url}/v1/sessions/{other_id}/thinking"))
+            .json(&json!({"level":"high"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
     assert_eq!(
         client
             .put(&selection)
@@ -313,10 +426,47 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
     let completed = terminal(&client, &url, &next.run_id).await;
     assert_eq!(completed.output.as_deref(), Some("fast-v2"));
     assert_eq!(completed.model.unwrap().context_window_tokens, 32000);
+    client
+        .put(&thinking_url)
+        .json(&json!({"enabled":true}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let thinking_run: RunAccepted = client
+        .post(format!("{url}/v1/sessions/{id}/runs"))
+        .json(&json!({"input":"thinking on"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        terminal(&client, &url, &thinking_run.run_id)
+            .await
+            .output
+            .as_deref(),
+        Some("fast-v2")
+    );
+    client
+        .put(&thinking_url)
+        .json(&json!({"level":"high"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
     let requests = fixture.requests.lock().await;
     assert_eq!(requests[0]["max_tokens"], 2048);
     assert!(requests[0].get("max_completion_tokens").is_none());
     assert_eq!(requests[1]["max_completion_tokens"], 1024);
+    assert_eq!(requests[1]["enable_thinking"], true);
+    assert_eq!(requests[1]["reasoning_effort"], "high");
+    assert_eq!(requests[2]["enable_thinking"], true);
     assert!(requests[1].get("max_tokens").is_none());
     drop(requests);
     let id = id.to_owned();
@@ -327,6 +477,15 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
     let selection = server.state.runs.session_model(&id, None).await.unwrap();
     assert_eq!(selection.profile.as_deref(), Some("fast"));
     assert!(selection.active.is_none());
+    assert!(
+        server
+            .state
+            .runs
+            .session_thinking(&id, None)
+            .await
+            .unwrap()
+            .enabled
+    );
     let session = server.state.runs.store.load(&id).await.unwrap();
     assert_eq!(
         session.executions[0].model_snapshot.as_ref().unwrap().model,
@@ -349,6 +508,14 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
             .contains("PRIVATE_MODEL_KEY")
     );
     server.state.runs.delete_session(&id).await.unwrap();
+    assert!(
+        !config
+            .session
+            .directory
+            .join("_runs")
+            .join(format!("{id}.thinking"))
+            .exists()
+    );
     assert!(
         !config
             .session

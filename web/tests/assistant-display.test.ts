@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ThreadAssistantMessagePart } from "@assistant-ui/react";
 import {
   latestDisplayPlan,
+  isVisibleMessagePart,
   partitionAssistantParts,
   formatRunDuration,
   groupProcessParts,
@@ -130,5 +131,70 @@ test("plan popup uses the latest successful structured plan and ignores pending 
       { role: "assistant", content: [{ ...saved, args: { summary: "Clear", steps: [] } }] },
     ]),
     { summary: "Clear", steps: [] },
+  );
+});
+
+test("tool generation, queue and approval are hidden until execution starts", () => {
+  const thought: ThreadAssistantMessagePart = { type: "reasoning", text: "Thinking" };
+  for (const state of ["preparing", "queued", "approval"]) {
+    const pending: ThreadAssistantMessagePart = { ...tool, providerMetadata: { kyler: { state } } };
+    assert.equal(isVisibleMessagePart(pending), false);
+    assert.deepEqual(partitionAssistantParts([thought, pending]), { process: [0], answer: [] });
+    assert.deepEqual(partitionAssistantParts([pending]), { process: [], answer: [] });
+  }
+  const running: ThreadAssistantMessagePart = {
+    ...tool,
+    providerMetadata: { kyler: { state: "running", startedAt: 1000 } },
+  };
+  assert.equal(isVisibleMessagePart(running), true);
+  assert.deepEqual(partitionAssistantParts([thought, running]), { process: [0, 1], answer: [] });
+});
+
+test("completed errors remain visible even when authorization prevented execution", () => {
+  const failed: ThreadAssistantMessagePart = {
+    ...tool,
+    isError: true,
+    result: "Permission denied",
+    providerMetadata: { kyler: { state: "finished" } },
+  };
+  assert.equal(isVisibleMessagePart(failed), true);
+  assert.deepEqual(partitionAssistantParts([failed, text("Explanation")]), {
+    process: [0],
+    answer: [1],
+  });
+  assert.equal(isVisibleMessagePart(tool), true); // Legacy history has no live state metadata.
+});
+
+test("cancelling an unstarted call never reveals a preparation card", () => {
+  const cancelled: ThreadAssistantMessagePart = {
+    ...tool,
+    result: "Cancelled.",
+    providerMetadata: { kyler: { state: "cancelled" } },
+  };
+  assert.equal(isVisibleMessagePart(cancelled), false);
+  assert.equal(
+    isVisibleMessagePart({
+      ...cancelled,
+      providerMetadata: { kyler: { state: "cancelled", startedAt: 1000 } },
+    }),
+    true,
+  );
+});
+
+test("interrupted parameter generation never becomes an executed tool card", () => {
+  const interrupted: ThreadAssistantMessagePart = {
+    ...tool,
+    result: "Outcome unknown; no tool result was received.",
+    isError: true,
+    providerMetadata: { kyler: { state: "interrupted" } },
+  };
+  assert.equal(isVisibleMessagePart(interrupted), false);
+  assert.deepEqual(partitionAssistantParts([interrupted]), { process: [], answer: [] });
+  assert.equal(
+    isVisibleMessagePart({
+      ...interrupted,
+      providerMetadata: { kyler: { state: "interrupted", startedAt: 1000 } },
+    }),
+    true,
   );
 });

@@ -178,6 +178,66 @@ impl ThreadHandle {
             ),
         })
     }
+    async fn thinking_path(&self) -> std::path::PathBuf {
+        if self.inner.hosted {
+            self.inner
+                .preferences
+                .join(format!("{}.thinking", self.session().await.session_id))
+        } else {
+            self.inner.preferences.with_extension("thinking")
+        }
+    }
+    pub async fn thinking(
+        &self,
+        enabled: Option<bool>,
+    ) -> Result<kyler_protocol::api::models::ThinkingState> {
+        self.thinking_level(enabled.map(kyler_protocol::api::models::ThinkingLevel::from_enabled))
+            .await
+    }
+    pub async fn thinking_level(
+        &self,
+        level: Option<kyler_protocol::api::models::ThinkingLevel>,
+    ) -> Result<kyler_protocol::api::models::ThinkingState> {
+        if let Some(level) = level {
+            let (reply, receive) = tokio::sync::oneshot::channel();
+            self.submit(super::ThreadOp::SelectThinking { level, reply })
+                .await?;
+            return receive
+                .await
+                .context("thread stopped before thinking selection")?;
+        }
+        self.thinking_state(None).await
+    }
+    pub(super) async fn thinking_state(
+        &self,
+        level: Option<kyler_protocol::api::models::ThinkingLevel>,
+    ) -> Result<kyler_protocol::api::models::ThinkingState> {
+        use kyler_protocol::api::models::ThinkingLevel;
+        let profile = self.inner.profile.read().await;
+        let agent = self.inner.agent.bind_model(profile.as_deref())?;
+        let supported = agent.thinking_supported();
+        let levels = agent.thinking_levels();
+        let path = self.thinking_path().await;
+        if let Some(level) = level {
+            ensure!(
+                levels.contains(&level),
+                "Thinking level is not supported for this model/provider"
+            );
+            save(&path, &serde_json::to_vec(&level)?)?;
+        }
+        let requested = read_thinking(&path)?.unwrap_or(ThinkingLevel::High);
+        let level = if levels.contains(&requested) {
+            requested
+        } else {
+            ThinkingLevel::High
+        };
+        Ok(kyler_protocol::api::models::ThinkingState {
+            enabled: level.enabled(),
+            supported,
+            level,
+            levels,
+        })
+    }
     pub async fn models(&self, reload: bool) -> Result<ModelCatalog> {
         let registry = self
             .inner
@@ -280,4 +340,43 @@ fn save(path: &Path, bytes: &[u8]) -> Result<()> {
     file.persist(path)?;
     std::fs::File::open(parent)?.sync_all()?;
     Ok(())
+}
+
+/// Read old boolean preferences and new levels without modifying historical data.
+pub(super) fn read_thinking(
+    path: &Path,
+) -> Result<Option<kyler_protocol::api::models::ThinkingLevel>> {
+    use kyler_protocol::api::models::ThinkingLevel;
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+            Ok(Some(if let Some(enabled) = value.as_bool() {
+                ThinkingLevel::from_enabled(enabled)
+            } else {
+                serde_json::from_value(value)?
+            }))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod thinking_tests {
+    use super::*;
+    use kyler_protocol::api::models::ThinkingLevel;
+    #[test]
+    fn old_boolean_and_level_preferences_are_read_without_rewriting() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("thinking");
+        for (input, expected) in [
+            ("true", ThinkingLevel::High),
+            ("false", ThinkingLevel::Off),
+            ("\"max\"", ThinkingLevel::Max),
+        ] {
+            std::fs::write(&path, input).unwrap();
+            assert_eq!(read_thinking(&path).unwrap(), Some(expected));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), input);
+        }
+    }
 }

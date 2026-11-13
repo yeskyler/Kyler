@@ -58,6 +58,10 @@ pub(super) async fn run(
                     let handle = super::ThreadHandle {inner:state.clone()};
                     let _ = reply.send(handle.model_state(Some(profile)).await);
                 },
+                Some(ThreadOp::SelectThinking {level,reply}) => {
+                    let handle = super::ThreadHandle {inner:state.clone()};
+                    let _ = reply.send(handle.thinking_state(Some(level)).await);
+                },
                 Some(ThreadOp::SelectPermissions {selection,reply}) => {
                     let handle = super::ThreadHandle {inner:state.clone()};
                     let result = handle.permission_state(Some(&selection)).await;
@@ -141,6 +145,28 @@ async fn start_turn(
             let profile = state.profile.read().await.clone();
             (session, state.agent.bind_model(profile.as_deref())?, None)
         }
+    };
+    let thinking_path = if state.hosted {
+        state
+            .preferences
+            .join(format!("{}.thinking", session.session_id))
+    } else {
+        state.preferences.with_extension("thinking")
+    };
+    let agent = if agent.thinking_supported() {
+        match super::preferences::read_thinking(&thinking_path)? {
+            Some(level) => {
+                let level = if !agent.thinking_levels().contains(&level) {
+                    kyler_protocol::api::models::ThinkingLevel::High
+                } else {
+                    level
+                };
+                agent.with_thinking_level(level)?
+            }
+            None => agent.with_thinking_level(kyler_protocol::api::models::ThinkingLevel::High)?,
+        }
+    } else {
+        agent
     };
     *state.environment.write().await = agent.execution_environment();
     let permissions = state.permissions.read().await.clone();

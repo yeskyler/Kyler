@@ -45,6 +45,10 @@ pub enum ThreadOp {
         profile: Option<String>,
         reply: oneshot::Sender<Result<SessionModel>>,
     },
+    SelectThinking {
+        level: kyler_protocol::api::models::ThinkingLevel,
+        reply: oneshot::Sender<Result<kyler_protocol::api::models::ThinkingState>>,
+    },
     SelectPermissions {
         selection: PermissionSelection,
         reply: oneshot::Sender<Result<PermissionState>>,

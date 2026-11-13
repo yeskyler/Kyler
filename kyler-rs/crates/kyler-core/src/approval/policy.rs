@@ -24,12 +24,25 @@ pub(crate) fn decide(
     if settings.validation_error().is_some() {
         return ApprovalStatus::Denied;
     }
-    match settings.rules.get(tool.name()) {
+    let legacy = match tool.name() {
+        "exec_command" | "shell" => "run_command",
+        "write_stdin" => match operation {
+            ToolOperation::Read => "read_process",
+            ToolOperation::State => "stop_process",
+            _ => "write_process",
+        },
+        _ => tool.name(),
+    };
+    let rule = settings
+        .rules
+        .get(tool.name())
+        .or_else(|| settings.rules.get(legacy));
+    match rule {
         Some(ToolRule::Deny) => return ApprovalStatus::Denied,
         Some(ToolRule::Allow) if !requested => return ApprovalStatus::Allowed,
         _ => {}
     }
-    let ask = requested || settings.rules.get(tool.name()) == Some(&ToolRule::Ask);
+    let ask = requested || rule == Some(&ToolRule::Ask);
     if ask {
         return if settings.rejects(ApprovalRequestKind::ToolRule) {
             ApprovalStatus::Denied
@@ -81,6 +94,14 @@ pub(crate) fn decide(
 }
 
 fn safe_read_command(args: &Value) -> bool {
+    if args["command"].is_array() {
+        return serde_json::from_value::<crate::tools::shell::ShellArgs>(args.clone())
+            .ok()
+            .and_then(|args| args.into_command().ok())
+            .and_then(|args| serde_json::to_value(args).ok())
+            .is_some_and(|args| safe_read_command(&args));
+    }
+
     if args
         .get("working_directory")
         .is_some_and(|value| !value.is_null())
@@ -152,7 +173,7 @@ pub(crate) fn advertise(parameters: &mut Value) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{super::ToolOperation, arguments, decide};
-    use crate::tools::{apply_patch::ApplyPatchTool, command::RunCommandTool};
+    use crate::tools::{apply_patch::ApplyPatchTool, shell::RunCommandTool};
 
     use serde_json::json;
 
@@ -160,6 +181,62 @@ mod tests {
         api::permissions::ApprovalStatus,
         approval::{ApprovalPolicy, ApprovalSettings, ToolRule},
     };
+
+    #[test]
+    fn renamed_process_tools_preserve_legacy_deny_rules() {
+        use crate::tools::exec_command::{ExecCommandTool, WriteStdinTool};
+        let mut settings = ApprovalSettings::default();
+        settings.policy = ApprovalPolicy::Never;
+        settings.rules.insert("run_command".into(), ToolRule::Deny);
+        assert_eq!(
+            decide(
+                &settings,
+                ToolOperation::Command,
+                &serde_json::json!({"command":"echo x"}),
+                &ExecCommandTool,
+                None,
+                false
+            ),
+            ApprovalStatus::Denied
+        );
+        settings
+            .rules
+            .insert("write_process".into(), ToolRule::Deny);
+        assert_eq!(
+            decide(
+                &settings,
+                ToolOperation::Command,
+                &serde_json::json!({"session_id":"p","chars":"x"}),
+                &WriteStdinTool,
+                None,
+                false
+            ),
+            ApprovalStatus::Denied
+        );
+        assert_eq!(
+            decide(
+                &settings,
+                ToolOperation::Read,
+                &serde_json::json!({"session_id":"p"}),
+                &WriteStdinTool,
+                None,
+                false
+            ),
+            ApprovalStatus::Allowed
+        );
+        settings.rules.insert("read_process".into(), ToolRule::Deny);
+        assert_eq!(
+            decide(
+                &settings,
+                ToolOperation::Read,
+                &serde_json::json!({"session_id":"p"}),
+                &WriteStdinTool,
+                None,
+                false
+            ),
+            ApprovalStatus::Denied
+        );
+    }
 
     #[test]
     fn policies_and_tool_rules_never_confuse_prompting_with_access() {

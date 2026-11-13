@@ -20,6 +20,20 @@ export type QuestionResponse =
   | { action: "cancel" }
   | { action: "submit"; answers: Record<string, QuestionAnswer> };
 export type QuestionDraft = QuestionAnswer & { custom: boolean };
+/** Bind pending input to its originating assistant message, never an older turn. */
+export function pendingMessageQuestion(
+  records: QuestionRecord[],
+  execution: unknown,
+  callIds: string[],
+) {
+  return records.find(
+    (record) =>
+      record.status === "pending" &&
+      (typeof execution === "string" && execution.length > 0
+        ? record.execution_id === execution
+        : callIds.includes(record.tool_call_id)),
+  );
+}
 export function mergeQuestions(current: QuestionRecord[], incoming: QuestionRecord[]) {
   const records = new Map(current.map((record) => [record.id, record]));
   for (const record of incoming) {

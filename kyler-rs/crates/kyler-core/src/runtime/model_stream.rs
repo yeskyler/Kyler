@@ -5,6 +5,7 @@ use super::{
 use crate::{
     context::{ContentItem, Role, TokenUsage},
     session::Session,
+    tools::apply_patch::{PATCH_GENERATION_TIMEOUT, PatchGenerationLimit, check_argument_size},
 };
 
 use std::{collections::BTreeMap, time::Duration};
@@ -42,6 +43,29 @@ struct ModelDelta {
     reasoning: Option<String>,
 }
 
+/// A continuous trickle cannot extend the fixed patch-generation deadline.
+async fn read_model_chunk<S: futures::Stream + Unpin>(
+    stream: &mut S,
+    patch_deadline: Option<tokio::time::Instant>,
+) -> Result<Option<S::Item>> {
+    if patch_deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+        return Err(PatchGenerationLimit("parameter generation exceeded 120 seconds").into());
+    }
+    let idle_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let deadline = patch_deadline.map_or(idle_deadline, |deadline| deadline.min(idle_deadline));
+    match tokio::time::timeout_at(deadline, stream.next()).await {
+        Ok(chunk) => Ok(chunk),
+        Err(error) => {
+            if patch_deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                return Err(
+                    PatchGenerationLimit("parameter generation exceeded 120 seconds").into(),
+                );
+            }
+            Err(anyhow::Error::new(error).context("model stream idle timeout"))
+        }
+    }
+}
+
 impl Agent {
     pub(super) async fn streaming_response(
         &self,
@@ -58,7 +82,7 @@ impl Agent {
         // Never retry after emitting deltas: replay would duplicate user-visible output.
         self.observe(super::observation::RuntimeObservation::ModelRequestStarted);
         request.stream = Some(true);
-        let request = crate::models::provider_request(request, session, self.thinking_mode())?;
+        let request = self.provider_request(request, session)?;
         if timing.is_some() {
             use sha2::{Digest, Sha256};
             let encoded = serde_json::to_vec(&request)?;
@@ -80,13 +104,14 @@ impl Agent {
         let mut reasoning_event: Option<usize> = None;
         let mut calls: BTreeMap<u32, (String, String, String)> = BTreeMap::new();
         let mut finished = None;
+        let mut patch_deadline = None;
         let mut first_event = true;
         let mut reported = TokenUsage::default();
         loop {
             let read_started = timing.as_ref().map(|_| std::time::Instant::now());
-            let chunk = tokio::time::timeout(Duration::from_secs(60), stream.next())
-                .await
-                .context("model stream idle timeout")?;
+            let chunk =
+                read_model_chunk(&mut stream, patch_deadline.filter(|_| finished.is_none()))
+                    .await?;
             if let (Some(timing), Some(started)) = (&mut timing, read_started) {
                 let elapsed = started.elapsed().as_micros().min(u64::MAX as u128) as u64;
                 timing.read_wait_us += elapsed;
@@ -213,6 +238,20 @@ impl Agent {
                             call.2.push_str(&arguments);
                         }
                     }
+                    if call.1 == "apply_patch" {
+                        patch_deadline.get_or_insert_with(|| {
+                            tokio::time::Instant::now() + PATCH_GENERATION_TIMEOUT
+                        });
+                        check_argument_size(call.2.len())?;
+                        if finished.is_none()
+                            && tokio::time::Instant::now() >= patch_deadline.unwrap()
+                        {
+                            return Err(PatchGenerationLimit(
+                                "parameter generation exceeded 120 seconds",
+                            )
+                            .into());
+                        }
+                    }
                     // Only publish identity changes; partial arguments stay private and unparsed.
                     if !call.0.is_empty() && (call.0 != previous.0 || call.1 != previous.1) {
                         events
@@ -263,5 +302,31 @@ impl Agent {
             (!text.is_empty()).then_some(text),
             (!calls.is_empty()).then_some(calls),
         ))
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn continuous_fragments_do_not_reset_patch_deadline() {
+        let mut source = Box::pin(futures::stream::unfold((), |_| async {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            Some(((), ()))
+        }));
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(40);
+        let error = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match read_model_chunk(&mut source, Some(deadline)).await {
+                    Ok(Some(())) => {}
+                    Ok(None) => panic!("source should remain open"),
+                    Err(error) => break error,
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(error.downcast_ref::<PatchGenerationLimit>().is_some());
     }
 }

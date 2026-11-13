@@ -62,11 +62,81 @@ Persistent sessions use an append-only `rollout.jsonl` journal and snapshots for
 and recovery. TUI and Web consume shared structured history rather than reconstructing
 tool state from plain assistant text.
 
+## Command lifecycle
+
+Models use `shell` for one-shot argv execution and retain `exec_command` and
+`write_stdin` for ongoing processes. Shared execution parameters and validation live
+in `tools/shell.rs`; there is no `tools/command.rs`. `shell` closes stdin, waits for
+exit or its bounded timeout, returns output and exit status without a process
+session ID, and cleans up its private process entry on exit or cancellation.
+Its default timeout is the host command timeout; explicit values remain bounded by
+the host background timeout.
+
+ `exec_command` accepts a complete
+`command` string, executed through `/bin/sh -c` within the existing authorized
+sandbox. Optional working directory, child environment, total timeout and initial
+wait retain the host's limits. Repeating an identical running command in the same
+chat is rejected with its existing process session ID. Ordinary shell syntax does
+not grant permissions beyond the sandbox or approval policy.
+
+Running commands return a process `session_id`, distinct from the chat session ID.
+`write_stdin` waits for new output when `chars` is empty/omitted, sends nonempty
+input, sends EOF with `close_stdin`, or stops the process group with `terminate`.
+Reads are serialized per process and use host-owned cursors. Terminal sessions
+retain remaining output and exit codes; input to ended sessions is explicitly not
+sent. Reads do not repeat already consumed output. Output is bounded and model
+summaries preserve status and exit codes. No PTY is advertised or implemented;
+Ctrl-C bytes are ordinary pipe input, so use `terminate` to interrupt.
+
+The existing manager retains at most four active processes per chat and 128 total
+entries, with bounded output; completed entries can be evicted at capacity.
+Legacy process tools and the internal `run_command` worker transport remain
+available to historical/internal code but are not advertised by the default agent.
+Existing legacy deny/ask rules apply to corresponding new operations unless an
+explicit new-name rule overrides them. Web and TUI use existing structured events.
+
+## Focused file operations
+
+Agent instructions favor small, coherent patches; related file operations may share
+a call. Existing files are read and updated with minimal context instead of being rewritten.
+Large new files can be built through complete successive patches; each call remains
+independently valid and the agent must finish the full deliverable. This is guidance,
+not a hard size cap, and it does not remove the need to finish generating new content.
+Before writing, the patch worker verifies all operations against staged file contents,
+including sequential edits and moves. Verification failures leave files unchanged;
+commit-time filesystem failures can still leave partial changes. Errors identify the
+file and hunk and guide a corrected retry. Malformed patches and existing-file errors
+require checking actual file state before a smaller corrected retry. Optional tool fields use host defaults when omitted.
+
+### Patch generation budgets
+
+`apply_patch` accepts at most 16 KiB of UTF-8 JSON arguments per call; the tool and
+approval path enforce the same limit. Instructions target 50–80 changed
+lines and about 4 KiB or less; after a budget interruption, the next patch targets
+one named section/function, at most about 40 changed lines and 2 KiB. These are
+prompt-level planning targets, not additional runtime size or line-count limits.
+Large new files start with a concise runnable structure and grow through complete
+updates; rejected full-file patches must not be resent or moved into shell commands. Streaming responses
+are interrupted as soon as accumulated patch arguments exceed the byte budget.
+A fixed 120-second generation deadline starts when `apply_patch` is identified and
+ends at the finish reason; ongoing fragments do not reset it. Existing connection
+and idle timeouts remain in effect. This deadline does not bound preceding reasoning
+or waiting for the first tool identity, nor does it change tool execution timeouts.
+
+Before any tool in a rejected response executes, the streamed agent loop may request
+a smaller complete call, at most twice per run and within its existing step budget.
+Partial arguments are never executed or included in recovery instructions. Exhaustion
+returns `model_patch_generation_limit`. Non-streaming calls are checked after receipt;
+this does not impose a generation-time deadline on non-streaming provider responses.
+These bounds do not guarantee lower total latency or prevent provider-side stalls.
+
 ## Deliverables
 
 The `register_artifacts` tool replaces the current execution's deliverable list with
-explicit file paths, display names, and at most one primary file. Registration validates
-workspace access and the per-file size limit without granting additional permissions.
+explicit file paths, optional display names, and at most one primary file.
+Omitted names default to the decoded source filename. A custom name without an
+extension receives the source extension; conflicting extensions remain invalid.
+Registration validates workspace access and the per-file size limit without granting additional permissions.
 At successful completion, the server retains immutable snapshots before publishing the
 terminal run event. Registration state belongs to one execution and does not carry
 forward into later turns.
@@ -74,10 +144,12 @@ forward into later turns.
 Registered files define the output list. When no files are registered, local links in
 the final response remain supported for compatibility. The host does not scan workspace
 directories for deliverables. Local dependencies of retained HTML and Markdown files
-remain hidden from the top-level list. Web opens an available, supported primary file automatically;
-other files remain selectable from the browser. Missing primary files never cause an
-unrelated file to be selected automatically. File-loading failures show an error and a
-retry control.
+remain hidden from the top-level list. Web opens the output panel for new available
+deliverables, preferring a previewable primary file, then another previewable
+deliverable, then a download-only file.
+Uploaded files and supporting resources do not trigger automatic opening. An open
+panel keeps its selection; closing it suppresses reopening during the same run.
+File-loading failures show an error and a retry control.
 
 XLSX and PPTX previews use `@vue-office/excel` and `@vue-office/pptx` in read-only,
 opaque-origin iframes. The Web build bundles the components, Vue runtime, compatibility
@@ -231,3 +303,21 @@ distinguish calls that have not started.
 The Web client loads successful plan-tool details independently of the SSE event loop,
 with a timeout and protection against older results replacing newer plans. Tool
 execution remains serial within each batch.
+
+## Session thinking preference
+
+`GET/PUT /v1/sessions/{id}/thinking` exposes credential-free thinking state and available `high/max` levels.
+Updates use the thread operation queue and an atomic session-owned preference
+sidecar, separate from active execution checkpoints. The preference survives restart
+and is applied to a copied model snapshot at the next turn admission; an active
+execution keeps its existing setting. Sessions default to High. Old Off/false preferences resolve to High without being
+rewritten on read; new Off selections are rejected. Low-level Off serialization
+remains for compatibility with embedded callers.
+SiliconFlow DeepSeek-V4-Flash maps High/Max to distinct `reasoning_effort` values;
+Off disables thinking and omits effort. Explicit levels are independent of model-name recognition.
+Model-name recognition chooses automatic defaults only. Any bound model can save
+an explicit thinking selection; provider parameter compatibility is validated by
+the provider. The menu remains visible rather than silently disappearing for an
+unrecognized model name.
+
+Provider parameter reference: [SiliconFlow Chat Completions](https://docs.siliconflow.cn/docs/api/chat-completions-post).

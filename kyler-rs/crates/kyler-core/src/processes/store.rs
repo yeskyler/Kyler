@@ -59,6 +59,9 @@ impl ProcessManager {
                 info,
                 input,
                 abort: None,
+                interaction: Arc::new(tokio::sync::Mutex::new(0)),
+                command_key: None,
+                stdin_closed: true,
             };
             persist(&manager.inner, &entry)?;
             manager

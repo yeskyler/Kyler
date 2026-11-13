@@ -125,6 +125,7 @@ export type ThreadComponents = {
   ReasoningGroup?: ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>> | undefined;
   TaskGroup?: ComponentType<{ group: ThreadGroupPart }> | undefined;
   ComposerExtra?: ComponentType | undefined;
+  ComposerEnd?: ComponentType | undefined;
   ComposerMenu?: ComponentType | undefined;
   ComposerHeader?: ComponentType | undefined;
   ComposerFooter?: ComponentType | undefined;
@@ -541,7 +542,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
 };
 
 const ComposerAction: FC = () => {
-  const { ComposerExtra, ComposerMenu } = useContext(ThreadComponentsContext);
+  const { ComposerExtra, ComposerMenu, ComposerEnd } = useContext(ThreadComponentsContext);
   const AttachmentButton = ComposerMenu ?? ComposerAddAttachment;
   // The stop control only cancels the send while no run it could stop is going.
   const isSending = useAuiState(
@@ -596,6 +597,7 @@ const ComposerAction: FC = () => {
             </ComposerPrimitive.StopDictation>
           </AuiIf>
         </AuiIf>
+        {ComposerEnd && <ComposerEnd />}
         <AuiIf
           condition={(s) =>
             (!s.composer.canCancel ||

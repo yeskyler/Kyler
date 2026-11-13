@@ -1,11 +1,26 @@
 import { isCompactionPart } from "./compaction.ts";
 import type { ThreadAssistantMessagePart } from "@assistant-ui/react";
 
+/** Internal generation/queue events must not look like tool execution. */
+export function isVisibleMessagePart(part: ThreadAssistantMessagePart): boolean {
+  if (part.type !== "tool-call") return true;
+  const data = part.providerMetadata?.kyler;
+  if (
+    ["cancelled", "interrupted"].includes(String(data?.state)) &&
+    typeof data?.startedAt !== "number"
+  )
+    return false;
+  return (
+    part.result !== undefined || !["preparing", "queued", "approval"].includes(String(data?.state))
+  );
+}
+
 /** Keep the final answer visible while collecting prior work in chronological order. */
 export function partitionAssistantParts(parts: readonly ThreadAssistantMessagePart[]) {
   let lastActivity = -1;
   let lastText = -1;
   parts.forEach((part, index) => {
+    if (!isVisibleMessagePart(part)) return;
     if (part.type === "tool-call" || part.type === "reasoning" || isCompactionPart(part))
       lastActivity = index;
     if (part.type === "text" && part.text.trim()) lastText = index;
@@ -14,7 +29,7 @@ export function partitionAssistantParts(parts: readonly ThreadAssistantMessagePa
   const process: number[] = [];
   const answer: number[] = [];
   parts.forEach((part, index) => {
-    if (part.type === "text" && !part.text.trim()) return;
+    if (!isVisibleMessagePart(part) || (part.type === "text" && !part.text.trim())) return;
     (index < finalStart ? process : answer).push(index);
   });
   return { process, answer };

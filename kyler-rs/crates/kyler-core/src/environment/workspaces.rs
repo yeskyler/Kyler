@@ -16,7 +16,7 @@ use crate::{
         MxcSandbox, NetworkAccess, Sandbox, SandboxPolicy, direct::DirectSandbox,
         policy::RustupRuntime,
     },
-    tools::{ToolBox, command::RunCommandTool},
+    tools::{ToolBox, exec_command::ExecCommandTool, shell::ShellTool},
 };
 use kyler_config::SandboxSettings;
 use kyler_protocol::sandbox::SandboxMode;
@@ -139,7 +139,8 @@ impl WorkspaceFactory {
             tools.remove("apply_patch");
         }
         if self.commands {
-            tools.insert("run_command".into(), Arc::new(RunCommandTool));
+            tools.insert("exec_command".into(), Arc::new(ExecCommandTool));
+            tools.insert("shell".into(), Arc::new(ShellTool));
         }
     }
     pub fn create(&self, workspace: &Path) -> Result<Arc<ExecutionEnvironment>> {

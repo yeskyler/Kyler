@@ -16,23 +16,50 @@ import {
   answerLabel,
   mergeQuestions,
   questionResponse,
+  pendingMessageQuestion,
   type QuestionDraft,
   type QuestionRecord,
   type QuestionResponse,
 } from "@/lib/kyler/questions";
 
-const QuestionContext = createContext<QuestionRecord[]>([]);
+const QuestionContext = createContext<{
+  records: QuestionRecord[];
+  session: string;
+  onUpdate: (record: QuestionRecord) => void;
+}>({ records: [], session: "", onUpdate: () => {} });
 export function QuestionsProvider({
   records,
+  session,
+  onUpdate,
   children,
 }: {
   records: QuestionRecord[];
+  session: string;
+  onUpdate: (record: QuestionRecord) => void;
   children: ReactNode;
 }) {
-  return <QuestionContext.Provider value={records}>{children}</QuestionContext.Provider>;
+  return (
+    <QuestionContext.Provider value={{ records, session, onUpdate }}>
+      {children}
+    </QuestionContext.Provider>
+  );
 }
 export function usePendingQuestion() {
-  return useContext(QuestionContext).find((record) => record.status === "pending");
+  const { records } = useContext(QuestionContext);
+  const execution = useAuiState((state) => state.message.metadata.custom.executionId);
+  const content = useAuiState((state) => state.message.content);
+  return pendingMessageQuestion(
+    records,
+    execution,
+    content.filter((part) => part.type === "tool-call").map((part) => part.toolCallId),
+  );
+}
+export function MessageQuestion() {
+  const record = usePendingQuestion();
+  const { session, onUpdate } = useContext(QuestionContext);
+  return record ? (
+    <QuestionCard key={record.id} record={record} session={session} onUpdate={onUpdate} />
+  ) : null;
 }
 export function useQuestions(session: string) {
   const [records, setRecords] = useState<QuestionRecord[]>([]);
@@ -228,7 +255,7 @@ export function QuestionCard({
 }
 export function QuestionHistory({ callId, fallback }: { callId: string; fallback: ReactNode }) {
   const execution = useAuiState((state) => state.message.metadata.custom.executionId);
-  const record = useContext(QuestionContext).find(
+  const record = useContext(QuestionContext).records.find(
     (record) => record.tool_call_id === callId && (!execution || record.execution_id === execution),
   );
   if (!record) return fallback;

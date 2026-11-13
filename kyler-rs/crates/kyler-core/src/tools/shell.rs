@@ -11,13 +11,12 @@ use crate::{
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use anyhow::{Context, Result, ensure};
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunCommandArgs {
@@ -123,6 +122,162 @@ impl RunCommandArgs {
         Ok(directory)
     }
 }
+/// One-shot argv execution; interactive lifecycle belongs to exec_command/write_stdin.
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShellArgs {
+    /// Program followed by arguments. Shell syntax requires an explicit shell, e.g. ["/bin/sh", "-c", "echo hello"].
+    pub command: Vec<String>,
+    #[serde(default)]
+    pub working_directory: Option<PathBuf>,
+    #[serde(default)]
+    pub environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u32>,
+}
+impl ShellArgs {
+    pub(crate) fn into_command(self) -> Result<RunCommandArgs> {
+        let mut command = self.command.into_iter();
+        let program = command
+            .next()
+            .context("command must include a program and its arguments")?;
+        let args = RunCommandArgs {
+            program,
+            args: command.collect(),
+            working_directory: self.working_directory,
+            environment: self.environment,
+            timeout_ms: self.timeout_ms,
+            yield_time_ms: 0,
+        };
+        args.validate()?;
+        Ok(args)
+    }
+}
+
+pub struct ShellTool;
+#[async_trait::async_trait]
+impl Tool for ShellTool {
+    fn name(&self) -> &str {
+        "shell"
+    }
+    fn description(&self) -> &str {
+        r#"Execute a one-shot program and wait for completion or timeout. command is an argv array including the program and all arguments, e.g. ["node","--check","snake/snake.js"]. For pipes/redirection explicitly use ["/bin/sh","-c","..."]. Stdin is closed; no PTY or interactive process session is returned. Prefer this for ordinary checks, tests and builds. Use exec_command plus write_stdin for ongoing/interactive processes. Default timeout is the host command timeout; requested timeout_ms must fit the host background limit. Timeout/cancellation cleans up the process group. Inspect status, exit_code, stdout and stderr; nonzero exit is not success. Environment and working_directory are per-call and remain subject to sandbox policy. Use apply_patch for edits."#
+    }
+    fn parameters(&self) -> Value {
+        serde_json::to_value(schema_for!(ShellArgs)).expect("shell schema")
+    }
+    fn approval_requirement(&self, args: &Value) -> Result<ToolOperation> {
+        serde_json::from_value::<ShellArgs>(args.clone())?.into_command()?;
+        Ok(ToolOperation::Command)
+    }
+    fn activity_kind(&self) -> ActivityKind {
+        ActivityKind::Execute
+    }
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::ManagedProcess
+    }
+    fn compress_output(
+        &self,
+        output: &str,
+        budget: &ToolOutputBudget,
+    ) -> Result<CompressedToolOutput> {
+        RunCommandTool.compress_output(output, budget)
+    }
+    async fn execute(&self, arguments: &str, context: &mut ToolContext<'_>) -> Result<String> {
+        let mut command = serde_json::from_str::<ShellArgs>(arguments)?.into_command()?;
+        let env = context
+            .environment
+            .context("shell requires an authorized sandbox")?;
+        ensure!(
+            env.policy().process.allow_commands,
+            "Sandbox blocks commands"
+        );
+        command.directory(
+            &env.session_environment().working_directory,
+            &env.policy().filesystem,
+        )?;
+        let timeout = command
+            .timeout_ms
+            .unwrap_or(env.policy().process.timeout_ms);
+        ensure!(
+            timeout <= env.policy().process.background_timeout_ms,
+            "requested shell timeout exceeds host limit"
+        );
+        command.timeout_ms = Some(timeout);
+        let manager = context
+            .processes
+            .context("shell requires a process manager")?;
+        let started = std::time::Instant::now();
+        let mut events = manager.subscribe();
+        let id = manager.start(
+            context.session_id,
+            env.clone(),
+            serde_json::to_value(&command)?,
+        )?;
+        let _cleanup = ShellCleanup {
+            manager,
+            owner: context.session_id,
+            id: &id,
+        };
+        manager.write(
+            context.session_id,
+            &id,
+            ProcessInput {
+                data: String::new(),
+                close: true,
+            },
+        )?;
+        let timed_out =
+            tokio::time::timeout(std::time::Duration::from_millis(timeout.into()), async {
+                loop {
+                    if manager.read(context.session_id, &id, 0)?.status != "running" {
+                        return Ok::<_, anyhow::Error>(());
+                    }
+                    let _ = events.recv().await;
+                }
+            })
+            .await;
+        let expired = timed_out.is_err();
+        if expired {
+            manager.stop(context.session_id, &id)?;
+        } else {
+            timed_out.unwrap()?;
+        }
+        let info = manager.read(context.session_id, &id, 0)?;
+        let expired = expired
+            || info
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("sandbox execution timed out"));
+        let text = |stream: &str| {
+            info.output
+                .iter()
+                .filter(|chunk| chunk.stream == stream)
+                .map(|chunk| chunk.text.as_str())
+                .collect::<String>()
+        };
+        let result = serde_json::json!({
+            "status": if expired { "timed_out" } else { info.status.as_str() },
+            "exit_code": info.metadata.as_ref().and_then(|metadata| metadata.exit_code),
+            "stdout": text("stdout"), "stderr": text("stderr"), "duration_ms": started.elapsed().as_millis(),
+            "output_truncated": info.oldest_cursor > 1, "error": info.error,
+        });
+        Ok(result.to_string())
+    }
+}
+
+struct ShellCleanup<'a> {
+    manager: &'a ProcessManager,
+    owner: &'a str,
+    id: &'a str,
+}
+impl Drop for ShellCleanup<'_> {
+    fn drop(&mut self) {
+        self.manager.forget_process(self.owner, self.id);
+    }
+}
+
+// Legacy wrapper retained for internal callers, not advertised to the model.
 pub struct RunCommandTool;
 #[async_trait::async_trait]
 impl Tool for RunCommandTool {
@@ -142,7 +297,7 @@ impl Tool for RunCommandTool {
         "run_command"
     }
     fn description(&self) -> &str {
-        "Run a program with an argument array inside the configured sandbox. Optionally set working_directory, per-call environment variables, and timeout_ms within the host limit. Use this to inspect projects, prepare local runtimes and dependencies, and execute in the selected environment. Environment variables and directory changes do not persist across calls; reuse explicit executable paths or pass the same settings again. Reserved host and loader variables cannot be overridden. Waits up to yield_time_ms (default 1000, maximum 60000). A completed command returns status, exit_code, stdout and stderr. A running command returns process_id, cursor and current output; use read_process, write_process or stop_process to manage it. yield_time_ms only controls how soon this call returns; timeout_ms limits total execution within the host background timeout. No terminal/PTY is provided. Shell syntax is interpreted only if an explicit shell program is requested. Use direct program and argument arrays for routine workspace operations. Sandbox permissions and output limits cannot be expanded."
+        "Run a program with an argument array inside the configured sandbox. Optionally set working_directory, per-call environment variables, and timeout_ms within the host limit. Use this to inspect projects, prepare local runtimes and dependencies, and execute in the selected environment. Environment variables and directory changes do not persist across calls; reuse explicit executable paths or pass the same settings again. Reserved host and loader variables cannot be overridden. Waits up to yield_time_ms (default 1000, maximum 60000). A completed command returns status, exit_code, stdout and stderr. A running command returns process_id, cursor and current output; use read_process, write_process or stop_process to manage it. yield_time_ms only controls how soon this call returns; timeout_ms limits total execution within the host background timeout. No terminal/PTY is provided. Shell syntax is interpreted only if an explicit shell program is requested. Use direct program and argument arrays for routine workspace operations. Omit unused optional arguments to use their defaults; avoid embedding large file contents in commands when focused file patches suffice. Sandbox permissions and output limits cannot be expanded."
     }
     fn parameters(&self) -> Value {
         serde_json::to_value(schema_for!(RunCommandArgs)).expect("command schema is serializable")
@@ -205,76 +360,31 @@ impl Tool for RunCommandTool {
     }
 }
 
-/// Session-scoped controls for commands started by run_command.
-pub struct ProcessTool {
-    pub manager: Arc<ProcessManager>,
-    pub action: &'static str,
-}
-#[async_trait::async_trait]
-impl Tool for ProcessTool {
-    fn name(&self) -> &str {
-        self.action
-    }
-    fn description(&self) -> &str {
-        match self.action {
-            "read_process" => {
-                "Read status and incremental process output using a cursor. Processes belong to the current session."
-            }
-            "write_process" => {
-                "Write bounded text to a managed process stdin. Set close=true to send EOF."
-            }
-            _ => "Stop a managed background process and terminate its sandbox process group.",
-        }
-    }
-    fn parameters(&self) -> Value {
-        json!({"type":"object","properties":{"process_id":{"type":"string"},"cursor":{"type":"integer","minimum":0},"data":{"type":"string"},"close":{"type":"boolean"}},"required":["process_id"],"additionalProperties":false})
-    }
-    fn execution_mode(&self) -> ToolExecutionMode {
-        ToolExecutionMode::Host
-    }
-    fn activity_kind(&self) -> ActivityKind {
-        ActivityKind::Execute
-    }
-    fn approval_requirement(&self, _: &Value) -> Result<ToolOperation> {
-        Ok(match self.action {
-            "read_process" => ToolOperation::Read,
-            "stop_process" => ToolOperation::State,
-            _ => ToolOperation::Command,
-        })
-    }
-    async fn execute(&self, args: &str, context: &mut ToolContext<'_>) -> Result<String> {
-        let args: Value = serde_json::from_str(args)?;
-        let id = args["process_id"].as_str().unwrap_or_default();
-        let value = match self.action {
-            "read_process" => serde_json::to_value(self.manager.read(
-                context.session_id,
-                id,
-                args["cursor"].as_u64().unwrap_or(0),
-            )?)?,
-            "write_process" => {
-                self.manager.write(
-                    context.session_id,
-                    id,
-                    ProcessInput {
-                        data: args["data"].as_str().unwrap_or_default().into(),
-                        close: args["close"].as_bool().unwrap_or(false),
-                    },
-                )?;
-                json!({"written":true})
-            }
-            _ => {
-                self.manager.stop(context.session_id, id)?;
-                json!({"cancelled":true})
-            }
-        };
-        Ok(serde_json::to_string(&value)?)
-    }
-}
-
 #[cfg(test)]
 mod environment_tests {
     use super::RunCommandArgs;
     use serde_json::json;
+
+    #[test]
+    fn shell_requires_argv_and_preserves_argument_boundaries() {
+        let args = serde_json::from_value::<super::ShellArgs>(
+            json!({"command":["/bin/echo","hello world"]}),
+        )
+        .unwrap()
+        .into_command()
+        .unwrap();
+        assert_eq!(args.program, "/bin/echo");
+        assert_eq!(args.args, ["hello world"]);
+        assert!(
+            serde_json::from_value::<super::ShellArgs>(json!({"command":[]}))
+                .unwrap()
+                .into_command()
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<super::ShellArgs>(json!({"command":"echo hello"})).is_err()
+        );
+    }
 
     #[test]
     fn command_context_accepts_project_toolchains_but_rejects_reserved_overrides() {

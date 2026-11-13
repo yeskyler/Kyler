@@ -225,19 +225,45 @@ test("file navigation filters resources and searches names and display paths", (
   assert.equal(absolute.href, file.href);
 });
 
-test("only explicit primary deliverables open automatically", () => {
+test("new deliverables open without a primary flag and prefer previewable primary files", () => {
   const secondary = { ...file, key: "secondary", primary: false };
   const legacy = { ...file, key: "legacy", primary: undefined };
+  const archive = {
+    ...file,
+    key: "archive",
+    name: "files.zip",
+    kind: "unsupported" as const,
+    primary: false,
+  };
   assert.equal(
-    autoPreview([secondary, legacy], new Set(), "s", initialBrowserState),
-    initialBrowserState,
+    autoPreview([secondary, legacy], new Set(), "s", initialBrowserState).selected,
+    secondary.key,
   );
   assert.equal(
     autoPreview([secondary, file], new Set(), "s", initialBrowserState).selected,
     file.key,
   );
   assert.equal(
-    autoPreview([{ ...file, available: false }, secondary], new Set(), "s", initialBrowserState),
+    autoPreview([{ ...file, available: false }, secondary], new Set(), "s", initialBrowserState)
+      .selected,
+    secondary.key,
+  );
+  assert.equal(
+    autoPreview([archive, secondary], new Set(), "s", initialBrowserState).selected,
+    secondary.key,
+  );
+  assert.equal(autoPreview([archive], new Set(), "s", initialBrowserState).selected, archive.key);
+  assert.equal(
+    autoPreview(
+      [
+        { ...file, resource: true },
+        { ...file, available: false },
+        { ...file, group: "uploaded" },
+      ],
+      new Set(),
+      "s",
+      initialBrowserState,
+    ),
     initialBrowserState,
   );
 });

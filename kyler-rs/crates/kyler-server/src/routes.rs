@@ -169,6 +169,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{id}/model",
             get(models::get).put(models::select),
         )
+        .route(
+            "/v1/sessions/{id}/thinking",
+            get(models::thinking).put(models::select_thinking),
+        )
         .route("/v1/service/shutdown", post(shutdown))
         .route(
             "/v1/sessions/{id}/skills",

@@ -594,6 +594,18 @@ async fn application_config_constructs_runtime_services_and_configured_tools() {
     assert_eq!(agent.context_policy.output_tokens, 512);
     assert_eq!(agent.tool_output_budget.max_bytes, 1234);
     assert!(agent.toolbox.contains_key("delegate_task"));
+    let process_agent = agent
+        .clone()
+        .with_processes(Arc::new(crate::processes::ProcessManager::default()));
+    assert!(process_agent.toolbox.contains_key("write_stdin"));
+    for legacy in [
+        "run_command",
+        "read_process",
+        "write_process",
+        "stop_process",
+    ] {
+        assert!(!agent.toolbox.contains_key(legacy));
+    }
     assert_eq!(
         agent
             .subagent_manager

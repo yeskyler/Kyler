@@ -54,6 +54,8 @@ export async function serverSettings() {
 // Only expose UI operations. Service shutdown and arbitrary upstream URLs are excluded.
 export function permittedPath(path: string, method: string) {
   const id = "[a-zA-Z0-9_-]+";
+  // Provider call IDs are opaque identifiers, not session UUIDs.
+  const toolCallId = "(?!\\.{1,2}$)[a-zA-Z0-9_.:-]{1,512}";
   const rules: [string, string][] = [
     ["GET", "info"],
     ["GET", "workspaces"],
@@ -90,6 +92,8 @@ export function permittedPath(path: string, method: string) {
     ["GET", `sessions/${id}/history`],
     ["GET", `sessions/${id}/questions`],
     ["POST", `sessions/${id}/questions/${id}/response`],
+    ["GET", `sessions/${id}/thinking`],
+    ["PUT", `sessions/${id}/thinking`],
     ["GET", `sessions/${id}/model`],
     ["PUT", `sessions/${id}/model`],
     ["GET", `sessions/${id}/model/settings`],
@@ -111,7 +115,7 @@ export function permittedPath(path: string, method: string) {
     ["GET", `sessions/${id}/attachments/${id}`],
     ["GET", `sessions/${id}/attachments/${id}/content`],
     ["DELETE", `sessions/${id}/attachments/${id}`],
-    ["GET", `sessions/${id}/tool-calls/${id}`],
+    ["GET", `sessions/${id}/tool-calls/${toolCallId}`],
     ["GET", `runs/${id}`],
     ["GET", `runs/${id}/events`],
     ["POST", `runs/${id}/cancel`],
@@ -140,7 +144,10 @@ export async function proxyRequest(request: Request, path: string[]) {
   }
   try {
     const settings = await serverSettings();
-    const target = new URL(`/v1/${route}`, settings.url);
+    const target = new URL(
+      `/v1/${path.map((segment) => encodeURIComponent(segment)).join("/")}`,
+      settings.url,
+    );
     target.search = new URL(request.url).search;
     const headers = new Headers();
     if (settings.token) headers.set("authorization", `Bearer ${settings.token}`);
