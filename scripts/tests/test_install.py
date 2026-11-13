@@ -59,7 +59,7 @@ def sandbox_fixture(root, environment):
     tools = root / "sandbox-tools"
     tools.mkdir()
     # Never permit these tests to mutate host packages, even on a Linux test runner.
-    for manager in ("apt-get", "dnf", "yum", "pacman", "zypper"):
+    for manager in ("apt-get", "dnf", "yum", "pacman", "zypper", "brew"):
         script = tools / manager
         script.write_text('#!/bin/sh\necho "Tests cannot install host packages; prepare sandbox dependencies first." >&2\nexit 1\n')
         script.chmod(0o755)
@@ -814,7 +814,7 @@ class SystemCompatibilityTests(unittest.TestCase):
                 path.write_text("#!/bin/sh\n" + body + "\n")
                 path.chmod(0o755)
             text = INSTALLER.read_text()
-            function = text[text.index("check_system() {"):text.index("prepare_linux_sandbox() {")]
+            function = text[text.index("check_system() {"):text.index("prepare_runtime_dependencies() {")]
             env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ["PATH"], TEST_SYSTEM=system, TEST_ARCH=architecture, TEST_LIBC=libc)
             return subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\ncheck_system'], env=env, capture_output=True, text=True, timeout=5)
 
@@ -837,7 +837,7 @@ class SystemCompatibilityTests(unittest.TestCase):
 
 
 class SandboxSetupTests(unittest.TestCase):
-    def check(self, version="0.9.0", manager="apt-get", root_user=False, sudo=True, fail_install=False, missing_network=False, upgrade=True):
+    def check(self, version="0.9.0", manager="apt-get", root_user=False, sudo=True, fail_install=False, missing_network=False, upgrade=True, system="Linux", missing_rg=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             tools = root / "bin"
@@ -845,7 +845,10 @@ class SandboxSetupTests(unittest.TestCase):
             log = root / "commands"
             marker = root / "installed"
             scripts = {
-                "uname": "echo Linux",
+                "uname": "echo " + system,
+                "curl": "exit 0",
+                "sha256sum": "exit 0",
+                "rg": 'if [ "$MISSING_RG" = yes ]; then [ -f "$SANDBOX_MARKER" ] && [ "$UPGRADE" = yes ] || exit 1; fi; echo "ripgrep 14.1.0"',
                 "id": "echo " + ("0" if root_user else "1000"),
                 "bwrap": 'if [ -f "$SANDBOX_MARKER" ] && [ "$UPGRADE" = yes ]; then echo "bubblewrap 0.9.0"; else echo "bubblewrap $SANDBOX_VERSION"; fi',
                 "sudo": 'printf "sudo %s\\n" "$*" >> "$SANDBOX_LOG"; exec "$@"',
@@ -860,12 +863,12 @@ class SandboxSetupTests(unittest.TestCase):
                 path.write_text("#!/bin/sh\n" + body + "\n")
                 path.chmod(0o755)
             # A closed PATH ensures tests can never invoke the host package manager or sudo.
-            for utility in ("awk", "touch", "sh"):
+            for utility in ("awk", "touch", "sh") + (("sleep",) if missing_network else ()):
                 (tools / utility).symlink_to(shutil.which(utility))
             text = INSTALLER.read_text()
-            function = text[text.index("prepare_linux_sandbox() {"):text.index("transfer() {")]
-            env = dict(os.environ, PATH=str(tools), SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no", UPGRADE="yes" if upgrade else "no")
-            result = subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\nprepare_linux_sandbox'], env=env, capture_output=True, text=True, timeout=10)
+            function = text[text.index("prepare_runtime_dependencies() {"):text.index("transfer() {")]
+            env = dict(os.environ, PATH=str(tools), SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no", UPGRADE="yes" if upgrade else "no", MISSING_RG="yes" if missing_rg else "no")
+            result = subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\nprepare_runtime_dependencies'], env=env, capture_output=True, text=True, timeout=10)
             return result, log.read_text() if log.exists() else ""
 
     def test_recent_bubblewrap_and_network_tools_are_reused(self):
@@ -880,7 +883,8 @@ class SandboxSetupTests(unittest.TestCase):
                 result, commands = self.check("0.4.0", manager=manager)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("sudo " + manager, commands)
-                self.assertIn("bubblewrap slirp4netns", commands)
+                self.assertIn("bubblewrap", commands)
+                self.assertNotIn("slirp4netns", commands)
                 self.assertIn("bubblewrap 0.9.0", result.stdout)
                 if manager == "apt-get": self.assertIn("sudo apt-get update", commands)
                 if manager == "pacman": self.assertNotIn("-Sy", commands)
@@ -909,6 +913,46 @@ class SandboxSetupTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("remain unavailable", result.stderr)
             self.assertIn("install", commands)
+
+    def test_only_missing_ripgrep_is_installed_on_linux(self):
+        for manager in ("apt-get", "dnf", "yum", "pacman", "zypper"):
+            with self.subTest(manager=manager):
+                result, commands = self.check(manager=manager, missing_rg=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("ripgrep", commands)
+                self.assertNotIn("bubblewrap", commands)
+                self.assertIn("ripgrep 14.1.0", result.stdout)
+
+    def test_macos_reuses_existing_dependencies_without_homebrew(self):
+        result, commands = self.check(system="Darwin", manager=None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(commands, "")
+        self.assertIn("Seatbelt", result.stdout)
+
+    def test_macos_installs_ripgrep_with_homebrew_without_sudo(self):
+        result, commands = self.check(system="Darwin", manager="brew", missing_rg=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("brew install ripgrep", commands)
+        self.assertNotIn("sudo", commands)
+
+    def test_ripgrep_is_rechecked_after_installation(self):
+        for system, manager in (("Linux", "apt-get"), ("Darwin", "brew")):
+            result, commands = self.check(system=system, manager=manager, missing_rg=True, upgrade=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("ripgrep", commands)
+            self.assertTrue("unavailable" in result.stderr or "unavailable" in result.stdout)
+
+    def test_macos_package_failure_shows_retry_command(self):
+        result, commands = self.check(system="Darwin", manager="brew", missing_rg=True, fail_install=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Retry: brew install ripgrep", result.stderr)
+
+    def test_macos_missing_homebrew_stops_with_instructions(self):
+        result, commands = self.check(system="Darwin", manager=None, missing_rg=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(commands, "")
+        self.assertIn("https://brew.sh", result.stderr)
+        self.assertIn("brew install ripgrep", result.stderr)
 
     def test_invalid_bubblewrap_version_is_not_accepted(self):
         result, commands = self.check("unknown", manager=None)

@@ -27,7 +27,7 @@ pub async fn execute(json: bool) -> Result<()> {
     } else {
         for check in checks {
             output::text(&format!(
-                "{}: process, workspace read/write, read-only/denied/outside paths and host loopback protection — OK\n",
+                "{}: process, ripgrep search, workspace read/write, read-only/denied/outside paths and host loopback protection — OK\n",
                 check.mode
             ))?;
         }

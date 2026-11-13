@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 use crate::sandbox::policy::RustupRuntime;
 
 #[derive(Default)]
-pub(super) struct Runtime {
+pub(crate) struct Runtime {
     pub readonly_paths: Vec<PathBuf>,
     pub search_directories: Vec<PathBuf>,
     pub rustup: Option<RustupRuntime>,
@@ -34,6 +34,12 @@ impl Runtime {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        // Services and fresh terminals may not inherit Homebrew's shell initialization.
+        #[cfg(target_os = "macos")]
+        directories.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ]);
         if let Some(home) = cargo_home {
             directories.push(home.join("bin"));
         }
