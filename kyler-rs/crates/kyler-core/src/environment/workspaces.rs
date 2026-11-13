@@ -1,5 +1,5 @@
 //! Host-owned policy for isolated, session-specific workspaces.
-mod runtime;
+pub(crate) mod runtime;
 
 use self::runtime::Runtime;
 

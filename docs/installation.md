@@ -23,7 +23,7 @@ it downloads both files again from GitHub for the same version. Checksum failure
 stop installation; they do not silently switch sources. `--version VERSION` skips
 latest-version discovery.
 
-Six numbered steps cover system compatibility, sandbox dependencies, download and
+Six numbered steps cover system compatibility, runtime dependencies, download and
 verification, native self-checks, configuration and installation, then service startup.
 Downloads show the source, file, size, speed, and remaining time. Failed downloads
 display manual download and local installation commands. Local bundles skip release
@@ -51,7 +51,7 @@ adapter are checked before download: `slirp4netns`, `ip`, `unshare`, `nsenter`,
 installed tools are reused. Missing dependencies use the first available supported
 package manager:
 
-| Package manager | Packages |
+| Package manager | Sandbox packages (only missing components are installed) |
 | --- | --- |
 | `apt-get` | `bubblewrap slirp4netns iproute2 util-linux iptables` |
 | `dnf` / `yum` | `bubblewrap slirp4netns iproute util-linux iptables` |
@@ -67,6 +67,18 @@ through its normal full-system update procedure if repository versions are outda
 Package-manager recognition is not a certification of every distribution/version.
 
 macOS uses the system Seatbelt sandbox without downloading a separate sandbox runtime.
+Both macOS and Linux require ripgrep (`rg`). Existing working installations are
+reused. On macOS, missing ripgrep or curl is installed using an existing Homebrew;
+if Homebrew is absent, the installer stops with the Homebrew URL and manual command.
+Homebrew is never installed automatically or run through sudo. Standard Apple
+Silicon and Intel Homebrew binary directories are included in the installer PATH.
+On Linux, only packages for missing/outdated sandbox tools, ripgrep, curl and SHA256
+utilities are requested from the supported system package manager. Package output
+is retained, and missing packages or an outdated repository stop installation with
+manual retry instructions. The installer does not add repositories or alter host
+security settings. Basic shell, archive and text utilities must already be present.
+Release bundles include Node.js; installing Kyler does not require Rust or a separate
+Node.js installation.
 Windows is not currently supported by Kyler's adapter, regardless of MXC's wider
 platform support.
 
@@ -77,7 +89,9 @@ new binary runs `kyler doctor` as the installing user. It uses temporary fixture
 a disposable local TCP listener, without reading application configuration, contacting
 a model or using an API key. Both offline and outbound sandbox policies must launch
 successfully and enforce workspace writes, protected/denied/outside paths and denial
-of host loopback access. A child shell is also executed inside each sandbox. Worker
+of host loopback access. A child shell and a real `grep_files` search over a
+disposable fixture are also executed inside each sandbox. This verifies ripgrep discovery and access through
+the same runtime PATH and read-only executable roots used by workspace tools. Worker
 execution uses the same MXC supervision and cleanup as application tools.
 
 The check exercises network-policy setup and local isolation; it does not verify

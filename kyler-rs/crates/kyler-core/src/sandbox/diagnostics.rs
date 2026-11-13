@@ -12,6 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 pub struct SandboxCheck {
     pub mode: String,
     pub child_process: bool,
+    pub ripgrep: bool,
     pub workspace_read_write: bool,
     pub readonly_enforced: bool,
     pub denied_read_enforced: bool,
@@ -36,6 +37,7 @@ pub async fn check(worker: &Path) -> Result<Vec<SandboxCheck>> {
     let host = TcpStream::connect(address).await?;
     let (accepted, _) = listener.accept().await?;
     drop((host, accepted));
+    let runtime = crate::environment::workspaces::runtime::Runtime::discover();
     let mut results = Vec::new();
     for (mode, network) in [
         ("offline", NetworkAccess::Deny),
@@ -43,6 +45,8 @@ pub async fn check(worker: &Path) -> Result<Vec<SandboxCheck>> {
     ] {
         let mut policy = SandboxPolicy::workspace_write("doctor", &workspace);
         policy.network = network;
+        policy.executable_search_path = runtime.search_path();
+        policy.runtime_readonly_paths = runtime.readonly_paths.clone();
         policy
             .filesystem
             .readonly_paths
@@ -61,6 +65,7 @@ pub async fn check(worker: &Path) -> Result<Vec<SandboxCheck>> {
             .await
             .with_context(|| format!("{mode}: native sandbox execution failed"))?;
         let result: SandboxCheck = serde_json::from_str(&output)?;
+        ensure!(result.ripgrep, "{mode}: sandbox ripgrep search failed");
         ensure!(
             result.child_process,
             "{mode}: child process execution failed"
@@ -120,6 +125,21 @@ pub(super) async fn probe(arguments: Value) -> Result<String> {
         .await
         .context("cannot start sandbox child process")?;
     let child_process = child_process.status.success() && child_process.stdout == b"kyler-doctor";
+    let matches = crate::tools::grep_files::grep_files(crate::tools::grep_files::GrepFilesArgs {
+        pattern: "^fixture$".into(),
+        include: Some("allowed".into()),
+        path: Some(".".into()),
+        limit: 10,
+    })
+    .await
+    .context(
+        "sandbox ripgrep search failed; install ripgrep and ensure rg is on the service PATH",
+    )?;
+    let ripgrep = matches.lines().any(|line| {
+        Path::new(line)
+            .file_name()
+            .is_some_and(|name| name == "allowed")
+    });
     let workspace_read_write = std::fs::read_to_string("allowed")? == "fixture"
         && std::fs::write("written", "probe").is_ok()
         && std::fs::read_to_string("written")? == "probe";
@@ -141,6 +161,7 @@ pub(super) async fn probe(arguments: Value) -> Result<String> {
     Ok(serde_json::to_string(&SandboxCheck {
         mode: String::new(),
         child_process,
+        ripgrep,
         workspace_read_write,
         readonly_enforced,
         denied_read_enforced,

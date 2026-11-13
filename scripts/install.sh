@@ -3,6 +3,10 @@
 set -eu
 # Namespace/firewall tools are commonly installed in sbin on Linux.
 PATH=${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin
+# Include existing Homebrew installations without invoking shell startup files.
+for dependency_bin in /opt/homebrew/bin /usr/local/bin; do
+    [ ! -d "$dependency_bin" ] || PATH="$PATH:$dependency_bin"
+done
 export PATH
 usage() {
     cat <<'HELP'
@@ -91,10 +95,25 @@ check_system() {
     for utility in tar awk sed find mktemp; do
         command -v "$utility" >/dev/null 2>&1 || fail "Required command is missing: $utility"
     done
-    command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail 'Install shasum or sha256sum first.'
 }
-prepare_linux_sandbox() {
-    [ "$(uname -s)" = Linux ] || { printf 'Backend: system Seatbelt (no additional download).\n'; return 0; }
+prepare_runtime_dependencies() {
+    if [ "$(uname -s)" = Darwin ]; then
+        printf 'Sandbox: system Seatbelt (actual execution checked in step 4).\n'
+        packages=
+        rg --version >/dev/null 2>&1 || packages=ripgrep
+        command -v curl >/dev/null 2>&1 || packages="$packages curl"
+        if [ -n "$packages" ]; then
+            command -v brew >/dev/null 2>&1 || fail "Missing dependencies: $packages. Install Homebrew using https://brew.sh, then run: brew install $packages. Rerun this installer afterward."
+            printf 'Installing missing dependencies. Command: brew install%s\n' " $packages"
+            brew install $packages || fail "Dependency installation failed. Retry: brew install $packages"
+        else
+            printf 'Reusing installed ripgrep and download tools.\n'
+        fi
+        rg --version || fail 'ripgrep is still unavailable; check your Homebrew installation and PATH.'
+        command -v curl >/dev/null 2>&1 || fail 'curl is still unavailable.'
+        command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail 'SHA256 checksum tools are missing.'
+        return 0
+    fi
     printf 'Checking Linux sandbox dependencies (Bubblewrap >= 0.5.0 and isolated networking)...\n'
     bubblewrap_ready() {
         command -v bwrap >/dev/null 2>&1 || return 1
@@ -104,27 +123,44 @@ prepare_linux_sandbox() {
     }
     dependencies_ready() {
         missing=
-        bubblewrap_ready || missing=bwrap
+        packages=
+        bubblewrap_ready || { missing=bwrap; packages=bubblewrap; }
+        rg --version >/dev/null 2>&1 || { missing="$missing rg"; packages="$packages ripgrep"; }
+        command -v curl >/dev/null 2>&1 || { missing="$missing curl"; packages="$packages curl ca-certificates"; }
+        if ! command -v shasum >/dev/null 2>&1 && ! command -v sha256sum >/dev/null 2>&1; then
+            missing="$missing sha256sum"; packages="$packages coreutils"
+        fi
         for tool in slirp4netns ip unshare nsenter iptables ip6tables iptables-restore ip6tables-restore sh sleep; do
-            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+            if ! command -v "$tool" >/dev/null 2>&1; then
+                missing="$missing $tool"
+                case "$tool" in
+                    slirp4netns) packages="$packages slirp4netns" ;;
+                    ip) packages="$packages $ip_package" ;;
+                    unshare|nsenter) case " $packages " in *' util-linux '*) ;; *) packages="$packages util-linux" ;; esac ;;
+                    iptables*) case " $packages " in *' iptables '*) ;; *) packages="$packages iptables" ;; esac ;;
+                    sh|sleep) fail "Required base system command missing: $tool" ;;
+                esac
+            fi
         done
         [ -z "$missing" ]
     }
-    if dependencies_ready; then
-        printf 'Reusing installed Bubblewrap and networking tools.\n'
-        return 0
-    fi
-    printf 'Missing or outdated: %s\n' "$missing"
     manager=
     for candidate in apt-get dnf yum pacman zypper; do
         if command -v "$candidate" >/dev/null 2>&1; then manager=$candidate; break; fi
     done
+    case "$manager" in dnf|yum) ip_package=iproute ;; *) ip_package=iproute2 ;; esac
+    if dependencies_ready; then
+        rg --version
+        printf 'Reusing installed Bubblewrap, networking tools, ripgrep and download tools.\n'
+        return 0
+    fi
+    printf 'Missing or outdated: %s\n' "$missing"
     case "$manager" in
-        apt-get) packages='bubblewrap slirp4netns iproute2 util-linux iptables'; instruction="apt-get update && apt-get install -y $packages" ;;
-        dnf|yum) packages='bubblewrap slirp4netns iproute util-linux iptables'; instruction="$manager install -y $packages" ;;
-        pacman) packages='bubblewrap slirp4netns iproute2 util-linux iptables'; instruction="pacman -S --needed --noconfirm $packages" ;;
-        zypper) packages='bubblewrap slirp4netns iproute2 util-linux iptables'; instruction="zypper --non-interactive install $packages" ;;
-        *) fail "No supported package manager found. Ask an administrator to install Bubblewrap >= 0.5.0 and these tools: $missing. Then rerun the installer." ;;
+        apt-get) instruction="apt-get update && apt-get install -y $packages" ;;
+        dnf|yum) instruction="$manager install -y $packages" ;;
+        pacman) instruction="pacman -S --needed --noconfirm $packages" ;;
+        zypper) instruction="zypper --non-interactive install $packages" ;;
+        *) fail "No supported package manager found. Ask an administrator to install these missing dependencies: $missing. Then rerun the installer." ;;
     esac
     if [ "$(id -u)" = 0 ]; then elevated=; else
         command -v sudo >/dev/null 2>&1 || fail "Administrator access is required. Ask an administrator to run: $instruction"
@@ -140,6 +176,7 @@ prepare_linux_sandbox() {
         zypper) $elevated zypper --non-interactive install $packages || fail "Dependency installation failed. Run as administrator: $instruction" ;;
     esac
     dependencies_ready || fail "Dependencies remain unavailable: $missing. The system repository may be too old or commands may be missing from PATH. No third-party repositories were added."
+    rg --version
     printf 'Dependency commands ready; native sandbox execution will be checked after unpacking.\n'
 }
 transfer() {
@@ -166,8 +203,8 @@ printf 'Existing configuration can be kept with Enter. API keys are hidden.\n'
 printf 'Already downloaded a bundle? Run: sh install.sh --bundle /path/to/kyler-platform.tar.gz\n'
 step 1 'Check system compatibility'
 check_system
-step 2 'Prepare sandbox dependencies'
-prepare_linux_sandbox
+step 2 'Prepare runtime dependencies'
+prepare_runtime_dependencies
 step 3 'Download and verify bundle'
 if [ -z "$bundle" ]; then
     command -v curl >/dev/null 2>&1 || fail 'curl is required.'
