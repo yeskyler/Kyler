@@ -261,6 +261,7 @@ fn tool_entry(name: &str, status: &str) -> Entry {
         name: name.into(),
         status: status.into(),
         started: Instant::now(),
+        patch: None,
         seconds: Some(0.1),
         activity: Some(ActivityKind::Explore),
         source: Default::default(),

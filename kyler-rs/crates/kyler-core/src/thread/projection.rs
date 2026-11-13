@@ -39,7 +39,7 @@ pub fn history(session: &Session, cursor: usize, limit: usize) -> Result<History
                     if arguments.to_string().len() > 8192 { arguments = serde_json::json!({"preview":prefix(&arguments.to_string(),8192),"truncated":true}); }
                     HistoryContent::ToolCall { call_id: tool_call_id.clone(), name: name.clone(), arguments, presentation, summary }
                 }
-                ContentItem::ToolResult { tool_call_id, name, status, content, .. } => HistoryContent::ToolResult { call_id: tool_call_id.clone(), name: name.clone(), status: format!("{status:?}").to_ascii_lowercase(), output: prefix(content, 32000), output_bytes: content.len(), truncated: content.len() > 32000 },
+                ContentItem::ToolResult { tool_call_id, name, status, content, .. } => HistoryContent::ToolResult { patch: (name == "apply_patch").then(|| kyler_protocol::api::tools::PatchResult::from_output(content)).flatten(), call_id: tool_call_id.clone(), name: name.clone(), status: format!("{status:?}").to_ascii_lowercase(), output: prefix(content, 32000), output_bytes: content.len(), truncated: content.len() > 32000 },
             });
         }
         let projected = HistoryEvent {

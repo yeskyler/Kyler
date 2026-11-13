@@ -15,6 +15,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::fs;
 
+use kyler_protocol::api::tools::{PatchFileChange, PatchResult};
+
 pub(crate) const MAX_PATCH_ARGUMENT_BYTES: usize = 16 * 1024;
 pub(crate) const PATCH_GENERATION_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(120);
@@ -25,7 +27,7 @@ impl std::fmt::Display for PatchGenerationLimit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "apply_patch {}. The next patch should change only one named section or function, at most about 40 changed lines and 2 KiB of JSON arguments. The hard argument limit remains 16384 UTF-8 bytes. Read existing files when state is uncertain and update only changed sections; do not resend the rejected whole-file patch or bypass the budget through shell commands.",
+            "apply_patch {}. Reduce the rejected scope substantially and return a smaller complete patch for a coherent subset; reduce it further if interrupted again. The hard argument limit remains 16384 UTF-8 bytes. Read existing files when state is uncertain and update only changed sections; do not resend the rejected whole-file patch or bypass the budget through shell commands.",
             self.0
         )
     }
@@ -43,7 +45,7 @@ pub(crate) fn check_argument_size(bytes: usize) -> anyhow::Result<()> {
 #[serde(deny_unknown_fields)]
 pub struct ApplyPatchArgs {
     /// Literal patch text. Keep the entire JSON argument object within 16 KiB of UTF-8 bytes;
-    /// aim for 50–80 changed lines and about 4 KiB or less per call. Example to create a file:
+    /// group coherent changes, typically about 8–12 KiB for a medium patch, without a fixed line count. Example to create a file:
     /// *** Begin Patch
     /// *** Add File: notes.txt
     /// +Hello
@@ -63,7 +65,9 @@ pub async fn apply_patch(args: ApplyPatchArgs) -> anyhow::Result<String> {
 
 pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<String> {
     let patch = parse_patch(input)?;
-    let mut changed_paths = Vec::with_capacity(patch.operations.len());
+    let root = std::fs::canonicalize(root)?;
+    let root = root.as_path();
+    let mut changes = Vec::<(PatchFileChange, bool)>::new();
     let mut staged = BTreeMap::<PathBuf, Option<String>>::new();
     let mut prepared = Vec::new();
 
@@ -77,8 +81,11 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
                     path.display()
                 );
                 let trailing_newline = !lines.is_empty();
+                changes.push((
+                    file_change(root, &path, "added", None, lines.len(), 0),
+                    false,
+                ));
                 stage_write(&mut staged, &mut prepared, &path, lines, trailing_newline);
-                changed_paths.push(path);
             }
             FileOperation::Delete { path } => {
                 let path = resolve_path(root, &path)?;
@@ -94,9 +101,17 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
                         path.display()
                     );
                 }
+                let removed = match staged.get(&path) {
+                    Some(Some(content)) => content.lines().count(),
+                    _ => {
+                        let bytes = fs::read(&path).await?;
+                        bytes.iter().filter(|byte| **byte == b'\n').count()
+                            + usize::from(!bytes.is_empty() && bytes.last() != Some(&b'\n'))
+                    }
+                };
+                changes.push((file_change(root, &path, "deleted", None, 0, removed), false));
                 staged.insert(path.clone(), None);
                 prepared.push(PreparedOperation::Remove(path.clone()));
-                changed_paths.push(path);
             }
             FileOperation::Update {
                 path,
@@ -112,6 +127,16 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
                 let ends_with_newline = source.ends_with('\n');
                 let mut lines = split_lines(&source);
 
+                let added = hunks
+                    .iter()
+                    .flat_map(|hunk| &hunk.lines)
+                    .filter(|line| matches!(line, HunkLine::Add(_)))
+                    .count();
+                let removed = hunks
+                    .iter()
+                    .flat_map(|hunk| &hunk.lines)
+                    .filter(|line| matches!(line, HunkLine::Remove(_)))
+                    .count();
                 for (index, hunk) in hunks.into_iter().enumerate() {
                     apply_hunk(&mut lines, &hunk).with_context(|| {
                         format!(
@@ -136,6 +161,19 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
                     );
                 }
 
+                let moved = destination_path != source_path;
+                // If removing the old path later fails, the new file still exists.
+                changes.push((
+                    file_change(
+                        root,
+                        &destination_path,
+                        if moved { "added" } else { "modified" },
+                        None,
+                        if moved { lines.len() } else { added },
+                        if moved { 0 } else { removed },
+                    ),
+                    false,
+                ));
                 stage_write(
                     &mut staged,
                     &mut prepared,
@@ -145,39 +183,119 @@ pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<S
                 );
                 if destination_path != source_path {
                     staged.insert(source_path.clone(), None);
+                    changes.push((
+                        file_change(
+                            root,
+                            &destination_path,
+                            "renamed",
+                            Some(&source_path),
+                            added,
+                            removed,
+                        ),
+                        true,
+                    ));
                     prepared.push(PreparedOperation::Remove(source_path));
                 }
-                changed_paths.push(destination_path);
             }
         }
     }
 
-    // Validate every operation before the first mutation. I/O failures during commit
-    // can still be partial; this is not a filesystem transaction.
-    for operation in prepared {
-        match operation {
+    // Preflight is complete. Record only committed operations; an I/O error can
+    // leave the failing file uncertain, which is explicitly reported for inspection.
+    anyhow::ensure!(
+        prepared.len() == changes.len(),
+        "patch commit metadata mismatch"
+    );
+    let mut report = PatchResult {
+        kind: "patch_result".into(),
+        status: "success".into(),
+        files: Vec::new(),
+        error: None,
+    };
+    for (operation, (mut change, replace)) in prepared.into_iter().zip(changes) {
+        let result = match operation {
             PreparedOperation::Write {
                 path,
                 lines,
                 trailing_newline,
-            } => {
-                write_lines(&path, &lines, trailing_newline).await?;
+            } => write_lines(&path, &lines, trailing_newline).await,
+            PreparedOperation::Remove(path) => fs::remove_file(&path).await.with_context(|| {
+                format!("failed to remove `{}` during patch commit", path.display())
+            }),
+        };
+        if let Err(error) = result {
+            report.status = if report.files.is_empty() {
+                "error"
+            } else {
+                "partial"
             }
-            PreparedOperation::Remove(path) => {
-                fs::remove_file(&path).await.with_context(|| format!("failed to remove `{}` during patch commit; inspect file state before retrying", path.display()))?;
+            .into();
+            report.error = Some(format!(
+                "{error:#}. The failing file may be partially changed; inspect current file state before retrying. Counts include only confirmed operations."
+            ));
+            return Ok(serde_json::to_string(&report)?);
+        }
+        if replace {
+            if let Some(index) = change
+                .previous_path
+                .as_ref()
+                .and_then(|path| report.files.iter().position(|file| &file.path == path))
+            {
+                let source = report.files.remove(index);
+                change.added += source.added;
+                change.removed += source.removed;
+                if source.operation == "added" {
+                    change.operation = "added".into();
+                    change.previous_path = None;
+                } else if source.operation == "renamed" {
+                    change.previous_path = source.previous_path;
+                }
             }
         }
+        if let Some(previous) = report
+            .files
+            .iter_mut()
+            .find(|file| file.path == change.path)
+        {
+            if replace {
+                *previous = change;
+            } else {
+                previous.added += change.added;
+                previous.removed += change.removed;
+                if change.operation != "modified"
+                    || !matches!(previous.operation.as_str(), "added" | "renamed")
+                {
+                    previous.operation = change.operation;
+                }
+            }
+        } else {
+            report.files.push(change);
+        }
     }
+    Ok(serde_json::to_string(&report)?)
+}
 
-    let files = changed_paths
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>();
-    Ok(format!(
-        "Applied patch to {} file(s): {}",
-        files.len(),
-        files.join(", ")
-    ))
+fn file_change(
+    root: &Path,
+    path: &Path,
+    operation: &str,
+    previous: Option<&Path>,
+    added: usize,
+    removed: usize,
+) -> PatchFileChange {
+    let relative = |path: &Path| {
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned()
+    };
+    PatchFileChange {
+        path: relative(path),
+        operation: operation.into(),
+        previous_path: previous.map(relative),
+        added,
+        removed,
+    }
 }
 
 enum PreparedOperation {
@@ -463,8 +581,8 @@ fn parse_patch(input: &str) -> anyhow::Result<Patch> {
                 hunks.push(Hunk { lines: hunk_lines });
             }
             anyhow::ensure!(
-                !hunks.is_empty(),
-                "updated file must contain at least one hunk"
+                !hunks.is_empty() || move_path.is_some(),
+                "updated file must contain at least one hunk or a move destination"
             );
             operations.push(FileOperation::Update {
                 path: path.to_string(),
@@ -539,6 +657,69 @@ mod tests {
                 .downcast_ref::<super::PatchGenerationLimit>()
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn reports_confirmed_counts_for_add_update_delete_and_rename() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        std::fs::write(root.join("edit.txt"), "keep\nold\n").unwrap();
+        std::fs::write(root.join("gone.txt"), b"first\nlast").unwrap();
+        std::fs::write(root.join("empty.txt"), "").unwrap();
+        std::fs::write(root.join("before.txt"), "unchanged\n").unwrap();
+        let output = apply_patch_in(root, "*** Begin Patch\n*** Add File: new.txt\n+one\n+two\n*** Update File: edit.txt\n@@\n keep\n-old\n+new\n+extra\n*** Delete File: gone.txt\n*** Delete File: empty.txt\n*** Update File: before.txt\n*** Move to: after.txt\n*** End Patch").await.unwrap();
+        let result = super::PatchResult::from_output(&output).unwrap();
+        assert_eq!(result.status, "success");
+        let files = result
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.as_str(),
+                    file.operation.as_str(),
+                    file.added,
+                    file.removed,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            files,
+            vec![
+                ("new.txt", "added", 2, 0),
+                ("edit.txt", "modified", 2, 1),
+                ("gone.txt", "deleted", 0, 2),
+                ("empty.txt", "deleted", 0, 0),
+                ("after.txt", "renamed", 0, 0)
+            ]
+        );
+        assert_eq!(result.files[4].previous_path.as_deref(), Some("before.txt"));
+    }
+
+    #[tokio::test]
+    async fn partial_commit_counts_only_confirmed_operations() {
+        let directory = tempfile::tempdir().unwrap();
+        // The second operation's parent becomes a regular file in the first commit.
+        let output = apply_patch_in(directory.path(), "*** Begin Patch\n*** Add File: first.txt\n+confirmed\n*** Add File: first.txt/child.txt\n+not written\n*** End Patch").await.unwrap();
+        let result = super::PatchResult::from_output(&output).unwrap();
+        assert_eq!(result.status, "partial");
+        assert_eq!(result.files.len(), 1);
+        assert_eq!(result.files[0].path, "first.txt");
+        assert_eq!(result.files[0].added, 1);
+        assert!(result.error.unwrap().contains("inspect current file state"));
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("first.txt")).unwrap(),
+            "confirmed\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_updates_aggregate_one_file_per_call() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = apply_patch_in(directory.path(), "*** Begin Patch\n*** Add File: new.txt\n+one\n*** Update File: new.txt\n@@\n-one\n+two\n*** End Patch").await.unwrap();
+        let result = super::PatchResult::from_output(&output).unwrap();
+        assert_eq!(result.files.len(), 1);
+        assert_eq!((result.files[0].added, result.files[0].removed), (2, 1));
+        assert_eq!(result.files[0].operation, "added");
     }
 
     #[tokio::test]
@@ -809,9 +990,9 @@ impl Tool for ApplyPatchTool {
     fn description(&self) -> &str {
         "Create, update, move or delete files using literal patch text in the input argument. \
          Required format: *** Begin Patch\n*** Add File: notes.txt\n+Hello\n*** End Patch. \
-         Hard limit: 16 KiB of UTF-8 JSON arguments per call. Aim for 50–80 changed lines and about 4 KiB or less, not the hard maximum. For large new files add a concise runnable structure first, then update one function/style/section at a time. Do not generate a whole application in the first Add File or minify code to fit. \
-         Prefer small coherent edits; related file operations may share a patch. Split large new files into complete patches when useful; do not repeat unchanged content. \
-         Add File never overwrites: if the file exists, read it and use Update File. After a malformed patch, inspect file state and retry a smaller complete patch. After a size/time interruption, the next complete patch should address one named part, at most about 40 changed lines and 2 KiB; do not resend the full rejected patch or move it into shell arguments. \
+         Hard limit: 16 KiB of UTF-8 JSON arguments per call. Group complete features or related changes, typically about 8–12 KiB for a medium patch, without a fixed line count. Create small files completely in one call; split larger changes by functional boundaries only when needed. Do not minify code to fit. \
+         Prefer coherent edits; related file operations may share a patch. Split large new files into complete patches when useful; do not repeat unchanged content. \
+         Add File never overwrites: if the file exists, read it and use Update File. After a malformed patch, inspect file state and retry a smaller complete patch. After a size/time interruption, substantially reduce the rejected scope and retry a complete coherent subset; do not resend the full rejected patch or move it into shell arguments. \
          For edits, read the file first, then use *** Update File: notes.txt\n@@\n-old text\n+new text. \
          Normally include three unchanged lines before and after each edit, enough to identify exactly one location. Do not duplicate overlapping context between adjacent edits; combine them into one hunk. Context lines start with one space; added/removed lines start with +/-. \
          Every added line, including blank lines, must start with +; use + alone for an empty line. \

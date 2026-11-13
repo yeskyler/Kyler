@@ -284,3 +284,18 @@ the backend saves explicit selections independently of model-name recognition. T
 turns and disabled during generation. SiliconFlow DeepSeek-V4-Flash sends distinct
 `reasoning_effort: high/max` values. High is the default; Off is not offered. Unknown model names do not hide or disable the menu; the provider remains responsible
 for validating explicitly requested parameters. Older disabled preferences are treated as High without rewriting historical data. Project and permission controls remain outside the input border.
+
+Composer progress keeps a completed/total `Steps` control on the right while an
+unfinished plan is running. The centered strip shows the latest confirmed live
+patch's path and green/red line counts, or a file total for multi-file patches.
+Clicking it opens the file list, independently of the Steps control. A new pending
+or failed patch does not replace confirmed changes; partial results include an
+amber notice. Results remain after the run ends, clear on a new user turn or
+session switch, and are not restored from historical tool output. Existing results
+on entering a session are suppressed; historical statistics remain in tool nodes.
+
+Completed patch tools show file totals and green `+`/red `−` line counts. Expanded
+details list labeled file operations, paths and per-file counts; pure renames omit
+zero counts. Partial commits show an amber notice and only confirmed operations.
+Live event metadata and saved history share these structured core results; legacy
+text output remains readable without inferred statistics.

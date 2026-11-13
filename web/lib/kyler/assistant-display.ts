@@ -127,3 +127,14 @@ export function latestDisplayPlan(
     }
   }
 }
+
+/** Keep composer progress scoped to the active turn, never a previous user request. */
+export function activeDisplayPlan(
+  messages: readonly { role: string; content: readonly unknown[] }[],
+  running: boolean,
+): DisplayPlan | undefined {
+  if (!running) return undefined;
+  const userIndex = messages.findLastIndex((message) => message.role === "user");
+  const plan = latestDisplayPlan(messages.slice(userIndex + 1));
+  return plan?.steps.some((step) => step.status !== "completed") ? plan : undefined;
+}

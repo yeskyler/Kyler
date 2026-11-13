@@ -12,7 +12,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::Paragraph,
 };
 use unicode_width::UnicodeWidthStr;
@@ -308,12 +308,56 @@ impl View {
                 if details.truncated { ", truncated" } else { "" },
                 details.output
             );
-            let lines = transcript::wrap(
+            let mut rows = Vec::new();
+            if details.name == "apply_patch" {
+                if let Some(patch) =
+                    kyler_protocol::api::tools::PatchResult::from_output(&details.output)
+                {
+                    if patch.status == "partial" {
+                        rows.push(Line::styled(
+                            "Partially applied — confirmed changes only",
+                            Style::default().fg(Color::Yellow),
+                        ));
+                    }
+                    for file in patch.files {
+                        let (label, color) = match file.operation.as_str() {
+                            "added" => ("Added", Color::Green),
+                            "deleted" => ("Deleted", Color::Red),
+                            "modified" => ("Modified", Color::Blue),
+                            _ => ("Renamed", Color::Gray),
+                        };
+                        let mut spans = vec![
+                            Span::styled(format!("{label} "), Style::default().fg(color)),
+                            Span::raw(crate::components::composer::clean(&format!(
+                                "{}{}",
+                                file.previous_path
+                                    .map(|path| format!("{path} → "))
+                                    .unwrap_or_default(),
+                                file.path
+                            ))),
+                        ];
+                        if file.added > 0 {
+                            spans.push(Span::styled(
+                                format!(" +{}", file.added),
+                                Style::default().fg(Color::Green),
+                            ));
+                        }
+                        if file.removed > 0 {
+                            spans.push(Span::styled(
+                                format!(" −{}", file.removed),
+                                Style::default().fg(Color::Red),
+                            ));
+                        }
+                        rows.push(Line::from(spans));
+                    }
+                    rows.push(Line::default());
+                }
+            }
+            rows.extend(
                 text.lines()
-                    .map(|line| Line::from(crate::components::composer::clean(line)))
-                    .collect(),
-                width.saturating_sub(4),
+                    .map(|line| Line::from(crate::components::composer::clean(line))),
             );
+            let lines = transcript::wrap(rows, width.saturating_sub(4));
             let (area, scroll) = crate::components::panel::draw(
                 frame,
                 self.input,

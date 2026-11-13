@@ -415,8 +415,11 @@ async fn projection(event: AgentStreamEvent, state: &ThreadState) -> Option<Even
             status,
             output,
         } => EventPayload::ToolFinished {
+            patch: (name == "apply_patch")
+                .then(|| kyler_protocol::api::tools::PatchResult::from_output(&output))
+                .flatten(),
             call_id,
-            name,
+            name: name.clone(),
             status: if status == ToolResultStatus::Success {
                 "success"
             } else {
@@ -427,10 +430,18 @@ async fn projection(event: AgentStreamEvent, state: &ThreadState) -> Option<Even
             error: if status == ToolResultStatus::Success {
                 None
             } else {
-                output
-                    .lines()
-                    .find(|line| !line.trim().is_empty())
-                    .map(|line| super::projection::prefix(line, 240))
+                let patch_error = (name == "apply_patch")
+                    .then(|| kyler_protocol::api::tools::PatchResult::from_output(&output))
+                    .flatten()
+                    .and_then(|result| result.error);
+                patch_error
+                    .or_else(|| {
+                        output
+                            .lines()
+                            .find(|line| !line.trim().is_empty())
+                            .map(str::to_owned)
+                    })
+                    .map(|line| super::projection::prefix(&line, 240))
             },
         },
         AgentStreamEvent::Completed { .. }

@@ -44,6 +44,9 @@ import {
 import { executionSections, isCompactionPart, type Compaction } from "@/lib/kyler/compaction";
 import { CompactionSeparator } from "./compaction-separator";
 
+import { parsePatchResult } from "@/lib/kyler/patch-changes";
+import { PatchFiles, PatchSummary } from "./patch-changes";
+
 function ActivityTool(props: ToolCallMessagePartProps) {
   if (props.toolName === "ask_question")
     return (
@@ -55,6 +58,10 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
   const [expanded, setExpanded] = useState(false);
   const panelId = useId();
   const data = props.providerMetadata?.kyler;
+  const patch =
+    props.toolName === "apply_patch"
+      ? parsePatchResult(data?.patch ?? data?.historyOutput ?? props.result)
+      : undefined;
   const summary = typeof data?.summary === "string" ? data.summary : "";
   const messageStatus = useAuiState((state) => state.message.status);
   const cancelled =
@@ -109,12 +116,13 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
         )
       : undefined;
   const error =
-    failed && typeof props.result === "string"
+    patch?.error ??
+    (failed && typeof props.result === "string"
       ? props.result
           .split("\n")
           .find((line) => line.trim())
           ?.slice(0, 180)
-      : undefined;
+      : undefined);
   return (
     <div className="min-w-0">
       <button
@@ -136,6 +144,7 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
         {summary && summary !== props.toolName && (
           <span className="min-w-0 flex-1 truncate opacity-75">{summary}</span>
         )}
+        {patch && <PatchSummary result={patch} />}
         {source && (
           <span className="hidden max-w-32 shrink-0 truncate rounded bg-muted/60 px-1.5 text-[10px] sm:inline">
             {source}
@@ -161,6 +170,11 @@ function StandardActivityTool(props: ToolCallMessagePartProps) {
           aria-label={`${props.toolName} details`}
           className="mb-2 ml-7 mt-1 rounded-lg border border-border/50 bg-muted/20 p-3"
         >
+          {patch && (
+            <div className="mb-3">
+              <PatchFiles result={patch} />
+            </div>
+          )}
           <ActivityDetails {...props} />
         </div>
       )}
@@ -226,6 +240,7 @@ function ActivityDetails(props: ToolCallMessagePartProps) {
   ]);
   if (props.status.type === "requires-action") return <ToolFallback {...props} />;
   const output = details?.status === "pending" ? undefined : details?.output;
+  const patch = props.toolName === "apply_patch" ? parsePatchResult(output) : undefined;
   return (
     <div className="space-y-3 text-xs leading-5">
       <p className="break-all font-mono font-medium">{props.toolName}</p>
@@ -245,6 +260,12 @@ function ActivityDetails(props: ToolCallMessagePartProps) {
           {details ? JSON.stringify(details.arguments, null, 2) : props.argsText || "{}"}
         </pre>
       </div>
+      {patch &&
+        !parsePatchResult(
+          props.providerMetadata?.kyler?.patch ??
+            props.providerMetadata?.kyler?.historyOutput ??
+            props.result,
+        ) && <PatchFiles result={patch} />}
       <div>
         <p className="mb-1 text-muted-foreground">Output</p>
         <pre

@@ -1,6 +1,7 @@
 import type { QuestionRecord } from "./questions.ts";
 import type { Compaction } from "./compaction.ts";
 export type KylerEvent = {
+  patch?: import("./patch-changes.ts").PatchResult;
   compaction?: Compaction;
   type: string;
   seq: number;

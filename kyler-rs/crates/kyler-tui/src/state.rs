@@ -59,6 +59,7 @@ pub enum Entry {
         seconds: Option<f64>,
         activity: Option<ActivityKind>,
         source: ToolSource,
+        patch: Option<kyler_protocol::api::tools::PatchResult>,
         output_bytes: Option<usize>,
         summary: Option<String>,
         error: Option<String>,
@@ -545,6 +546,7 @@ impl State {
                             }
                             .into(),
                             started: Instant::now(),
+                            patch: None,
                             seconds: presentation.as_ref().and_then(|metadata| {
                                 Some(
                                     (metadata.finished_at? - metadata.started_at?).max(0) as f64
@@ -561,6 +563,7 @@ impl State {
                         });
                     }
                     HistoryContent::ToolResult {
+                        patch: result_patch,
                         call_id,
                         name,
                         status,
@@ -574,6 +577,7 @@ impl State {
                                 status: old,
                                 output_bytes: bytes,
                                 error,
+                                patch,
                                 ..
                             } = &mut self.entries[index]
                             {
@@ -584,6 +588,15 @@ impl State {
                                 } else {
                                     status.clone()
                                 };
+                                *patch = result_patch.clone().or_else(|| {
+                                    (name == "apply_patch")
+                                        .then(|| {
+                                            kyler_protocol::api::tools::PatchResult::from_output(
+                                                &output,
+                                            )
+                                        })
+                                        .flatten()
+                                });
                                 *bytes = Some(output_bytes);
                                 *error = (status != "success" && !cancelled).then(|| {
                                     output.lines().next().unwrap_or("Tool failed").to_owned()
@@ -592,9 +605,18 @@ impl State {
                         } else {
                             self.entries.push(Entry::Tool {
                                 id: call_id,
-                                name,
+                                name: name.clone(),
                                 status: status.clone(),
                                 started: Instant::now(),
+                                patch: result_patch.or_else(|| {
+                                    (name == "apply_patch")
+                                        .then(|| {
+                                            kyler_protocol::api::tools::PatchResult::from_output(
+                                                &output,
+                                            )
+                                        })
+                                        .flatten()
+                                }),
                                 seconds: None,
                                 activity: None,
                                 source: ToolSource::Builtin,

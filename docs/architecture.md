@@ -111,12 +111,13 @@ require checking actual file state before a smaller corrected retry. Optional to
 ### Patch generation budgets
 
 `apply_patch` accepts at most 16 KiB of UTF-8 JSON arguments per call; the tool and
-approval path enforce the same limit. Instructions target 50–80 changed
-lines and about 4 KiB or less; after a budget interruption, the next patch targets
-one named section/function, at most about 40 changed lines and 2 KiB. These are
-prompt-level planning targets, not additional runtime size or line-count limits.
-Large new files start with a concise runnable structure and grow through complete
-updates; rejected full-file patches must not be resent or moved into shell commands. Streaming responses
+approval path enforce the same limit. Instructions group complete features or related
+changes without a fixed line count; medium patches typically target about 8–12 KiB,
+while small files may be created completely in one call. Larger changes split at
+functional boundaries when necessary. After a budget interruption, retry a
+substantially smaller coherent subset and reduce further on repeated interruptions.
+These are prompt-level planning targets, not additional runtime limits. Rejected
+full patches must not be resent unchanged or moved into shell commands. Streaming responses
 are interrupted as soon as accumulated patch arguments exceed the byte budget.
 A fixed 120-second generation deadline starts when `apply_patch` is identified and
 ends at the finish reason; ongoing fragments do not reset it. Existing connection
@@ -321,3 +322,23 @@ the provider. The menu remains visible rather than silently disappearing for an
 unrecognized model name.
 
 Provider parameter reference: [SiliconFlow Chat Completions](https://docs.siliconflow.cn/docs/api/chat-completions-post).
+
+### Patch change statistics
+
+Successful `apply_patch` output is a structured `patch_result` containing
+workspace-relative file paths, operation labels, previous paths for renames, and
+added/removed line counts. Update counts exclude context; additions count written
+lines and deletions count original lines, including a final unterminated line.
+Repeated operations aggregate per file, and pure renames report zero changed lines.
+Preflight failures report no successful changes. Commit I/O failures return an
+error/partial result containing only confirmed operations and an inspection warning
+for the failing file; runtime dispatch records these as tool errors, not success.
+The files are not updated transactionally.
+
+Durable tool output retains the report. Both tool-finished events and history
+projection include optional patch metadata, independent of textual preview
+truncation. Older events/output remain valid and show no guessed statistics.
+Web uses green additions, red deletions, blue modifications, neutral renames and
+amber partial-application notices, with symbols and labels in both themes. TUI
+shows matching colored totals and file details; text and symbols remain useful
+without color. No tool arguments are parsed to estimate completed changes.
