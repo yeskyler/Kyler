@@ -226,7 +226,19 @@ impl Agent {
                 Err(anyhow::anyhow!("unknown tool {}", f.function.name))
             };
             let (status, content) = match result {
-                Ok(content) => (ToolResultStatus::Success, content),
+                Ok(content) => {
+                    let failed_patch = f.function.name == "apply_patch"
+                        && kyler_protocol::api::tools::PatchResult::from_output(&content)
+                            .is_some_and(|result| result.status != "success");
+                    (
+                        if failed_patch {
+                            ToolResultStatus::Error
+                        } else {
+                            ToolResultStatus::Success
+                        },
+                        content,
+                    )
+                }
                 Err(error) => {
                     tracing::warn!(tool=%f.function.name,tool_call_id=%f.id,"tool execution failed");
                     (

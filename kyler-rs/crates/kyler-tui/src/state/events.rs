@@ -99,6 +99,7 @@ impl State {
                                 name,
                                 status: "preparing".into(),
                                 started: Instant::now(),
+                                patch: None,
                                 seconds: None,
                                 activity: None,
                                 source: Default::default(),
@@ -163,6 +164,7 @@ impl State {
                             }
                             .into(),
                             started: Instant::now(),
+                            patch: None,
                             seconds: None,
                             activity: Some(activity),
                             source,
@@ -172,6 +174,7 @@ impl State {
                         });
                     }
                     EventPayload::ToolFinished {
+                        patch,
                         call_id,
                         name,
                         status,
@@ -185,6 +188,7 @@ impl State {
                             seconds,
                             output_bytes,
                             error: tool_error,
+                            patch: tool_patch,
                             ..
                         }) = self
                             .entries
@@ -195,6 +199,7 @@ impl State {
                             let executed = state == "running";
                             *state = status;
                             *tool_error = error;
+                            *tool_patch = patch;
                             *output_bytes = Some(bytes);
                             *seconds = executed.then(|| started.elapsed().as_secs_f64());
                         } else {
@@ -203,6 +208,7 @@ impl State {
                                 name,
                                 status,
                                 started: Instant::now(),
+                                patch,
                                 seconds: Some(0.0),
                                 activity: Default::default(),
                                 source: Default::default(),

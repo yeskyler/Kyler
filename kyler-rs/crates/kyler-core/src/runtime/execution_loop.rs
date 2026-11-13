@@ -162,7 +162,7 @@ impl Agent {
                         );
                         // No calls from the rejected batch have executed. Never replay side effects.
                         patch_recovery = Some(format!(
-                            "Host feedback: the previous model response was interrupted before any tool in that response executed. {} Return a smaller complete tool call for just one named section or function, targeting at most 40 changed lines and about 2 KiB of JSON arguments. Do not regenerate or resend the rejected full-file patch. If the target file exists, read its relevant section and use Update File; otherwise create only a concise runnable structure and add the rest in later patches. Do not minify code, bypass the budget with shell/exec_command, or repeat already completed work. After all parts are implemented, validate the full result and register the final artifacts.",
+                            "Host feedback: the previous model response was interrupted before any tool in that response executed. {} Return a smaller complete tool call for a coherent subset, substantially reducing the rejected scope; reduce it further if interrupted again. Do not regenerate or resend the rejected full-file patch. If the target file exists, read its relevant section and use Update File; otherwise create a complete smaller functional part and add the remaining parts in later patches. Do not minify code, bypass the budget with shell/exec_command, or repeat already completed work. After all parts are implemented, validate the full result and register the final artifacts.",
                             error
                         ));
                         continue;

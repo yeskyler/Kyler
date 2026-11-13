@@ -1468,3 +1468,35 @@ test("tool execution becomes visible before its result while preparation stays h
   }
   assert.deepEqual(states.slice(0, 5), ["preparing", "preparing", "queued", "running", "finished"]);
 });
+
+test("patch statistics arrive with the finished event without a details request", async (t) => {
+  const patch = {
+    kind: "patch_result",
+    status: "success",
+    files: [{ path: "game.ts", operation: "modified", added: 12, removed: 4 }],
+  };
+  t.mock.method(globalThis, "fetch", async (path: string) => {
+    if (path.endsWith("/runs")) return Response.json({ run_id: "patch-run" });
+    assert.ok(!path.includes("/tool-calls/"));
+    return stream([
+      { seq: 1, type: "tool_started", call_id: "patch", name: "apply_patch", activity: "edit" },
+      {
+        seq: 2,
+        type: "tool_finished",
+        call_id: "patch",
+        name: "apply_patch",
+        status: "success",
+        patch,
+      },
+      { seq: 3, type: "run_completed", output: "Done" },
+    ]);
+  });
+  let final: ChatModelRunResult | undefined;
+  for await (const update of chatAdapter("session", () => {}).run({
+    messages: [{ role: "user", content: [{ type: "text", text: "Edit" }], attachments: [] }],
+    abortSignal: new AbortController().signal,
+  } as never) as AsyncGenerator<ChatModelRunResult>)
+    final = update;
+  const tool = final?.content?.find((part) => part.type === "tool-call");
+  assert.deepEqual(tool?.providerMetadata?.kyler?.patch, patch);
+});

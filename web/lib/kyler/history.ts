@@ -32,6 +32,7 @@ export type HistoryContent =
     }
   | {
       type: "tool_result";
+      patch?: Json;
       call_id: string;
       name: string;
       status: string;
@@ -252,6 +253,7 @@ export function historyMessages(
             kyler: {
               ...part.providerMetadata?.kyler,
               state: cancelled ? "cancelled" : "finished",
+              ...(item.patch ? { patch: item.patch } : {}),
               historyOutput: item.output,
               outputTruncated: item.truncated,
               outputBytes: item.output_bytes,

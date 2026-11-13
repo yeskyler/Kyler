@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ThreadAssistantMessagePart } from "@assistant-ui/react";
 import {
   latestDisplayPlan,
+  activeDisplayPlan,
   isVisibleMessagePart,
   partitionAssistantParts,
   formatRunDuration,
@@ -197,4 +198,39 @@ test("interrupted parameter generation never becomes an executed tool card", () 
     }),
     true,
   );
+});
+
+test("composer plan follows only the active turn and disappears on completion or termination", () => {
+  const steps = [
+    { id: "build", content: "Implement feature", status: "in_progress" },
+    { id: "test", content: "Verify result", status: "pending" },
+  ];
+  const planMessage = (items: typeof steps) => ({
+    role: "assistant",
+    content: [
+      {
+        type: "tool-call",
+        toolName: "update_plan",
+        args: { summary: "Deliver feature", steps: items },
+        result: "{}",
+      },
+    ],
+  });
+  const messages = [{ role: "user", content: [] }, planMessage(steps)];
+  assert.deepEqual(activeDisplayPlan(messages, true)?.steps, steps);
+  assert.equal(activeDisplayPlan(messages, false), undefined);
+  assert.equal(activeDisplayPlan([...messages, { role: "user", content: [] }], true), undefined);
+  assert.equal(
+    activeDisplayPlan(
+      [...messages, planMessage(steps.map((step) => ({ ...step, status: "completed" })))],
+      true,
+    ),
+    undefined,
+  );
+  assert.equal(activeDisplayPlan([...messages, planMessage([])], true), undefined);
+  const updated = steps.map((step, index) => ({
+    ...step,
+    status: index === 0 ? "completed" : "in_progress",
+  }));
+  assert.deepEqual(activeDisplayPlan([...messages, planMessage(updated)], true)?.steps, updated);
 });

@@ -345,6 +345,7 @@ fn tool_line(entry: &Entry) -> Option<Line<'static>> {
         source,
         output_bytes,
         summary,
+        patch,
         ..
     } = entry
     else {
@@ -368,6 +369,29 @@ fn tool_line(entry: &Entry) -> Option<Line<'static>> {
             format!("  {}", clean(summary)),
             Style::default().fg(Color::Gray),
         ));
+    }
+    if let Some(patch) = patch {
+        if patch.status == "partial" {
+            spans.push(Span::styled(
+                " · Partially applied",
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+        spans.push(Span::raw(format!(" · {} files", patch.files.len())));
+        let added: usize = patch.files.iter().map(|file| file.added).sum();
+        let removed: usize = patch.files.iter().map(|file| file.removed).sum();
+        if added > 0 {
+            spans.push(Span::styled(
+                format!(" +{added}"),
+                Style::default().fg(Color::Green),
+            ));
+        }
+        if removed > 0 {
+            spans.push(Span::styled(
+                format!(" −{removed}"),
+                Style::default().fg(Color::Red),
+            ));
+        }
     }
     if !label.is_empty() {
         spans.push(Span::styled(
@@ -452,6 +476,7 @@ pub fn fingerprint(entry: &Entry) -> u64 {
             output_bytes,
             summary,
             error,
+            patch,
             ..
         } => {
             1u8.hash(&mut hash);
@@ -459,6 +484,7 @@ pub fn fingerprint(entry: &Entry) -> u64 {
             name.hash(&mut hash);
             activity.hash(&mut hash);
             source.hash(&mut hash);
+            patch.hash(&mut hash);
             output_bytes.hash(&mut hash);
             summary.hash(&mut hash);
             error.hash(&mut hash);

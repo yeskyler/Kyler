@@ -156,6 +156,7 @@ fn tool_activity_stream_updates_rendered_status_and_output_size() {
         &mut state,
         2,
         EventPayload::ToolFinished {
+            patch: None,
             error: None,
             call_id: "call".into(),
             name: "read_file".into(),
@@ -180,6 +181,7 @@ fn tool_activity_stream_updates_rendered_status_and_output_size() {
         &mut state,
         3,
         EventPayload::ToolFinished {
+            patch: None,
             call_id: "call".into(),
             name: "read_file".into(),
             status: "error".into(),
@@ -548,4 +550,49 @@ fn preparing_tool_is_updated_in_place_and_settled_on_cancel() {
             .iter()
             .any(|e| matches!(e, Entry::Tool { status, .. } if status == "cancelled"))
     );
+}
+
+#[test]
+fn patch_statistics_render_green_additions_and_red_deletions() {
+    use kyler_protocol::api::tools::{PatchFileChange, PatchResult};
+    use ratatui::style::Color;
+    let mut state = ready();
+    state.run = Some("run".into());
+    server(
+        &mut state,
+        1,
+        EventPayload::ToolFinished {
+            call_id: "patch-call".into(),
+            name: "apply_patch".into(),
+            status: "success".into(),
+            output_bytes: 100,
+            error: None,
+            patch: Some(PatchResult {
+                kind: "patch_result".into(),
+                status: "success".into(),
+                error: None,
+                files: vec![PatchFileChange {
+                    path: "game.ts".into(),
+                    operation: "modified".into(),
+                    previous_path: None,
+                    added: 12,
+                    removed: 4,
+                }],
+            }),
+        },
+    );
+    let lines = transcript::tool_rows(&state.entries, 100);
+    let spans = lines
+        .iter()
+        .flat_map(|line| &line.spans)
+        .collect::<Vec<_>>();
+    let colored = |color| {
+        spans
+            .iter()
+            .filter(|span| span.style.fg == Some(color))
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    };
+    assert!(colored(Color::Green).contains("+12"));
+    assert!(colored(Color::Red).contains("−4"));
 }

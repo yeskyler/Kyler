@@ -339,6 +339,7 @@ export function chatAdapter(
                   ...part.providerMetadata,
                   kyler: {
                     ...part.providerMetadata?.kyler,
+                    ...(event.patch ? { patch: event.patch } : {}),
                     state: "finished",
                     finishedAt: event.timestamp_ms ?? Date.now(),
                   },

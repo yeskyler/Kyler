@@ -68,6 +68,8 @@ pub enum EventPayload {
         source: ToolSource,
     },
     ToolFinished {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        patch: Option<super::tools::PatchResult>,
         call_id: String,
         name: String,
         status: String,
