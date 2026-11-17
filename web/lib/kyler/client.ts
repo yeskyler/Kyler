@@ -92,6 +92,7 @@ export function attachments(reference: SessionReference): AttachmentAdapter {
 async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => void) {
   let cursor = 0;
   let retries = 0;
+  let expiredReplays = 0;
   while (true) {
     signal.throwIfAborted();
     try {
@@ -100,6 +101,40 @@ async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => 
         signal,
         cache: "no-store",
       });
+      if (response.status === 410) {
+        if (++expiredReplays > 3)
+          throw new Error(
+            "Live events expired repeatedly. Reload the conversation; the task is still running on the backend.",
+          );
+        const info = await api<{
+          status: string;
+          last_event_seq: number;
+          output: string | null;
+          error?: { message: string };
+          execution_id: string | null;
+          finished_at: number | null;
+        }>(`runs/${run}`, { signal });
+        if (["completed", "failed", "cancelled"].includes(info.status)) {
+          yield {
+            type:
+              info.status === "completed"
+                ? "run_completed"
+                : info.status === "cancelled"
+                  ? "run_cancelled"
+                  : "run_failed",
+            seq: info.last_event_seq,
+            output: info.output ?? "",
+            execution_id: info.execution_id,
+            timestamp_ms: info.finished_at ?? undefined,
+            error: info.error,
+          };
+          return;
+        }
+        cursor = info.last_event_seq;
+        onReconnect?.();
+        yield { type: "replay_gap", seq: cursor, execution_id: info.execution_id };
+        continue;
+      }
       if (!response.ok) {
         if (response.status === 401) redirectToLogin();
         throw new KylerApiError(`Cannot read run events (${response.status}).`, response.status);
@@ -109,6 +144,7 @@ async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => 
         if (event.seq <= cursor) continue;
         cursor = event.seq;
         retries = 0;
+        expiredReplays = 0;
         yield event;
         if (["run_completed", "run_failed", "run_cancelled"].includes(event.type)) return;
       }
@@ -179,6 +215,7 @@ export function chatAdapter(
       let finishedAt: number | undefined;
       let terminal = false;
       let responded = false;
+      let replayGap = false;
       let step: number | undefined;
       let batch: number | undefined;
       const content: ThreadAssistantMessagePart[] = [];
@@ -220,11 +257,6 @@ export function chatAdapter(
       });
       try {
         lifecycle?.onAdmitted?.(session);
-        if (typeof localStorage !== "undefined")
-          localStorage.setItem(
-            runStorageKey(session),
-            JSON.stringify({ id: accepted.run_id, input }),
-          );
         const events = followRun(accepted.run_id, detailsSignal, lifecycle?.onReconnect);
         closeEvents = () => events.return(undefined);
         let nextEvent: ReturnType<typeof events.next> | undefined;
@@ -414,6 +446,14 @@ export function chatAdapter(
               };
             onApproval(approval);
             yield update();
+          } else if (event.type === "replay_gap") {
+            if (!replayGap)
+              content.push({
+                type: "text",
+                text: "Earlier live output is no longer cached. Reconnected to the running task; saved history remains available.\n\n",
+              });
+            replayGap = true;
+            yield update();
           } else if (event.type === "run_completed") {
             finishedAt = event.timestamp_ms ?? Date.now();
             terminal = true;
@@ -426,6 +466,10 @@ export function chatAdapter(
             if (!responded && output?.trim()) {
               lifecycle?.onResponse?.(session);
               responded = true;
+            }
+            if (replayGap && output?.trim()) {
+              for (let index = content.length - 1; index >= 0; index--)
+                if (content[index].type === "text") content.splice(index, 1);
             }
             const tail = content.at(-1);
             if (output?.trim()) {
@@ -467,8 +511,8 @@ export function chatAdapter(
         detailsController.abort();
         hydrations.clear();
         await closeEvents?.();
-        if (!terminal) await cancel();
-        if (typeof localStorage !== "undefined") localStorage.removeItem(runStorageKey(session));
+        // A network or replay failure is not a user cancellation. Other browsers may be observing.
+        if (!terminal && abortSignal.aborted) await cancel();
       }
     },
   };

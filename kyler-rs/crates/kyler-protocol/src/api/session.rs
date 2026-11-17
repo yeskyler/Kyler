@@ -65,3 +65,10 @@ pub struct CreateSessionRequest {
 fn is_false(value: &bool) -> bool {
     !*value
 }
+
+/// An existing admitted run; observing it never submits another turn.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveSessionRun {
+    pub run: super::run::RunInfo,
+    pub input: String,
+}

@@ -7,14 +7,9 @@ import {
 } from "@assistant-ui/react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { Button } from "@/components/ui/button";
-import {
-  api,
-  attachments,
-  chatAdapter,
-  pendingSessionKey,
-  selectedSessionKey,
-  runStorageKey,
-} from "@/lib/kyler/client";
+import { api, attachments, chatAdapter } from "@/lib/kyler/client";
+import { readPreferences, patchPreferences, initialSession } from "@/lib/kyler/preferences";
+import { activeSessionRun } from "@/lib/kyler/session-recovery";
 import { sessionTitle } from "@/lib/kyler/sessions";
 import {
   navigateSession,
@@ -57,7 +52,6 @@ type Loaded = {
   approvals: Approval[];
   recoverRun?: string;
 };
-const storageKey = selectedSessionKey;
 type Info = { model: string; default_workspace?: string; workspace_root?: string | null };
 
 export function Assistant() {
@@ -85,21 +79,34 @@ export function Assistant() {
   const [error, setError] = useState("");
   const [generation, setGeneration] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  useEffect(() => {
-    try {
-      setSidebarCollapsed(localStorage.getItem("kyler.sidebar.collapsed") === "true");
-    } catch {
-      // Start expanded if browser storage is unavailable.
-    }
-  }, []);
-  const changeSidebarCollapsed = (collapsed: boolean) => {
-    setSidebarCollapsed(collapsed);
-    try {
-      localStorage.setItem("kyler.sidebar.collapsed", String(collapsed));
-    } catch {
-      // Keep the current layout without persistence.
-    }
+  const [preferenceError, setPreferenceError] = useState("");
+  const initialPreferences = useRef(true);
+  const preferenceEdits = useRef(0);
+  const savePreference = (patch: Parameters<typeof patchPreferences>[0]) => {
+    void patchPreferences(patch)
+      .then(() => setPreferenceError(""))
+      .catch(() =>
+        setPreferenceError("Could not save your preferences. Check the backend connection."),
+      );
   };
+  const changeSidebarCollapsed = (collapsed: boolean) => {
+    ++preferenceEdits.current;
+    setSidebarCollapsed(collapsed);
+    savePreference({ sidebar_collapsed: collapsed });
+  };
+  useEffect(() => {
+    const refresh = () => {
+      const revision = preferenceEdits.current;
+      void readPreferences()
+        .then((preferences) => {
+          if (revision === preferenceEdits.current)
+            setSidebarCollapsed(preferences.sidebar_collapsed);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
   const infoRef = useRef<Info | null>(null);
   const activeKey = useRef<string | null>(null);
   const requestedSession = useRef<string | null>(null);
@@ -113,9 +120,19 @@ export function Assistant() {
       navigationInitialized.current = true;
     }
     async function load() {
-      // Opening the home page starts a draft; history requires an explicit selection.
-      const saved = requestedSession.current;
+      let saved = requestedSession.current;
       const info = await api<Info>("info");
+      if (initialPreferences.current) {
+        const preferences = await readPreferences();
+        if (disposed || sequence !== loading.current) return;
+        initialPreferences.current = false;
+        setSidebarCollapsed(preferences.sidebar_collapsed);
+        saved = initialSession(saved, preferences);
+        if (saved && !requestedSession.current) {
+          requestedSession.current = saved;
+          navigateSession(saved, "replace");
+        }
+      }
       infoRef.current = info;
       if (!saved) {
         const session = await createDraftSession();
@@ -133,22 +150,11 @@ export function Assistant() {
         return;
       }
       const session = await api<Session>(`sessions/${encodeURIComponent(saved)}`);
-      let recoverRun: string | undefined;
-      let recoverExecution: string | null = null;
-      let recoverInput = "";
-      const pending = localStorage.getItem(runStorageKey(session.session_id));
-      if (pending) {
-        const stored = JSON.parse(pending) as { id: string; input: string };
-        const run = await api<{ status: string; execution_id: string | null }>(`runs/${stored.id}`);
-        if (["starting", "running", "cancelling"].includes(run.status)) {
-          recoverRun = stored.id;
-          recoverExecution = run.execution_id;
-          recoverInput = stored.input;
-        } else localStorage.removeItem(runStorageKey(session.session_id));
-      }
-      const messages = await loadHistory(session.session_id, recoverExecution);
-      if (recoverRun && messages.at(-1)?.role !== "user")
-        messages.push({ id: `recover-${recoverRun}`, role: "user", content: recoverInput });
+      const active = await activeSessionRun(session.session_id);
+      const recoverRun = active?.run.run_id;
+      const messages = await loadHistory(session.session_id, active?.run.execution_id);
+      if (active && messages.at(-1)?.role !== "user")
+        messages.push({ id: `recover-${recoverRun}`, role: "user", content: active.input });
       const model = await api<{
         selected: { model: string } | null;
         active: { model: string } | null;
@@ -159,8 +165,7 @@ export function Assistant() {
       if (!disposed && sequence === loading.current) {
         activeKey.current = session.session_id;
         if (!session.draft) {
-          localStorage.setItem(storageKey, session.session_id);
-          localStorage.removeItem(pendingSessionKey);
+          savePreference({ last_session_id: session.session_id });
         }
         setLoaded({
           key: session.session_id,
@@ -198,15 +203,13 @@ export function Assistant() {
     if (cached) {
       ++loading.current;
       activeKey.current = id;
-      localStorage.setItem(storageKey, id);
-      localStorage.removeItem(pendingSessionKey);
+      if (!cached.session.draft) savePreference({ last_session_id: id });
       setError("");
       updateLoaded(cached);
       return;
     }
     activeKey.current = null;
-    localStorage.removeItem(pendingSessionKey);
-    localStorage.setItem(storageKey, id);
+
     setLoaded(undefined);
     setError("");
     setGeneration((n) => n + 1);
@@ -231,8 +234,7 @@ export function Assistant() {
     releaseDraft();
     requestedSession.current = null;
     activeKey.current = session.session_id;
-    localStorage.removeItem(storageKey);
-    localStorage.removeItem(pendingSessionKey);
+    savePreference({ last_session_id: null });
     setError("");
     setLoaded({
       key: session.session_id,
@@ -246,7 +248,6 @@ export function Assistant() {
   };
   const admit = (key: string, id: string) => {
     if (activeKey.current === key) {
-      localStorage.setItem(pendingSessionKey, id);
       requestedSession.current = id;
       navigateSession(id, "replace");
     }
@@ -261,13 +262,11 @@ export function Assistant() {
     if (activeKey.current === key) {
       requestedSession.current = id;
       navigateSession(id, "replace");
-      localStorage.setItem(storageKey, id);
-      localStorage.removeItem(pendingSessionKey);
+      savePreference({ last_session_id: id });
     }
   };
   const deleteSession = async (id: string, fallback?: string) => {
     await api(`sessions/${id}`, { method: "DELETE" });
-    localStorage.removeItem(runStorageKey(id));
     setOpened((items) => Object.fromEntries(Object.entries(items).filter(([key]) => key !== id)));
     setLive((items) => Object.fromEntries(Object.entries(items).filter(([key]) => key !== id)));
     if (loaded?.session.session_id === id) {
@@ -321,6 +320,14 @@ export function Assistant() {
   return (
     <>
       {notice}
+      {preferenceError && (
+        <p
+          role="alert"
+          className="fixed bottom-4 left-1/2 z-50 max-w-lg -translate-x-1/2 rounded-lg border bg-background p-3 text-sm text-destructive shadow-lg"
+        >
+          {preferenceError}
+        </p>
+      )}
       {Object.values(opened).map((item) => (
         <div
           key={item.key}

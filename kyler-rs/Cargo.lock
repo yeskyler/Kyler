@@ -2238,6 +2238,7 @@ dependencies = [
  "quick-xml",
  "reqwest",
  "rmcp",
+ "rusqlite",
  "schemars",
  "serde",
  "serde-saphyr",

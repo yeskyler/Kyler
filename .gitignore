@@ -65,3 +65,8 @@ blob-report/
 scheduler.sqlite3
 scheduler.sqlite3-wal
 scheduler.sqlite3-shm
+
+# Private application indexes and shared UI preferences
+app.sqlite3
+app.sqlite3-wal
+app.sqlite3-shm

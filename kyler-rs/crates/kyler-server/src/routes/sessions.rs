@@ -12,11 +12,12 @@ use axum::{
 };
 use serde::Deserialize;
 
-use kyler_core::{ExecutionStatus, Session, context::ContentItem};
+use kyler_core::{Session, context::ContentItem};
 use kyler_protocol::api::{
     SessionUsage,
-    run::RunStatus,
-    session::{CreateSessionRequest, Message, MessagePage, SessionPage, SessionSummary},
+    session::{
+        ActiveSessionRun, CreateSessionRequest, Message, MessagePage, SessionPage, SessionSummary,
+    },
 };
 
 #[derive(Deserialize, Default)]
@@ -34,45 +35,7 @@ pub(super) fn page(query: Result<Query<Pagination>, QueryRejection>) -> ApiResul
     Ok((query.cursor.unwrap_or(0), limit))
 }
 pub fn summary(session: Session) -> SessionSummary {
-    let title = session
-        .events
-        .iter()
-        .flat_map(|event| &event.content)
-        .find_map(|item| {
-            if let ContentItem::Message { role, content } = item {
-                if role.as_str() == "user" {
-                    let title = content.split_whitespace().collect::<Vec<_>>().join(" ");
-                    return (!title.is_empty()).then(|| title.chars().take(80).collect());
-                }
-            }
-            None
-        });
-    SessionSummary {
-        title,
-        draft: false,
-        workspace_root: session.environment.as_ref().map(|e| {
-            e.project_root
-                .as_ref()
-                .unwrap_or(&e.workspace_root)
-                .to_string_lossy()
-                .into_owned()
-        }),
-        working_directory: session
-            .environment
-            .as_ref()
-            .map(|e| e.working_directory.to_string_lossy().into_owned()),
-        session_id: session.session_id,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        event_count: session.events.len(),
-        execution_count: session.executions.len() + usize::from(session.execution.is_some()),
-        status: session.execution.map(|e| match e.status {
-            ExecutionStatus::Running => RunStatus::Running,
-            ExecutionStatus::Completed => RunStatus::Completed,
-            ExecutionStatus::Failed => RunStatus::Failed,
-            ExecutionStatus::Cancelled => RunStatus::Cancelled,
-        }),
-    }
+    kyler_core::session::store::catalog::summary(&session)
 }
 pub async fn create(
     State(state): State<AppState>,
@@ -130,27 +93,20 @@ pub async fn list(
     query: Result<Query<Pagination>, QueryRejection>,
 ) -> ApiResult<Json<SessionPage>> {
     let (cursor, limit) = page(query)?;
-    let mut sessions = state.runs.store.list().await.map_err(ApiError::storage)?;
-    let drafts = state.runs.draft_sessions().await?;
-    sessions.retain(|session| !drafts.contains(&session.session_id));
-    if cursor > sessions.len() {
-        return Err(ApiError::bad("Pagination cursor is out of range."));
-    }
-    let end = cursor.saturating_add(limit).min(sessions.len());
-    let next_cursor = (end < sessions.len()).then_some(end);
-    let mut items = Vec::new();
-    for info in sessions.into_iter().skip(cursor).take(limit) {
-        match state.runs.store.load(&info.session_id).await {
-            Ok(session) => items.push(summary(session)),
-            Err(error) if error.to_string() == "session not found" => continue,
-            Err(error) => return Err(ApiError::storage(error)),
-        }
-    }
-    apply_run_statuses(&state, &mut items).await;
-    Ok(Json(SessionPage {
-        sessions: items,
-        next_cursor,
-    }))
+    let mut page = state
+        .runs
+        .store
+        .page(cursor, limit)
+        .await
+        .map_err(|error| {
+            if error.to_string() == "Pagination cursor is out of range." {
+                ApiError::bad("Pagination cursor is out of range.")
+            } else {
+                ApiError::storage(error)
+            }
+        })?;
+    apply_run_statuses(&state, &mut page.sessions).await;
+    Ok(Json(page))
 }
 
 // Admission and cancellation are visible before the next session checkpoint.
@@ -256,4 +212,33 @@ pub async fn usage(
         total_tokens: u64::from(session.usage.total_tokens)
             + u64::from(session.subagent_usage.total_tokens),
     }))
+}
+
+pub async fn active_run(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Option<ActiveSessionRun>>> {
+    valid_id(&id)?;
+    // Authenticate the session's existence before exposing run metadata.
+    state
+        .runs
+        .store
+        .load(&id)
+        .await
+        .map_err(ApiError::storage)?;
+    let registry = state.runs.registry.lock().await;
+    let value = registry
+        .active
+        .get(&id)
+        .and_then(|run| registry.runs.get(run))
+        .map(|entry| ActiveSessionRun {
+            run: entry.info(),
+            input: entry
+                .input
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .unwrap_or_default(),
+        });
+    Ok(Json(value))
 }

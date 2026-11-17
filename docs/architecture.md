@@ -59,6 +59,10 @@ limit is reached. Managed commands can return a process ID while still running.
 Subagents are optional independent child sessions managed by delegation tools; a child
 does not recursively inherit subagent-management tools.
 
+Session lists and shared Web preferences use a scoped SQLite application database.
+See [Session persistence](session-persistence.md) for indexing, migration, and browser
+recovery behavior.
+
 Persistent sessions use an append-only `rollout.jsonl` journal and snapshots for loading
 and recovery. TUI and Web consume shared structured history rather than reconstructing
 tool state from plain assistant text.

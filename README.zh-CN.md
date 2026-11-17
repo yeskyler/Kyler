@@ -93,6 +93,7 @@ npm run dev -- --hostname 127.0.0.1 --port 30002
 | 文档 | 内容 |
 | --- | --- |
 | [安装](docs/installation.md) | 配置、服务管理和升级 |
+| [会话持久化](docs/session-persistence.md) | 存储和跨浏览器恢复 |
 | [自动化任务](docs/automations.md) | 定时任务和运行历史 |
 | [配置](docs/configuration.md) | 模型、路径和应用设置 |
 | [架构](docs/architecture.md) | 运行时、存储与执行边界 |

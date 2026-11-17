@@ -1,4 +1,5 @@
 //! Session storage transactions, optimistic revisions and live-execution recovery.
+pub mod catalog;
 mod journal;
 mod locking;
 
@@ -10,7 +11,6 @@ use journal::{commit, persist, read_locked};
 use locking::{execution_lease, owned_executions, store_lock};
 
 use std::{
-    collections::BTreeSet,
     fs as disk,
     path::{Path, PathBuf},
     sync::Arc,
@@ -36,6 +36,8 @@ pub struct SessionInfo {
 pub struct SessionStore {
     root: Arc<PathBuf>,
     store_lock: Arc<Mutex<()>>,
+    catalog: Arc<catalog::Catalog>,
+    catalog_dirty: Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn validate_id(id: &str) -> Result<()> {
@@ -58,10 +60,18 @@ impl SessionStore {
         fs::create_dir_all(root.as_ref()).await?;
         let root = fs::canonicalize(root.as_ref()).await?;
         let store_lock = store_lock(&root);
-        Ok(Self {
+        let index_root = root.clone();
+        let catalog =
+            tokio::task::spawn_blocking(move || catalog::Catalog::open(&index_root)).await??;
+        let store = Self {
+            catalog: Arc::new(catalog),
+            catalog_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             root: Arc::new(root),
             store_lock,
-        })
+        };
+        let index = store.catalog.clone();
+        store.transaction(move |root| index.reconcile(root)).await?;
+        Ok(store)
     }
 
     /// Keep both the Tokio mutex and OS lock in the blocking task, even if its caller
@@ -87,8 +97,21 @@ impl SessionStore {
         Ok(session)
     }
 
+    fn record_catalog(
+        index: &catalog::Catalog,
+        dirty: &std::sync::atomic::AtomicBool,
+        root: &Path,
+        session: &Session,
+    ) {
+        if index.upsert(root, session).is_err() {
+            dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+            tracing::warn!("Session committed; catalog repair is required");
+        }
+    }
     pub async fn load(&self, id: &str) -> Result<Session> {
         let id = id.to_owned();
+        let index = self.catalog.clone();
+        let dirty = self.catalog_dirty.clone();
         self.transaction(move |root| {
             let loaded = read_locked(root, &id)?.context("session not found")?;
             let legacy = loaded.writer.is_none();
@@ -105,6 +128,7 @@ impl SessionStore {
             }
             if legacy || recover {
                 commit(root, &mut session, Some(loaded))?;
+                Self::record_catalog(&index, &dirty, root, &session);
             }
             Ok(session)
         })
@@ -113,8 +137,14 @@ impl SessionStore {
 
     pub async fn save(&self, session: &mut Session) -> Result<()> {
         let snapshot = session.clone();
+        let index = self.catalog.clone();
+        let dirty = self.catalog_dirty.clone();
         let saved = self
-            .transaction(move |root| persist(root, snapshot))
+            .transaction(move |root| {
+                let saved = persist(root, snapshot)?;
+                Self::record_catalog(&index, &dirty, root, &saved);
+                Ok(saved)
+            })
             .await?;
         session.revision = saved.revision;
         session.updated_at = saved.updated_at;
@@ -149,60 +179,76 @@ impl SessionStore {
     /// Stable committed-prefix reader; no model calls or tool execution during replay.
     pub async fn rollout(&self, id: &str) -> Result<RolloutReader> {
         let id = id.to_owned();
+        let index = self.catalog.clone();
+        let dirty = self.catalog_dirty.clone();
         self.transaction(move |root| {
             let loaded = read_locked(root, &id)?.context("session not found")?;
             if loaded.writer.is_none() {
                 let mut session = loaded.session.clone();
                 commit(root, &mut session, Some(loaded))?;
+                Self::record_catalog(&index, &dirty, root, &session);
             }
             RolloutReader::open(root.join(&id).join("rollout.jsonl"), &id)
         })
         .await
     }
 
-    pub async fn list(&self) -> Result<Vec<SessionInfo>> {
-        self.transaction(|root| {
-            let mut ids = BTreeSet::new();
-            for entry in disk::read_dir(root)? {
-                let path = entry?.path();
-                let candidate = if path.is_dir() {
-                    path.file_name()
-                } else if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                    path.file_stem()
-                } else {
-                    None
-                };
-                if let Some(id) = candidate.and_then(|s| s.to_str()) {
-                    if validate_id(id).is_ok() {
-                        ids.insert(id.to_owned());
-                    }
+    pub fn catalog(&self) -> Arc<catalog::Catalog> {
+        self.catalog.clone()
+    }
+    pub async fn summaries(
+        &self,
+        visible_only: bool,
+    ) -> Result<Vec<kyler_protocol::api::session::SessionSummary>> {
+        let index = self.catalog.clone();
+        let dirty = self.catalog_dirty.clone();
+        self.transaction(move |root| {
+            if dirty.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                if let Err(error) = index.reconcile(root) {
+                    dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+                    return Err(error);
                 }
             }
-            let mut result = Vec::new();
-            for id in ids {
-                let Some(loaded) = read_locked(root, &id)? else {
-                    continue;
-                };
-                let s = loaded.session;
-                result.push(SessionInfo {
-                    session_id: s.session_id,
-                    created_at: s.created_at,
-                    updated_at: s.updated_at,
-                    event_count: s.events.len(),
-                    execution_count: s.executions.len() + usize::from(s.execution.is_some()),
-                });
-            }
-            result.sort_by(|a, b| {
-                b.updated_at
-                    .cmp(&a.updated_at)
-                    .then_with(|| a.session_id.cmp(&b.session_id))
-            });
-            Ok(result)
+            index.list(visible_only)
         })
         .await
     }
+    pub async fn page(
+        &self,
+        cursor: usize,
+        limit: usize,
+    ) -> Result<kyler_protocol::api::session::SessionPage> {
+        let index = self.catalog.clone();
+        let dirty = self.catalog_dirty.clone();
+        self.transaction(move |root| {
+            if dirty.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                if let Err(error) = index.reconcile(root) {
+                    dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+                    return Err(error);
+                }
+            }
+            index.page(cursor, limit)
+        })
+        .await
+    }
+    pub async fn list(&self) -> Result<Vec<SessionInfo>> {
+        Ok(self
+            .summaries(false)
+            .await?
+            .into_iter()
+            .map(|s| SessionInfo {
+                session_id: s.session_id,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+                event_count: s.event_count,
+                execution_count: s.execution_count,
+            })
+            .collect())
+    }
 
     pub async fn delete(&self, id: &str) -> Result<()> {
+        let index = self.catalog.clone();
+        let dirty = self.catalog_dirty.clone();
         let local = acquire_session(id)?;
         let id = id.to_owned();
         self.transaction(move |root| {
@@ -224,6 +270,10 @@ impl SessionStore {
                 disk::remove_dir_all(directory)?;
             }
             sync_directory(root)?;
+            if let Err(error) = index.remove(&id) {
+                dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(error);
+            }
             Ok(())
         })
         .await

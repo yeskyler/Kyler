@@ -74,19 +74,7 @@ export function WorkspaceSidebar({
         api<SessionPage>("sessions?limit=50", { signal: controller.signal }),
         api<Workspace[]>("workspaces", { signal: controller.signal }),
       ]);
-      const items = await Promise.all(
-        page.sessions.map(async (item) => {
-          if (item.title?.trim()) return item;
-          const first = await api<{ messages: { role: string; content: string }[] }>(
-            `sessions/${item.session_id}/messages?limit=5`,
-            { signal: controller.signal },
-          ).catch(() => null);
-          return {
-            ...item,
-            placeholder: first?.messages.find((message) => message.role === "user")?.content,
-          };
-        }),
-      );
+      const items = page.sessions;
       if (!controller.signal.aborted) {
         setSessions(items);
         setWorkspaces(projects);

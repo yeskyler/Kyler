@@ -156,3 +156,17 @@ cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-server --test automation
 The server integration test uses temporary storage and loopback-only fake model
 responses, validating authorization, task creation/run idempotency, core admission,
 and history persistence. It requires permission to bind local TCP sockets.
+
+## Session catalog and cross-browser recovery
+
+The session catalog uses bundled SQLite. See [Session persistence](session-persistence.md).
+Validate migration, checkpoint reconciliation, deletion, shared preferences, and
+reconnecting a fresh client without another model admission using:
+
+```sh
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-core --lib session::store
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-server --test session_catalog
+```
+
+The server test uses temporary storage and a loopback fake model. It does not call
+a paid provider or read an installed user's configuration.

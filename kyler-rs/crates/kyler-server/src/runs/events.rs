@@ -14,6 +14,7 @@ use kyler_protocol::api::{
 };
 
 pub struct Entry {
+    pub input: Mutex<Option<String>>,
     pub inner: Mutex<RunData>,
     pub changed: watch::Sender<u64>,
     pub cancel: watch::Sender<bool>,
@@ -37,6 +38,7 @@ impl Entry {
         max_subscribers: usize,
     ) -> Self {
         Self {
+            input: Mutex::new(None),
             inner: Mutex::new(RunData {
                 info,
                 events: VecDeque::new(),
@@ -66,6 +68,7 @@ impl Entry {
         self.changed.send_replace(seq);
     }
     pub fn complete(&self, mut info: RunInfo, payload: EventPayload) {
+        *self.input.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let seq = {
             let mut data = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             info.last_event_seq = data.info.last_event_seq;

@@ -9,6 +9,7 @@ pub mod inspection;
 pub mod mcp;
 pub mod models;
 pub mod permissions;
+pub mod preferences;
 pub mod processes;
 pub mod questions;
 pub mod run;

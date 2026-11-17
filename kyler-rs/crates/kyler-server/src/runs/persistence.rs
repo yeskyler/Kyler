@@ -78,6 +78,9 @@ pub async fn save(root: PathBuf, info: RunInfo) -> Result<()> {
             drop(file);
             fs::rename(&temporary, root.join(format!("{}.json", info.run_id)))?;
             sync_directory(&root)?;
+            if let Some(sessions)=root.parent() {
+                if let Err(error)=kyler_core::session::store::catalog::Catalog::open(sessions).and_then(|catalog|catalog.run(&info)) {tracing::warn!(error=%error,"Run manifest committed; application index repair is required");}
+            }
             Ok(())
         })();
         if result.is_err() {
@@ -104,7 +107,11 @@ pub async fn remove(root: &Path, id: &str) -> Result<()> {
         if root.join("admissions").exists() {
             sync_directory(&root.join("admissions"))?;
         }
-        sync_directory(&root)
+        sync_directory(&root)?;
+        if let Some(sessions) = root.parent() {
+            kyler_core::session::store::catalog::Catalog::open(sessions)?.remove_run(&id)?;
+        }
+        Ok(())
     })
     .await?
 }

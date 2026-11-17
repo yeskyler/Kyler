@@ -113,6 +113,12 @@ impl RunManager {
                 )),
             );
         }
+        let catalog = store.catalog();
+        let restored = runs.values().map(|entry| entry.info()).collect::<Vec<_>>();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            catalog.replace_runs(&restored)
+        })
+        .await??;
         let mut keys = HashMap::new();
         for admission in persistence::admissions(root.clone()).await? {
             keys.insert(
@@ -144,7 +150,10 @@ impl RunManager {
             )),
             attachments,
             approvals: None,
-            protected_paths: Vec::new(),
+            protected_paths: ["", "-wal", "-shm"]
+                .into_iter()
+                .map(|suffix| PathBuf::from(format!("{}{suffix}", store.catalog().path.display())))
+                .collect(),
             agent,
             workspaces: None,
             default_workspace: None,

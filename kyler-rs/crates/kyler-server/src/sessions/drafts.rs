@@ -33,10 +33,20 @@ impl RunManager {
     }
     pub async fn publish_session(&self, id: &str) -> ApiResult<()> {
         match tokio::fs::remove_file(self.root.join(format!("{id}.draft"))).await {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Ok(()) => self.update_draft_index(id, false).await,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                self.update_draft_index(id, false).await
+            }
             Err(error) => Err(ApiError::storage(error.into())),
         }
+    }
+    async fn update_draft_index(&self, id: &str, draft: bool) -> ApiResult<()> {
+        let index = self.store.catalog();
+        let id = id.to_owned();
+        tokio::task::spawn_blocking(move || index.draft(&id, draft))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(ApiError::storage)
     }
     pub async fn mark_draft(&self, id: &str) -> ApiResult<()> {
         let path = self.root.join(format!("{id}.draft"));
@@ -47,6 +57,7 @@ impl RunManager {
         })
         .await
         .map_err(|_| ApiError::internal())?
-        .map_err(ApiError::storage)
+        .map_err(ApiError::storage)?;
+        self.update_draft_index(id, true).await
     }
 }

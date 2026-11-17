@@ -239,6 +239,7 @@ impl RunManager {
             false,
             self.settings.max_subscribers_per_run,
         ));
+        *entry.input.lock().unwrap_or_else(|e| e.into_inner()) = Some(request.input.clone());
         registry
             .active
             .insert(session_id.clone(), info.run_id.clone());

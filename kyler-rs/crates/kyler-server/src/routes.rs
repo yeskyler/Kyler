@@ -8,6 +8,7 @@ pub mod memory;
 pub mod models;
 pub mod permissions;
 pub mod plugins;
+pub mod preferences;
 pub mod processes;
 pub mod questions;
 pub mod runs;
@@ -55,6 +56,11 @@ pub fn router(state: AppState) -> Router {
             get(|| async { axum::Json(serde_json::json!({"status":"ok"})) }),
         )
         .route("/v1/info", get(info))
+        .route(
+            "/v1/preferences",
+            get(preferences::get).put(preferences::update),
+        )
+        .route("/v1/sessions/{id}/active-run", get(sessions::active_run))
         .route(
             "/v1/workspaces/{id}",
             axum::routing::delete(workspaces::delete),
