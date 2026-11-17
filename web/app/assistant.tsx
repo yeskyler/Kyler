@@ -507,7 +507,10 @@ function Connected({
             createSession={(workspace) =>
               createSession(workspace, runtime.thread.composer.getState().text)
             }
-            startSkillCreation={() => createSession(null, "@skill-creator ")}
+            startSkillCreation={async () => {
+              await createSession(null, "@skill-creator ");
+              setView("chat");
+            }}
             ensureSession={ensureSession}
           >
             <ArtifactsProvider session={loaded.session.session_id}>
