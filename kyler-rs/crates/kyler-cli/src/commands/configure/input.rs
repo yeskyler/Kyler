@@ -9,6 +9,7 @@ use crossterm::{
 };
 
 use kyler_config::{SecretString, models::ProviderSettings};
+use kyler_core::context::ContextPolicy;
 
 /// Each prompt completes its validation loop before the next step is printed.
 /// Plain terminal output remains in scrollback; setup never opens a full-screen view.
@@ -29,6 +30,22 @@ impl Prompts {
     }
     pub fn model(&mut self, default: &str) -> Result<String> {
         self.step("Model", |label| model(label, default))
+    }
+    pub fn context_window(
+        &mut self,
+        label: &str,
+        default: usize,
+        policy: &ContextPolicy,
+    ) -> Result<usize> {
+        self.step(label, |label| {
+            loop {
+                let value = prompt(label, &default.to_string())?;
+                match parse_context_window(&value, policy) {
+                    Ok(tokens) => return Ok(tokens),
+                    Err(message) => eprintln!("{message} Try again, or press Esc to cancel."),
+                }
+            }
+        })
     }
     pub fn api_url(&mut self, label: &str, default: &str) -> Result<String> {
         self.step(label, |label| api_url(label, default))
@@ -81,6 +98,27 @@ fn model(label: &str, default: &str) -> Result<String> {
         }
         eprintln!("Enter a model ID, such as deepseek-ai/DeepSeek-V4-Flash.");
     }
+}
+
+fn parse_context_window(value: &str, policy: &ContextPolicy) -> std::result::Result<usize, String> {
+    let value = value.trim();
+    let (number, multiplier) = match value.strip_suffix(['k', 'K']) {
+        Some(number) => (number.trim_end(), 1000usize),
+        None => (value, 1),
+    };
+    let tokens = (!number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| number.parse::<usize>().ok())
+        .flatten()
+        .and_then(|value| value.checked_mul(multiplier))
+        .filter(|value| *value > 0 && i64::try_from(*value).is_ok())
+        .ok_or_else(|| {
+            "Enter a positive whole token count, such as 128000 or 128k (1k = 1000 tokens)."
+                .to_owned()
+        })?;
+    let mut candidate = policy.clone();
+    candidate.context_tokens = tokens;
+    candidate.validate().map_err(|error|format!("Invalid context window: {error}. Current output budget: {}; safety margin: {}; summary budget: {} tokens. For a smaller model, reduce these reservations in the configuration before running setup again",policy.output_tokens,policy.safety_tokens,policy.summary_tokens))?;
+    Ok(tokens)
 }
 
 fn validate_url(value: &str) -> std::result::Result<(), &'static str> {
@@ -300,6 +338,41 @@ fn read_password() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{normalize_key, validate_url};
+
+    #[test]
+    fn context_window_accepts_decimal_k_and_enforces_the_runtime_budget() {
+        let policy = kyler_core::context::ContextPolicy::default();
+        for (input, expected) in [
+            ("128000", 128000),
+            ("128k", 128000),
+            ("64K", 64000),
+            (" 256k ", 256000),
+        ] {
+            assert_eq!(
+                super::parse_context_window(input, &policy).unwrap(),
+                expected
+            );
+        }
+        for invalid in [
+            "",
+            "0",
+            "-128000",
+            "+128000",
+            "1.5k",
+            "128KiB",
+            "abc",
+            "184467440737095516160k",
+            "8000",
+        ] {
+            assert!(
+                super::parse_context_window(invalid, &policy).is_err(),
+                "{invalid}"
+            );
+        }
+        let mut smaller = policy.clone();
+        smaller.output_tokens = 512;
+        assert_eq!(super::parse_context_window("32k", &smaller).unwrap(), 32000);
+    }
 
     #[test]
     fn hidden_input_preserves_paste_and_handles_editing_without_an_event_reader() {

@@ -146,10 +146,14 @@ inputs pass validation; no additional navigation confirmation is required.
 | `OPENAI_BASE_URL` | `https://api.siliconflow.cn/v1`; OpenAI-compatible Chat Completions API |
 | `OPENAI_API_KEY` | Required; input is hidden |
 | Model | `deepseek-ai/DeepSeek-V4-Flash` |
+| Context window (tokens) | Existing value or `128000`; accepts `128k` as 128000 tokens |
 
 Enter retains an existing value. A saved key is identified as configured without
 revealing its contents. Invalid input is rejected at the current prompt. Setup does not
-send a model request. Esc cancels configuration before an existing installation is
+send a model request. The context window is supplied by the user, not detected from
+the model ID; confirm it when changing models. The wizard validates output, safety,
+and summary reservations before accepting the window. Named profiles each receive
+their own window prompt; other budget settings remain unchanged. Esc cancels configuration before an existing installation is
 replaced.
 
 ### Access scope and Web token

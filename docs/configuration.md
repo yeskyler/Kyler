@@ -25,6 +25,14 @@ supports explicit `--model`, `--base-url`, and `--api-key` overrides; supply cre
 through hidden setup input or process environment variables; command-line arguments are
 visible in shell history and process listings.
 
+`kyler configure` asks for the context window after the model name. Enter keeps
+the current value; `128k` means 128000 tokens. Legacy single-model setup saves
+`[context].context_tokens`; named-profile setup saves each profile's `context_tokens`.
+The value must match the selected provider's model limit and pass the runtime budget
+validation. Changing the model name does not automatically detect or reset its window.
+After saving, restart the backend or explicitly reload the model catalog; an admitted
+turn retains its existing snapshot.
+
 Paths normally resolve beside the selected configuration. When the selected file is
 inside a directory named `config`, application-relative paths resolve from that
 directory's parent. `workspace.default_directory` and skill paths support configured

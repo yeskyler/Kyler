@@ -400,6 +400,10 @@ else:
         if bundle is None:
             bundle = local_bundle(self.root, KYLER_BINARY)
         replies = list(replies)
+        if expected == 0 and not any(b"Context window" in marker for marker, _ in replies):
+            model_step = next((i for i, (marker, _) in enumerate(replies) if marker.startswith(b"[3] Model")), None)
+            if model_step is not None:
+                replies.insert(model_step + 1, (b"[4] Context window (tokens)", b"\n"))
         addresses = []
         if expected == 0:
             if not preserve_addresses:
@@ -508,6 +512,61 @@ else:
         self.assertNotIn("tools.tavily", config)
         for marker in [b"[1] OPENAI_BASE_URL", b"[2] OPENAI_API_KEY", b"[3] Model", b"kyler tui", b"kyler service stop"]:
             self.assertIn(marker, output)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_context_window_prompt_validates_k_suffix_persists_and_keeps_existing(self):
+        output = self.interactive_install([
+            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[2] OPENAI_API_KEY", b"WINDOW_TEST_KEY\r"),
+            (b"[3] Model [", b"window-model\n"),
+            (b"[4] Context window (tokens)", b"invalid\n"),
+            (b"[4] Context window (tokens)", b"8000\n"),
+            (b"[4] Context window (tokens)", b"64k\n"),
+        ])
+        self.assertIn(b"positive whole token count", output)
+        self.assertIn(b"Invalid context window", output)
+        self.assertIn("context_tokens = 64000", (self.home / ".kyler/config.toml").read_text())
+        output = self.interactive_install([
+            (b"[1] OPENAI_BASE_URL [", b"\n"),
+            (b"[2] OPENAI_API_KEY", b"\r"),
+            (b"[3] Model [", b"\n"),
+            (b"[4] Context window (tokens) [64000]", b"\n"),
+        ], preserve_addresses=True)
+        self.assertIn("context_tokens = 64000", (self.home / ".kyler/config.toml").read_text())
+        self.assertNotIn(b"WINDOW_TEST_KEY", output)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_named_profiles_configure_context_windows_independently(self):
+        config = self.home / ".kyler/config.toml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text('''[models]
+default = "a_small"
+[models.providers.fixture]
+base_url = "http://127.0.0.1:1/v1"
+api_key = "PROFILE_TEST_KEY"
+[models.profiles.a_small]
+provider = "fixture"
+model = "small-model"
+context_tokens = 64000
+output_tokens = 1000
+[models.profiles.b_large]
+provider = "fixture"
+model = "large-model"
+context_tokens = 128000
+output_tokens = 8192
+''')
+        output = self.interactive_install([
+            (b"[1] fixture OPENAI_BASE_URL", b"\n"),
+            (b"[2] fixture OPENAI_API_KEY", b"\r"),
+            (b"[3] a_small context window (tokens) [64000]", b"32k\n"),
+            (b"[4] b_large context window (tokens) [128000]", b"256k\n"),
+        ])
+        text = config.read_text()
+        self.assertIn("context_tokens = 32000", text)
+        self.assertIn("context_tokens = 256000", text)
+        self.assertIn("output_tokens = 1000", text)
+        self.assertIn("output_tokens = 8192", text)
+        self.assertNotIn(b"PROFILE_TEST_KEY", output)
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
     def test_lan_scope_generates_tokens_without_address_or_password_prompts(self):

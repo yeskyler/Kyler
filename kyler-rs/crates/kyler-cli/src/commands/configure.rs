@@ -10,6 +10,7 @@ use std::{
 };
 
 use kyler_config::loader;
+use kyler_core::context::ContextPolicy;
 
 pub(super) fn config_path(explicit: Option<&Path>) -> Result<PathBuf> {
     let path = explicit
@@ -78,13 +79,37 @@ pub fn configure(
         if config.models.providers.is_empty() {
             config.llm.base_url = prompts.api_url("OPENAI_BASE_URL", &config.llm.base_url)?;
             config.llm.api_key = prompts.key("OPENAI_API_KEY", &config.llm.api_key, false)?;
+            let previous_model = config.llm.model.clone();
             config.llm.model = prompts.model(&config.llm.model)?;
+            if config.llm.model != previous_model {
+                eprintln!("Model changed; confirm the context window supported by the new model.");
+            }
+            eprintln!(
+                "Use the window supported by your provider; it is not detected automatically. 128k = 128000 tokens."
+            );
+            config.context.context_tokens = prompts.context_window(
+                "Context window (tokens)",
+                config.context.context_tokens,
+                &ContextPolicy::from(&config.context),
+            )?;
         } else {
             for (name, provider) in &mut config.models.providers {
                 provider.base_url =
                     prompts.api_url(&format!("{name} OPENAI_BASE_URL"), &provider.base_url)?;
                 provider.api_key =
                     prompts.key(&format!("{name} OPENAI_API_KEY"), &provider.api_key, false)?;
+            }
+            eprintln!(
+                "Set each model's provider-supported context window. 128k = 128000 tokens; Enter keeps the current value."
+            );
+            for (name, profile) in &mut config.models.profiles {
+                let mut policy = ContextPolicy::from(&config.context);
+                policy.output_tokens = profile.output_tokens;
+                profile.context_tokens = prompts.context_window(
+                    &format!("{name} context window (tokens)"),
+                    profile.context_tokens,
+                    &policy,
+                )?;
             }
         }
         if addresses || enable_web || config.web.enabled {
@@ -155,6 +180,14 @@ pub fn configure(
     }
     config.session.enabled = true;
     config.validate().map_err(|e|CliError::new(2,format!("Configuration not saved: {e}. Run kyler configure to fix it; non-interactive setup requires credentials in the config or environment.")))?;
+    for profile in config.effective_models().profiles.values() {
+        let mut policy = ContextPolicy::from(&config.context);
+        policy.context_tokens = profile.context_tokens;
+        policy.output_tokens = profile.output_tokens;
+        policy
+            .validate()
+            .map_err(|error| CliError::new(2, format!("Configuration not saved: {error}")))?;
+    }
     let root = values
         .as_table_mut()
         .ok_or_else(|| CliError::new(2, "Configuration must be a TOML table"))?;
@@ -201,6 +234,13 @@ pub fn configure(
         }
     }
     if config.models.providers.is_empty() {
+        table(root, "context")?.insert(
+            "context_tokens".into(),
+            toml::Value::Integer(
+                i64::try_from(config.context.context_tokens)
+                    .map_err(|_| CliError::new(2, "Context window is too large"))?,
+            ),
+        );
         let llm = table(root, "llm")?;
         llm.insert("model".into(), toml::Value::String(config.llm.model));
         llm.insert("base_url".into(), toml::Value::String(config.llm.base_url));
@@ -222,6 +262,18 @@ pub fn configure(
             value.insert(
                 "api_key".into(),
                 toml::Value::String(provider.api_key.expose().into()),
+            );
+        }
+    }
+    if !config.models.profiles.is_empty() {
+        let profiles = table(table(root, "models")?, "profiles")?;
+        for (name, profile) in &config.models.profiles {
+            table(profiles, name)?.insert(
+                "context_tokens".into(),
+                toml::Value::Integer(
+                    i64::try_from(profile.context_tokens)
+                        .map_err(|_| CliError::new(2, "Context window is too large"))?,
+                ),
             );
         }
     }
