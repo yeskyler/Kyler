@@ -94,6 +94,7 @@ ports when running together.
 | Guide | Contents |
 | --- | --- |
 | [Installation](docs/installation.md) | Setup, service management, and upgrades |
+| [Automations](docs/automations.md) | Scheduled tasks and run history |
 | [Configuration](docs/configuration.md) | Models, paths, and application settings |
 | [Architecture](docs/architecture.md) | Runtime, storage, and execution boundaries |
 | [Development](docs/development.md) | Build requirements and validation |

@@ -116,6 +116,36 @@ impl Server {
             Duration::from_secs(config.server.approval_timeout_seconds),
             config.session.directory.join("_approvals"),
         )?));
+        let database = config
+            .session
+            .directory
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("scheduler.sqlite3");
+        for suffix in ["", "-wal", "-shm"] {
+            runs.protected_paths.push(std::path::PathBuf::from(format!(
+                "{}{suffix}",
+                database.display()
+            )));
+        }
+        let binding = runs
+            .store
+            .directory()
+            .canonicalize()?
+            .to_string_lossy()
+            .into_owned();
+        let concurrency = runs.settings.max_concurrent_runs.min(2);
+        server.state.scheduler = Some(
+            kyler_scheduler::Scheduler::open(
+                &database,
+                &binding,
+                Arc::new(crate::automations::AutomationExecutor {
+                    manager: Arc::downgrade(&server.state.runs),
+                }),
+                concurrency,
+            )
+            .await?,
+        );
         kyler_protocol::startup::mark("server_state_ready");
         Ok(server)
     }
@@ -130,6 +160,7 @@ impl Server {
             state: AppState {
                 instance_id: uuid::Uuid::new_v4().to_string(),
                 runs: RunManager::new(agent, store, settings).await?,
+                scheduler: None,
             },
         })
     }
@@ -155,6 +186,11 @@ impl Server {
                     .is_none_or(|factory| !factory.unrestricted_roots()),
             "non-loopback workspace listener requires explicit allowed roots"
         );
+        let scheduler = if let Some(scheduler) = &self.state.scheduler {
+            Some(scheduler.start().await?)
+        } else {
+            None
+        };
         let mut stopping = manager.stopping.subscribe();
         let http = axum::serve(listener, self.router())
             .with_graceful_shutdown(async move {
@@ -176,8 +212,9 @@ impl Server {
         };
         tokio::pin!(cleaner);
         tokio::select! {
-            result=&mut http=>{manager.shutdown().await;result?;}
+            result=&mut http=>{if let Some(scheduler)=scheduler {let _=scheduler.stop().await;} manager.shutdown().await;result?;}
             _=shutdown=>{
+                if let Some(scheduler)=scheduler {let _=scheduler.stop().await;}
                 let deadline=tokio::time::Instant::now()+Duration::from_secs(manager.settings.shutdown_grace_seconds);
                 let clean=manager.shutdown().await;
                 if !clean {tracing::warn!("shutdown grace period expired; incomplete runs will be recovered on restart");}

@@ -58,6 +58,17 @@ export function permittedPath(path: string, method: string) {
   const toolCallId = "(?!\\.{1,2}$)[a-zA-Z0-9_.:-]{1,512}";
   const rules: [string, string][] = [
     ["GET", "info"],
+    ["GET", "automations"],
+    ["POST", "automations"],
+    ["GET", "automations/status"],
+    ["POST", "automations/preview"],
+    ["GET", `automations/${id}`],
+    ["PUT", `automations/${id}`],
+    ["DELETE", `automations/${id}`],
+    ["POST", `automations/${id}/enabled`],
+    ["GET", `automations/${id}/runs`],
+    ["POST", `automations/${id}/runs`],
+    ["POST", `automation-runs/${id}/cancel`],
     ["GET", "workspaces"],
     ["POST", "workspaces"],
     ["DELETE", `workspaces/${id}`],

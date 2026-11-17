@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod attachments;
+pub mod automations;
 pub mod history;
 pub mod inspection;
 pub mod mcp;
@@ -193,6 +194,24 @@ pub fn router(state: AppState) -> Router {
             get(sessions::get).delete(sessions::delete),
         )
         .route("/v1/sessions/{id}/messages", get(sessions::messages))
+        .route(
+            "/v1/automations",
+            get(automations::list).post(automations::create),
+        )
+        .route("/v1/automations/status", get(automations::status))
+        .route("/v1/automations/preview", post(automations::preview))
+        .route(
+            "/v1/automations/{id}",
+            get(automations::get)
+                .put(automations::update)
+                .delete(automations::delete),
+        )
+        .route("/v1/automations/{id}/enabled", post(automations::enabled))
+        .route(
+            "/v1/automations/{id}/runs",
+            get(automations::runs).post(automations::run),
+        )
+        .route("/v1/automation-runs/{id}/cancel", post(automations::cancel))
         .route("/v1/sessions/{id}/rollout", get(inspection::rollout))
         .route(
             "/v1/sessions/{id}/rollout/{seq}",

@@ -34,6 +34,7 @@ and artifacts through their respective views.
 | --- | --- |
 | `kyler-cli` | Command parsing, setup, service lifecycle, and launch entry points |
 | `kyler-server` | HTTP routes, SSE cache/replay, durable admission, host workspace binding |
+| `kyler-scheduler` | SQLite-backed automation schedules, leases, run snapshots, and recovery |
 | `kyler-tui` | Terminal interaction and in-process core operation/event adaptation |
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
 | `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integrations |

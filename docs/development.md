@@ -141,3 +141,18 @@ Rust build output is stored in `kyler-rs/target/`, Next.js output in `web/.next/
 release output in `dist/`. Private GAIA datasets and local reports stay in the ignored
 directories under `kyler-rs/crates/kyler-evals/`. Local data must be preserved during
 directory moves and build cleanup.
+
+## Automation scheduler
+
+See [Automations](automations.md) for configuration, storage, and recovery behavior.
+The independent `kyler-scheduler` crate uses bundled SQLite and a mockable execution
+adapter; scheduling tests never call a provider. Run:
+
+```sh
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-scheduler
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-server --test automations
+```
+
+The server integration test uses temporary storage and loopback-only fake model
+responses, validating authorization, task creation/run idempotency, core admission,
+and history persistence. It requires permission to bind local TCP sockets.

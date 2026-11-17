@@ -60,3 +60,8 @@ blob-report/
 # Private benchmark data and local evaluation output
 /kyler-rs/crates/kyler-evals/datasets/
 /kyler-rs/crates/kyler-evals/results/
+
+# Private automation schedules and SQLite journals
+scheduler.sqlite3
+scheduler.sqlite3-wal
+scheduler.sqlite3-shm

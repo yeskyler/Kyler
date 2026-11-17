@@ -9,6 +9,7 @@ members = [
     "crates/kyler-logging",
     "crates/kyler-tui",
     "crates/kyler-server",
+    "crates/kyler-scheduler",
     "crates/kyler-evals",
 ]
 
@@ -29,6 +30,7 @@ kyler-config = { path = "crates/kyler-config" }
 kyler-logging = { path = "crates/kyler-logging" }
 kyler-tui = { path = "crates/kyler-tui" }
 kyler-server = { path = "crates/kyler-server" }
+kyler-scheduler = { path = "crates/kyler-scheduler" }
 kyler-evals = { path = "crates/kyler-evals" }
 
 # external crates
@@ -69,3 +71,7 @@ serde-saphyr = { version = "2.0", default-features = false, features = ["deseria
 sha2 = "0.10"
 
 libc = "0.2"
+
+rusqlite = { version = "0.38", features = ["bundled"] }
+chrono-tz = "0.10"
+croner = "4"

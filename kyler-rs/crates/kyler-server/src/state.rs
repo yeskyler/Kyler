@@ -6,4 +6,5 @@ use std::sync::Arc;
 pub struct AppState {
     pub instance_id: String,
     pub runs: Arc<RunManager>,
+    pub scheduler: Option<Arc<kyler_scheduler::Scheduler>>,
 }

@@ -11,6 +11,7 @@ kyler-core.workspace = true
 kyler-config.workspace = true
 kyler-logging.workspace = true
 kyler-protocol.workspace = true
+kyler-scheduler.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 tower-http.workspace = true

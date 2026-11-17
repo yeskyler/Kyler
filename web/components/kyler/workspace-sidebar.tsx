@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import {
   BlocksIcon,
+  CalendarClockIcon,
   LogOutIcon,
   ChevronRightIcon,
   FolderIcon,
@@ -47,8 +48,8 @@ export function WorkspaceSidebar({
   active: boolean;
   localSessions: HistorySession[];
   defaultWorkspace?: string;
-  view: "chat" | "resources";
-  setView: (view: "chat" | "resources") => void;
+  view: "chat" | "resources" | "automations";
+  setView: (view: "chat" | "resources" | "automations") => void;
   createSession: (workspace?: string | null) => Promise<void>;
   selectSession: (id: string) => void;
   deleteSession: (id: string, fallback?: string) => Promise<void>;
@@ -245,6 +246,15 @@ export function WorkspaceSidebar({
         >
           <BlocksIcon className="size-4" />
           Plugins
+        </Button>
+        <Button
+          variant="ghost"
+          aria-current={view === "automations" ? "page" : undefined}
+          className="h-11 w-full justify-start gap-3 rounded-xl px-3 text-sm font-medium hover:bg-sidebar-accent/60"
+          onClick={() => setView("automations")}
+        >
+          <CalendarClockIcon className="size-4" />
+          Automations
         </Button>
       </nav>
       <div className="mt-8 mb-3 flex items-center justify-between pl-3 pr-1">

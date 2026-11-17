@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod attachments;
+pub mod automations;
 pub mod compaction;
 pub mod event;
 pub mod history;
