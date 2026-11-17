@@ -201,7 +201,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .unwrap();
     assert_eq!(
         thinking,
-        json!({"enabled":true,"supported":true,"level":"high","levels":["high","max"]})
+        json!({"enabled":false,"supported":true,"level":"off","levels":["off","low","high","max"]})
     );
     assert_eq!(
         client
@@ -211,7 +211,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
             .await
             .unwrap()
             .status(),
-        400
+        200
     );
     assert_eq!(
         client
@@ -239,8 +239,32 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
             .await
             .unwrap()
             .status(),
-        400
+        200
     );
+    let low: Value = client
+        .put(&thinking_url)
+        .json(&json!({"level":"low"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(low["level"], "low");
+    assert_eq!(low["enabled"], true);
+    let saved: Value = client
+        .get(&thinking_url)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(saved["level"], "low");
     assert_eq!(
         client
             .put(&thinking_url)
@@ -465,8 +489,9 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
     assert!(requests[0].get("max_completion_tokens").is_none());
     assert_eq!(requests[1]["max_completion_tokens"], 1024);
     assert_eq!(requests[1]["enable_thinking"], true);
-    assert_eq!(requests[1]["reasoning_effort"], "high");
+    assert_eq!(requests[1]["reasoning_effort"], "low");
     assert_eq!(requests[2]["enable_thinking"], true);
+    assert_eq!(requests[2]["reasoning_effort"], "high");
     assert!(requests[1].get("max_tokens").is_none());
     drop(requests);
     let id = id.to_owned();

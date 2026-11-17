@@ -496,3 +496,89 @@ async fn approval_gates_side_effects_and_permissions_update_during_run() {
     task.await.unwrap().unwrap();
     model.abort();
 }
+
+#[tokio::test]
+async fn configured_workspace_full_access_selection_survives_restart() {
+    use kyler_server::workspaces::WorkspaceFactory;
+    let root = tempfile::tempdir().unwrap();
+    let mut config = AppConfig::default();
+    config.llm.api_key = SecretString::new("fixture");
+    config.llm.base_url = "http://127.0.0.1:1/v1".into();
+    config.llm.model = "fixture".into();
+    config.session.enabled = true;
+    config.session.directory = root.path().join("sessions");
+    config.skills.enabled = false;
+    let mut id = None;
+    for resumed in [false, true] {
+        let factory = WorkspaceFactory::configured(
+            std::env::current_exe().unwrap(),
+            vec![],
+            config.sandbox.clone(),
+        )
+        .unwrap();
+        let server = Server::from_config_with_workspaces(&config, Arc::new(factory))
+            .await
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (stop, done) = oneshot::channel();
+        let task = tokio::spawn(server.serve(listener, async {
+            let _ = done.await;
+        }));
+        let http = reqwest::Client::new();
+        if id.is_none() {
+            let session: SessionSummary = http
+                .post(format!("{base}/v1/sessions"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            id = Some(session.session_id);
+        }
+        let url = format!("{base}/v1/sessions/{}/permissions", id.as_ref().unwrap());
+        let state: PermissionState = http
+            .get(&url)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            state.selected.mode,
+            if resumed {
+                PermissionMode::FullAccess
+            } else {
+                PermissionMode::WorkspaceAccess
+            }
+        );
+        assert!(
+            state
+                .options
+                .iter()
+                .find(|o| o.mode == PermissionMode::FullAccess)
+                .unwrap()
+                .available
+        );
+        let response = http
+            .put(&url)
+            .json(&json!({"mode":"full_access","confirm_full_access":true}))
+            .send()
+            .await
+            .unwrap();
+        let full: PermissionState = response.error_for_status().unwrap().json().await.unwrap();
+        assert_eq!(
+            full.sandbox,
+            Some(kyler_protocol::sandbox::SandboxMode::DangerFullAccess)
+        );
+        assert_eq!(full.selected.mode, PermissionMode::FullAccess);
+        stop.send(()).unwrap();
+        task.await.unwrap().unwrap();
+    }
+}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   contextUsage,
+  modelThroughput,
   contextComponents,
   formatCheckpointTokens,
   tokenCount,
@@ -187,4 +188,18 @@ test("rollout formatting touches only trusted token metadata and preserves raw d
     payload: { event: { arguments: { total_tokens: 1000 } } },
   };
   assert.deepEqual(formatCheckpointTokens(event), event);
+});
+
+test("model throughput uses request output and duration and rejects missing metrics", () => {
+  assert.equal(modelThroughput({ model: "fixture", output_tokens: 120, elapsed_ms: 2000 }), 60);
+  for (const metrics of [
+    undefined,
+    null,
+    { model: "fixture", output_tokens: 0, elapsed_ms: 2000 },
+    { model: "fixture", output_tokens: -1, elapsed_ms: 2000 },
+    { model: "fixture", output_tokens: 120, elapsed_ms: 0 },
+    { model: "fixture", output_tokens: 120, elapsed_ms: NaN },
+  ]) {
+    assert.equal(modelThroughput(metrics), null);
+  }
 });

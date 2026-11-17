@@ -171,6 +171,7 @@ impl Agent {
                 }
             } else {
                 let request = self.provider_request(request, session)?;
+                let request_started = std::time::Instant::now();
                 let response = tokio::time::timeout(
                     Duration::from_secs(60),
                     (|| async {
@@ -185,6 +186,7 @@ impl Agent {
                 .await
                 .map_err(|error| ModelError::wrap(error.into()))?
                 .map_err(|error| ModelError::wrap(error.into()))?;
+                let request_elapsed = request_started.elapsed();
                 self.observe(super::observation::RuntimeObservation::FirstModelEvent);
                 if let Some(text) = response["choices"][0]["message"]["reasoning_content"]
                     .as_str()
@@ -195,6 +197,10 @@ impl Agent {
                 }
                 let response: CreateChatCompletionResponse = serde_json::from_value(response)
                     .map_err(|error| ModelError::wrap(error.into()))?;
+                let output_tokens = response
+                    .usage
+                    .as_ref()
+                    .map_or(0, |usage| usage.completion_tokens);
                 if let Some(u) = response.usage {
                     session.memory.observe_prompt_tokens(u.prompt_tokens);
                     session.add_usage(u.prompt_tokens, u.completion_tokens, u.total_tokens);
@@ -205,6 +211,9 @@ impl Agent {
                     .next()
                     .context("No choices in response")?
                     .message;
+                session
+                    .memory
+                    .record_model_response(&self.model, output_tokens, request_elapsed);
                 (message.content, message.tool_calls)
             };
             if let Some(calls) = tool_calls.filter(|calls| !calls.is_empty()) {

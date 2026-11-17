@@ -40,6 +40,11 @@ impl Agent {
                 .is_some_and(|policy| policy.mode.preset() == PermissionMode::WorkspaceAccess)
             {
                 Arc::new(environment.workspace_access())
+            } else if policy
+                .as_ref()
+                .is_some_and(|p| p.mode == PermissionMode::FullAccess)
+            {
+                Arc::new(environment.full_access())
             } else {
                 environment.clone()
             }
@@ -81,6 +86,14 @@ impl Agent {
             .policy_changes(&context.session_id, &context.policy);
         let policy = changes.borrow_and_update().clone();
         session.current_execution_mut()?.permissions = Some(policy.clone());
+        ensure!(
+            policy.mode != PermissionMode::FullAccess
+                || self
+                    .environment
+                    .as_ref()
+                    .is_none_or(|e| e.allows_full_access()),
+            "Full access is unavailable in this execution environment."
+        );
         let settings = policy.effective_approval();
         let (_, mut effective_environment) = self.permission_environment();
         let preflight = |environment: Option<&ExecutionEnvironment>| -> Result<()> {
@@ -92,7 +105,9 @@ impl Agent {
                         || self
                             .environment
                             .as_ref()
-                            .is_some_and(|host| host.policy().mode == policy.mode),
+                            .is_some_and(|host| host.policy().mode == policy.mode
+                                || (policy.mode == crate::sandbox::SandboxMode::DangerFullAccess
+                                    && host.allows_full_access())),
                     "MCP connection belongs to a different sandbox boundary."
                 );
                 let cwd = &environment.session_environment().working_directory;

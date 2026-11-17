@@ -40,7 +40,10 @@ pub(super) fn load(
         saved.permissions.mode = PermissionMode::ReadOnly;
     }
     if saved.permissions.mode == PermissionMode::FullAccess
-        && config.sandbox.mode != SandboxMode::DangerFullAccess
+        && !matches!(
+            config.sandbox.mode,
+            SandboxMode::WorkspaceWrite | SandboxMode::DangerFullAccess
+        )
     {
         saved.permissions.mode = PermissionMode::WorkspaceAccess;
         saved.permissions.approval = Some(config.approval.clone());
@@ -107,7 +110,8 @@ impl ThreadHandle {
         let writes = environment
             .as_ref()
             .is_some_and(|e| !e.policy().filesystem.readwrite_paths.is_empty());
-        let options = permission_options(host, writes);
+        let full_access = environment.as_ref().is_some_and(|e| e.allows_full_access());
+        let options = permission_options(host, writes, full_access);
         let mut selected = self.inner.permissions.write().await;
         if let Some(selection) = selection {
             let mode = selection.mode.unwrap_or(selected.mode).preset();
@@ -121,6 +125,27 @@ impl ThreadHandle {
                     || selection.confirm_full_access,
                 "confirm full access first"
             );
+            ensure!(
+                mode == selected.mode
+                    || (mode != PermissionMode::FullAccess
+                        && selected.mode != PermissionMode::FullAccess)
+                    || self.inner.active.read().await.is_none(),
+                "Wait for the current run to finish before switching full access."
+            );
+            if mode != selected.mode
+                && (mode == PermissionMode::FullAccess
+                    || selected.mode == PermissionMode::FullAccess)
+            {
+                let session = self.session().await.session_id;
+                ensure!(
+                    self.inner
+                        .processes
+                        .list(&session)
+                        .iter()
+                        .all(|p| p.status != "running"),
+                    "Stop active process sessions before switching full access."
+                );
+            }
             let mut approval = selection.approval.clone().unwrap_or_else(|| {
                 if selection.mode.is_some() {
                     self.inner.default_approval.clone()
@@ -157,6 +182,7 @@ impl ThreadHandle {
             sandbox: match selected.mode {
                 PermissionMode::ReadOnly if host.is_some() => Some(SandboxMode::ReadOnly),
                 PermissionMode::WorkspaceAccess if writes => Some(SandboxMode::WorkspaceWrite),
+                PermissionMode::FullAccess if full_access => Some(SandboxMode::DangerFullAccess),
                 _ => host,
             },
             approval: selected.effective_approval(),
@@ -173,7 +199,7 @@ impl ThreadHandle {
                 .as_ref()
                 .map(|e| e.session_environment().workspace_root.display().to_string()),
             ceiling: format!(
-                "Host sandbox: {}. Approval choices cannot expand the host boundary.",
+                "Default sandbox: {}. Full access requires explicit confirmation and host authorization.",
                 host.map(|mode| mode.label()).unwrap_or("unavailable")
             ),
         })
@@ -310,7 +336,11 @@ impl ThreadHandle {
     }
 }
 
-fn permission_options(host: Option<SandboxMode>, writes: bool) -> Vec<PermissionOption> {
+fn permission_options(
+    host: Option<SandboxMode>,
+    writes: bool,
+    full_access: bool,
+) -> Vec<PermissionOption> {
     PermissionMode::ALL
         .into_iter()
         .map(|mode| PermissionOption {
@@ -318,13 +348,14 @@ fn permission_options(host: Option<SandboxMode>, writes: bool) -> Vec<Permission
             available: match mode {
                 PermissionMode::ReadOnly => host.is_some(),
                 PermissionMode::WorkspaceAccess => writes,
-                PermissionMode::FullAccess => host == Some(SandboxMode::DangerFullAccess),
+                PermissionMode::FullAccess => full_access,
                 PermissionMode::AutoReview => false,
             },
             description: match mode {
                 PermissionMode::ReadOnly => "Read allowed files without changing them.",
                 PermissionMode::WorkspaceAccess => "Work within the host-authorized workspace.",
-                PermissionMode::FullAccess => "Use the configured full-access host boundary.",
+                PermissionMode::FullAccess if full_access => "Access host files and network as the service user, without workspace isolation. The working directory stays unchanged.",
+                PermissionMode::FullAccess => "Full access is unavailable in this execution environment.",
                 _ => "Unavailable.",
             }
             .into(),

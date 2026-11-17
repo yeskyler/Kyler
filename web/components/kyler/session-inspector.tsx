@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/kyler/client";
 import {
   contextUsage,
+  modelThroughput,
   tokenCount,
   type ContextInspection,
   type InspectorTab,
@@ -14,9 +15,9 @@ import {
 import { ContextPanel, MemoryPanel, RolloutPanel } from "./inspection-panels";
 
 const tabs = [
-  { id: "rollout", label: "Rollout", Icon: ListTreeIcon },
-  { id: "memory", label: "Memory", Icon: BrainIcon },
   { id: "context", label: "Context", Icon: ChartPieIcon },
+  { id: "memory", label: "Memory", Icon: BrainIcon },
+  { id: "rollout", label: "Rollout", Icon: ListTreeIcon },
 ] as const;
 type InspectionState = {
   session: string;
@@ -244,11 +245,28 @@ export function SessionInspectorBackButton() {
 export function SessionInspectorControls() {
   const { tab, active, navigate, context, error } = useInspection();
   const usage = contextUsage(context?.latest_request);
+  const metrics = context?.latest_model_response;
+  const speed = modelThroughput(metrics);
   return (
     <div
-      className="ml-auto flex shrink-0 items-center gap-0.5"
+      className="flex w-full flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground sm:gap-4"
       aria-label="Session inspection tools"
     >
+      <span
+        className="inline-flex h-6 items-center tabular-nums"
+        title={
+          speed === null
+            ? "No completed model request with reported output tokens."
+            : `${metrics!.model} · Latest completed model request: output tokens / request time, including first-token latency and excluding tool execution.`
+        }
+        aria-label={
+          speed === null
+            ? "Model throughput unavailable"
+            : `Model throughput: ${speed.toFixed(1)} tokens per second`
+        }
+      >
+        {speed === null ? "—" : speed.toFixed(1)} tokens/s
+      </span>
       {tabs.map(({ id, label, Icon }) => {
         const title =
           id === "context"
@@ -270,6 +288,7 @@ export function SessionInspectorControls() {
             className={`flex h-6 items-center justify-center gap-1 rounded-md px-1.5 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 ${active && tab === id ? "bg-muted text-foreground" : "text-muted-foreground"}`}
           >
             <Icon aria-hidden className="size-3.5" strokeWidth={1.5} />
+            {id !== "context" && <span>{label}</span>}
             {id === "context" && usage && (
               <span className="text-[10px] tabular-nums">{usage.percent}%</span>
             )}

@@ -36,11 +36,11 @@ impl Agent {
         self.thinking_mode().unwrap_or(false)
     }
     pub fn thinking_levels(&self) -> Vec<kyler_protocol::api::models::ThinkingLevel> {
-        use kyler_protocol::api::models::ThinkingLevel::{High, Max};
+        use kyler_protocol::api::models::ThinkingLevel::{High, Low, Max, Off};
         if !self.thinking_supported() {
             return Vec::new();
         }
-        vec![High, Max]
+        vec![Off, Low, High, Max]
     }
     pub fn with_thinking(self, enabled: bool) -> Result<Self> {
         self.with_thinking_level(kyler_protocol::api::models::ThinkingLevel::from_enabled(
@@ -171,7 +171,12 @@ mod thinking_level_tests {
         let bound = agent.bind_model(None).unwrap();
         assert_eq!(
             bound.thinking_levels(),
-            vec![ThinkingLevel::High, ThinkingLevel::Max]
+            vec![
+                ThinkingLevel::Off,
+                ThinkingLevel::Low,
+                ThinkingLevel::High,
+                ThinkingLevel::Max
+            ]
         );
         let request = CreateChatCompletionRequestArgs::default()
             .model(&config.llm.model)
@@ -191,6 +196,7 @@ mod thinking_level_tests {
         assert!(default.get("reasoning_effort").is_none());
         for (level, effort) in [
             (ThinkingLevel::Off, None),
+            (ThinkingLevel::Low, Some("low")),
             (ThinkingLevel::High, Some("high")),
             (ThinkingLevel::Max, Some("max")),
         ] {
@@ -238,6 +244,7 @@ mod thinking_level_tests {
             .unwrap();
         for (level, effort) in [
             (ThinkingLevel::Off, None),
+            (ThinkingLevel::Low, Some("low")),
             (ThinkingLevel::High, Some("high")),
             (ThinkingLevel::Max, Some("max")),
         ] {

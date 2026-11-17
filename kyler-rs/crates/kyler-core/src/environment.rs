@@ -170,6 +170,7 @@ impl ExecutionEnvironment {
                 policy.filesystem.denied_paths.push(root.join(relative));
             }
         }
+        policy.allow_full_access = self.policy.allow_full_access;
         policy.process = self.policy.process.clone();
         if policy.mode != SandboxMode::ReadOnly {
             policy.network = match &self.policy.network {
@@ -294,6 +295,7 @@ impl ExecutionEnvironment {
             policy.filesystem.readonly_paths.push(path.clone());
             policy.filesystem.write_protected_paths.push(path);
         }
+        policy.allow_full_access = self.policy.allow_full_access;
         policy.process = self.policy.process.clone();
         policy.runtime_readonly_paths = self.policy.runtime_readonly_paths.clone();
         policy.executable_search_path = self.policy.executable_search_path.clone();
@@ -302,12 +304,36 @@ impl ExecutionEnvironment {
         environment.backend = Arc::new(RestrictingSandbox);
         environment
     }
+    pub fn allows_full_access(&self) -> bool {
+        self.policy.allow_full_access
+            && matches!(
+                self.policy.mode,
+                SandboxMode::WorkspaceWrite | SandboxMode::DangerFullAccess
+            )
+    }
+    /// Select the separately authorized full-access capability without changing directories.
+    /// Callers must reject an unavailable selection before executing tools.
+    pub fn full_access(&self) -> Self {
+        if !self.allows_full_access() {
+            return self.clone();
+        }
+        let mut environment = self.clone();
+        let mut policy = SandboxPolicy::danger_full_access(&self.policy.id);
+        policy.process = self.policy.process.clone();
+        policy.runtime_readonly_paths = self.policy.runtime_readonly_paths.clone();
+        policy.executable_search_path = self.policy.executable_search_path.clone();
+        policy.rustup = self.policy.rustup.clone();
+        environment.policy = policy;
+        environment.backend = Arc::new(DirectSandbox);
+        environment
+    }
     pub fn read_only(&self) -> Self {
         if !self.policy.mode.isolated() {
             return self.workspace_access().read_only();
         }
         let mut policy = self.policy.clone();
         policy.mode = SandboxMode::ReadOnly;
+        policy.allow_full_access = false;
         policy
             .filesystem
             .readonly_paths
@@ -395,5 +421,62 @@ mod isolation_tests {
                 .check_write(own, &own.join("result.txt"))
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod full_access_tests {
+    use super::*;
+
+    #[test]
+    fn full_access_changes_execution_boundary_only_when_authorized() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let mut policy = SandboxPolicy::workspace_write("fixture", &workspace);
+        let environment = ExecutionEnvironment::new(
+            &workspace,
+            &workspace,
+            policy.clone(),
+            std::env::current_exe().unwrap(),
+            Arc::new(DirectSandbox),
+        )
+        .unwrap();
+        assert_eq!(
+            environment.full_access().policy().mode,
+            SandboxMode::WorkspaceWrite
+        );
+        policy.allow_full_access = true;
+        let environment = ExecutionEnvironment::new(
+            &workspace,
+            &workspace,
+            policy,
+            std::env::current_exe().unwrap(),
+            Arc::new(DirectSandbox),
+        )
+        .unwrap();
+        let full = environment.full_access();
+        full.policy().validate().unwrap();
+        assert_eq!(full.policy().mode, SandboxMode::DangerFullAccess);
+        assert_eq!(
+            full.session_environment(),
+            environment.session_environment()
+        );
+        assert!(
+            environment
+                .policy()
+                .filesystem
+                .check_write(&workspace, &root.path().join("outside"))
+                .is_err()
+        );
+        assert!(
+            full.policy()
+                .filesystem
+                .check_write(&workspace, &root.path().join("outside"))
+                .is_ok()
+        );
+        assert!(matches!(full.policy().network, NetworkAccess::AllowAll));
+        assert!(!environment.read_only().allows_full_access());
+        assert_eq!(environment.policy().mode, SandboxMode::WorkspaceWrite);
     }
 }

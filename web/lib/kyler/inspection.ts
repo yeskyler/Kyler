@@ -23,7 +23,21 @@ export type RequestSnapshot = {
   visible_events: number;
   window_start: number;
 };
+export type ModelResponseMetrics = { model: string; output_tokens: number; elapsed_ms: number };
+export function modelThroughput(metrics: ModelResponseMetrics | null | undefined): number | null {
+  if (
+    !metrics ||
+    !validTokenCount(metrics.output_tokens) ||
+    metrics.output_tokens === 0 ||
+    !Number.isFinite(metrics.elapsed_ms) ||
+    metrics.elapsed_ms <= 0
+  )
+    return null;
+  const rate = (metrics.output_tokens * 1000) / metrics.elapsed_ms;
+  return Number.isFinite(rate) ? rate : null;
+}
 export type ContextInspection = {
+  latest_model_response?: ModelResponseMetrics | null;
   session_id: string;
   latest_request: RequestSnapshot | null;
   next_request_budget: ContextBudget | null;

@@ -57,6 +57,8 @@ pub struct RustupRuntime {
 #[derive(Debug, Clone)]
 pub struct SandboxPolicy {
     pub mode: SandboxMode,
+    /// Host-owned capability, independent of the initially selected sandbox mode.
+    pub allow_full_access: bool,
     pub id: String,
     pub filesystem: FilesystemPolicy,
     pub network: NetworkAccess,
@@ -70,6 +72,7 @@ impl SandboxPolicy {
     pub fn read_only(id: impl Into<String>, workspace: impl AsRef<Path>) -> Self {
         Self {
             mode: SandboxMode::ReadOnly,
+            allow_full_access: false,
             id: id.into(),
             filesystem: FilesystemPolicy {
                 readonly_paths: vec![workspace.as_ref().into()],
@@ -95,12 +98,14 @@ impl SandboxPolicy {
     pub fn danger_full_access(id: impl Into<String>) -> Self {
         let mut policy = Self::workspace_write(id, Path::new("/"));
         policy.mode = SandboxMode::DangerFullAccess;
+        policy.allow_full_access = true;
         policy.network = NetworkAccess::AllowAll;
         policy
     }
     pub fn external_sandbox(id: impl Into<String>) -> Self {
         let mut policy = Self::danger_full_access(id);
         policy.mode = SandboxMode::ExternalSandbox;
+        policy.allow_full_access = false;
         policy.network = NetworkAccess::Inherit;
         policy
     }

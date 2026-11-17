@@ -35,7 +35,15 @@ impl RunManager {
                             })
                         });
                     if snapshot.mode == PermissionMode::FullAccess
-                        && mode != Some(SandboxMode::DangerFullAccess)
+                        && !self
+                            .workspaces
+                            .as_ref()
+                            .map(|f| f.allows_full_access())
+                            .unwrap_or_else(|| {
+                                self.agent
+                                    .execution_environment()
+                                    .is_some_and(|e| e.allows_full_access())
+                            })
                     {
                         snapshot.mode = if mode == Some(SandboxMode::ReadOnly) {
                             PermissionMode::ReadOnly
@@ -94,6 +102,23 @@ impl RunManager {
         }
         let session = self.store.load(id).await.map_err(ApiError::storage)?;
         let thread = self.core_thread(&session).await?;
+        if let Some(selection) = &selection {
+            let current = thread
+                .handle
+                .permissions(None)
+                .await
+                .map_err(|e| ApiError::bad(&e.to_string()))?;
+            let next = selection.mode.unwrap_or(current.selected.mode).preset();
+            if next != current.selected.mode
+                && (next == PermissionMode::FullAccess
+                    || current.selected.mode == PermissionMode::FullAccess)
+                && registry.active.contains_key(id)
+            {
+                return Err(ApiError::bad(
+                    "Wait for the current run to finish before switching full access.",
+                ));
+            }
+        }
         let state = thread
             .handle
             .permissions(selection.as_ref())

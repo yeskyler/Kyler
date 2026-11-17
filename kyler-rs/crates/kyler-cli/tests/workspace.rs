@@ -385,3 +385,31 @@ async fn serve_binds_readonly_workspace_and_lists_current_directory_in_native_wo
 async fn serve_workspace_write_enables_patch_with_workspace_relative_paths() {
     check(true).await;
 }
+
+#[tokio::test]
+async fn confirmed_full_access_uses_real_worker_outside_the_default_workspace() {
+    use kyler_config::SandboxSettings;
+    use kyler_server::workspaces::WorkspaceFactory;
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let outside = root.path().join("outside.txt");
+    std::fs::write(&outside, "host-access-fixture\n").unwrap();
+    let factory = WorkspaceFactory::configured(
+        PathBuf::from(env!("CARGO_BIN_EXE_kyler")),
+        vec![],
+        SandboxSettings::default(),
+    )
+    .unwrap();
+    let environment = factory.create(&workspace).unwrap();
+    let args = json!({"file_path": outside}).to_string();
+    assert!(environment.run_tool("read_file", &args).await.is_err());
+    let full = environment.full_access();
+    let output = full.run_tool("read_file", &args).await.unwrap();
+    assert!(output.contains("host-access-fixture"), "{output}");
+    assert_eq!(
+        full.session_environment(),
+        environment.session_environment()
+    );
+    assert!(environment.run_tool("read_file", &args).await.is_err());
+}

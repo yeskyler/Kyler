@@ -57,6 +57,10 @@ async fn fixture(responses: Vec<Vec<Value>>) -> (String, JoinHandle<Vec<Value>>)
             requests.push(serde_json::from_slice(&data[start..start + length]).unwrap());
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").await.unwrap();
             for value in chunks {
+                if let Some(delay) = value.get("_delay_ms").and_then(Value::as_u64) {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    continue;
+                }
                 if value.get("_stall").is_some() {
                     // Keep the response open until the client cancels/drops it.
                     let mut byte = [0];
@@ -945,4 +949,27 @@ async fn repeated_oversized_patch_streams_stop_after_two_retries() {
     assert!(error.to_string().contains("generation budget"));
     assert_eq!(count.load(Ordering::SeqCst), 0);
     assert_eq!(server.await.unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn completed_request_throughput_is_scoped_and_survives_checkpoint_reload() {
+    let mut response = answer("measured");
+    response.insert(0, json!({"_delay_ms":25}));
+    let (url, server) = fixture(vec![response]).await;
+    let directory = tempfile::tempdir().unwrap();
+    let store = Arc::new(SessionStore::new(directory.path()).await.unwrap());
+    let result = agent(url, ToolBox::new())
+        .with_session_store(store.clone())
+        .run_stream("measure request")
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    let restored = store.load(&result.session.session_id).await.unwrap();
+    let metrics = restored.memory.last_model_response.unwrap();
+    assert_eq!(metrics.model, "test");
+    assert_eq!(metrics.output_tokens, 2);
+    assert!(metrics.elapsed_ms >= 25);
+    server.await.unwrap();
 }

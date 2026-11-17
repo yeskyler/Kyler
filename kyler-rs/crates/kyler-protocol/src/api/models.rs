@@ -73,6 +73,7 @@ pub struct ModelConnectionUpdate {
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingLevel {
     Off,
+    Low,
     High,
     Max,
 }

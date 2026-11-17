@@ -82,6 +82,18 @@ ceiling. Sandbox policy controls actual access; approval controls whether a call
 requires permission before execution. An approval cannot grant access that the host has
 not authorized.
 
+With the default `workspace-write` configuration, Full access is available without
+setting `mode = "danger-full-access"`. Sessions still start with Workspace access.
+Selecting Full access requires confirmation and an idle session with no running managed
+processes. It switches local tool execution to unrestricted filesystem and network
+access as the service OS user, disables per-call approvals, and keeps the current
+working directory. OS and external container restrictions still apply. Existing MCP
+connections retain their configured execution boundary.
+
+Users select Full access in the session permissions interface. Read-only and
+external-sandbox execution environments
+retain their existing restrictions.
+
 Workspace networking is enabled by default. To disable it:
 
 ```toml
@@ -114,15 +126,22 @@ repeated snapshots are not counted twice. Persisted historical usage remains unc
 because aggregate records do not preserve the original provider usage sequence. Raw
 Rollout JSON downloads retain integer values.
 
+The session composer footer shows the latest completed primary-agent model request's
+average output rate in `tokens/s`, followed by Context, Memory, and Rollout controls.
+The rate uses provider-reported completion tokens divided by model request time,
+including connection and first-token latency and excluding tools. Requests without
+usable token counts or timing show `— tokens/s`. The measurement is retained in the
+session checkpoint and is separate from cumulative usage and subagent activity.
+
 ## Session execution paths
 
 Managed server sessions use private execution directories beneath
 `session.directory/_execution/<session-id>/workspace/`. The selected workspace is used
 for project grouping; its existing files are not implicitly readable or imported. Inputs
 must be supplied explicitly. Extra filesystem roots from the global sandbox
-configuration do not expand this per-session boundary. The server limits each session to
-read-only or workspace-write containment, even when the host configuration permits
-unrestricted/external execution elsewhere.
+configuration do not expand the default per-session boundary. Explicitly confirmed Full
+access can remove this containment; the session
+continues using the same private working directory.
 
 ## Model thinking mode
 
@@ -141,14 +160,14 @@ continuations include the associated `reasoning_content` and count it in the inp
 budget. Reasoning from prior turns is not resent. Thinking may increase response
 latency and token usage.
 
-The Web composer offers High and Max inside the input border. The saved session
-choice overrides the configuration default and applies at the next turn without a
-service restart; active executions keep their captured setting. For the known
-SiliconFlow DeepSeek model, High/Max send `reasoning_effort: "high"/"max"` with
-thinking enabled, and enables thinking for both levels. Sessions default to High; old saved Off or
-boolean false preferences resolve to High. Off is no longer a selectable session
-setting. Lower-level provider configuration remains available to embedded callers. A bound model accepts explicit High/Max preferences without requiring a local
-model-name allowlist. Explicit High/Max send the corresponding effort value.
+The Web composer displays the current model and thinking level on the right. Its
+Model and Thinking level submenus select the session model and Off, Low, High, or Max.
+The saved session choice overrides the configuration default and applies at the next
+turn without a service restart; active executions keep their captured setting.
+Sessions default to High. Off sends `enable_thinking: false` without `reasoning_effort`.
+Low, High, and Max enable thinking and send `reasoning_effort: "low"`, `"high"`, or
+`"max"`, respectively. Saved Off and legacy boolean false preferences remain Off.
+A bound model accepts explicit preferences without a local model-name allowlist.
 Provider compatibility is validated by the provider; unsupported request parameters
 remain errors rather than being silently ignored or mapped to identical requests.
 

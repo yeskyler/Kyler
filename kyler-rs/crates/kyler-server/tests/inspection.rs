@@ -77,7 +77,25 @@ async fn inspection_is_session_scoped_committed_and_does_not_call_the_model() {
             },
         ],
     ));
+    session
+        .memory
+        .record_model_response("fixture-model", 120, Duration::from_secs(2));
     h.store.save(&mut session).await.unwrap();
+    let measured: ContextInspection = h
+        .client
+        .get(format!("{inspect}/context"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let metrics = measured.latest_model_response.unwrap();
+    assert_eq!(metrics.model, "fixture-model");
+    assert_eq!(metrics.output_tokens, 120);
+    assert_eq!(metrics.elapsed_ms, 2000);
     let memory = MemoryStore::new(h.root.path().join("_memory"));
     let scope = MemoryStore::scope(&session);
     for index in 0..20 {

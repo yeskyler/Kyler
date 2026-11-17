@@ -45,9 +45,19 @@ impl Agent {
                 .as_ref()
                 .is_some_and(|e| e.policy().mode == SandboxMode::ReadOnly);
         let (_, effective_environment) = agent.permission_environment();
+        // Existing MCP connections keep their host-configured boundary, even when
+        // local tools select the separately authorized full-access capability.
         let mcp_allowed = !read_only
-            && agent.environment.as_ref().map(|e| e.policy().mode)
-                == effective_environment.as_ref().map(|e| e.policy().mode);
+            && (agent.environment.as_ref().map(|e| e.policy().mode)
+                == effective_environment.as_ref().map(|e| e.policy().mode)
+                || (agent
+                    .approval
+                    .as_ref()
+                    .is_some_and(|c| c.policy.mode == PermissionMode::FullAccess)
+                    && agent
+                        .environment
+                        .as_ref()
+                        .is_some_and(|e| e.allows_full_access())));
         if !mcp_allowed {
             Arc::make_mut(&mut agent.toolbox)
                 .retain(|_, tool| tool.execution_mode() != ToolExecutionMode::Mcp);

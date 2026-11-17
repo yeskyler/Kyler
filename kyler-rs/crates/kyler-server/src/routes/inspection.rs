@@ -232,6 +232,7 @@ pub async fn context(
         ),
     };
     Ok(Json(ContextInspection {
+        latest_model_response: session.memory.last_model_response.clone(),
         session_id: id,
         latest_request: session.memory.last_request.clone(),
         next_request_budget: budget,

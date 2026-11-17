@@ -124,6 +124,12 @@ impl WorkspaceFactory {
     pub fn sandbox_mode(&self) -> SandboxMode {
         self.sandbox.mode
     }
+    pub fn allows_full_access(&self) -> bool {
+        matches!(
+            self.sandbox.mode,
+            SandboxMode::WorkspaceWrite | SandboxMode::DangerFullAccess
+        )
+    }
     pub fn session_sandbox_mode(&self) -> SandboxMode {
         if self.sandbox.mode == SandboxMode::ReadOnly {
             SandboxMode::ReadOnly
@@ -173,6 +179,7 @@ impl WorkspaceFactory {
                 SandboxPolicy::external_sandbox("cli-external-sandbox-v1")
             }
         };
+        policy.allow_full_access = self.allows_full_access();
         let protected = self
             .sandbox
             .protected_paths

@@ -1,9 +1,15 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
-use kyler_protocol::api::inspection::{CompactionSnapshot, ContextRequestSnapshot};
+use kyler_protocol::api::inspection::{
+    CompactionSnapshot, ContextRequestSnapshot, ModelResponseMetrics,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContextMemory {
+    #[serde(default)]
+    pub last_model_response: Option<ModelResponseMetrics>,
     #[serde(default)]
     pub last_request: Option<ContextRequestSnapshot>,
     #[serde(default)]
@@ -23,6 +29,16 @@ pub struct ContextMemory {
 }
 
 impl ContextMemory {
+    pub fn record_model_response(&mut self, model: &str, output_tokens: u32, elapsed: Duration) {
+        let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+        self.last_model_response =
+            (output_tokens > 0 && elapsed_ms > 0).then(|| ModelResponseMetrics {
+                model: model.into(),
+                output_tokens,
+                elapsed_ms,
+            });
+    }
+
     /// Update the current request without calibrating against an intermediate stream snapshot.
     pub fn record_prompt_tokens(&mut self, actual: u32) {
         self.last_provider_input_tokens = actual as usize;
@@ -45,6 +61,20 @@ impl ContextMemory {
 #[cfg(test)]
 mod tests {
     use super::ContextMemory;
+
+    #[test]
+    fn model_metrics_preserve_request_scope_and_clear_missing_usage() {
+        let mut memory = ContextMemory::default();
+        memory.record_model_response("fixture", 120, std::time::Duration::from_secs(2));
+        let encoded = serde_json::to_vec(&memory).unwrap();
+        let restored: ContextMemory = serde_json::from_slice(&encoded).unwrap();
+        let metrics = restored.last_model_response.unwrap();
+        assert_eq!(metrics.model, "fixture");
+        assert_eq!(metrics.output_tokens, 120);
+        assert_eq!(metrics.elapsed_ms, 2000);
+        memory.record_model_response("fixture", 0, std::time::Duration::from_secs(1));
+        assert!(memory.last_model_response.is_none());
+    }
 
     #[test]
     fn intermediate_snapshots_do_not_repeatedly_calibrate_estimates() {

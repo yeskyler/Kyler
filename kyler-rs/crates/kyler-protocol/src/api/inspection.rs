@@ -37,8 +37,18 @@ pub struct CompactionSnapshot {
     pub after_tokens: usize,
     pub window_start: usize,
 }
+/// Latest completed primary-agent model request; elapsed time excludes tool execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelResponseMetrics {
+    pub model: String,
+    pub output_tokens: u32,
+    /// Includes connection and first-token latency.
+    pub elapsed_ms: u64,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextInspection {
+    #[serde(default)]
+    pub latest_model_response: Option<ModelResponseMetrics>,
     pub session_id: String,
     pub latest_request: Option<ContextRequestSnapshot>,
     pub next_request_budget: Option<ContextBudget>,

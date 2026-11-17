@@ -457,3 +457,46 @@ async fn closing_a_hosted_thread_does_not_shutdown_shared_host_resources() {
     manager.shutdown().await.unwrap();
     agent.shutdown().await;
 }
+
+#[tokio::test]
+async fn default_workspace_offers_confirmed_full_access_and_preserves_it_on_resume() {
+    let root = tempfile::tempdir().unwrap();
+    let mut config = config(root.path(), "http://127.0.0.1:1/v1");
+    config.sandbox.mode = SandboxMode::WorkspaceWrite;
+    let runtime = manager(config.clone()).await;
+    let new = runtime.start_thread(root.path(), None).await.unwrap();
+    let id = new.session_configured.session_id.clone();
+    let state = new.thread.permissions(None).await.unwrap();
+    assert_eq!(state.selected.mode, PermissionMode::WorkspaceAccess);
+    assert!(
+        state
+            .options
+            .iter()
+            .find(|o| o.mode == PermissionMode::FullAccess)
+            .unwrap()
+            .available
+    );
+    let mut selection = PermissionSelection {
+        mode: Some(PermissionMode::FullAccess),
+        approval: None,
+        confirm_full_access: false,
+    };
+    assert!(new.thread.permissions(Some(&selection)).await.is_err());
+    selection.confirm_full_access = true;
+    let full = new.thread.permissions(Some(&selection)).await.unwrap();
+    assert_eq!(full.sandbox, Some(SandboxMode::DangerFullAccess));
+    runtime.shutdown().await.unwrap();
+    let runtime = manager(config.clone()).await;
+    let resumed = runtime.start_thread(root.path(), Some(&id)).await.unwrap();
+    assert_eq!(
+        resumed
+            .thread
+            .permissions(None)
+            .await
+            .unwrap()
+            .selected
+            .mode,
+        PermissionMode::FullAccess
+    );
+    runtime.shutdown().await.unwrap();
+}

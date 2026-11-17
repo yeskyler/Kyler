@@ -90,6 +90,7 @@ impl Agent {
                 request_bytes=encoded.len(), request_sha256=%format!("{:x}", Sha256::digest(&encoded)),
                 enable_thinking=?request.get("enable_thinking").and_then(|v| v.as_bool()), "model request fingerprint");
         }
+        let request_started = std::time::Instant::now();
         let mut stream = tokio::time::timeout(
             Duration::from_secs(60),
             client.chat().create_stream_byot::<_, ModelChunk>(request),
@@ -267,6 +268,7 @@ impl Agent {
                 }
             }
         }
+        let request_elapsed = request_started.elapsed();
         if let Some(timing) = &timing {
             timing.stage("stream_ended");
         }
@@ -298,6 +300,11 @@ impl Agent {
         if let Some(timing) = &mut timing {
             timing.complete = true;
         }
+        session.memory.record_model_response(
+            &self.model,
+            reported.completion_tokens,
+            request_elapsed,
+        );
         Ok((
             (!text.is_empty()).then_some(text),
             (!calls.is_empty()).then_some(calls),
