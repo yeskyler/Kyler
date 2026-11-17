@@ -198,6 +198,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{id}/rollout/{seq}",
             get(inspection::rollout_detail),
         )
+        .route(
+            "/v1/sessions/{id}/analytics",
+            get(inspection::analytics::inspect),
+        )
         .route("/v1/sessions/{id}/context", get(inspection::context))
         .route("/v1/sessions/{id}/memory/inspect", get(inspection::memory))
         .route(

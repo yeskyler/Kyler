@@ -1,8 +1,16 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useAuiState } from "@assistant-ui/react";
-import { ArrowLeftIcon, BrainIcon, ChartPieIcon, ListTreeIcon } from "lucide-react";
+import { ArrowLeftIcon, BrainIcon, ChartPieIcon, ListTreeIcon, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/kyler/client";
 import {
@@ -10,6 +18,7 @@ import {
   modelThroughput,
   tokenCount,
   type ContextInspection,
+  type InspectionAnalytics,
   type InspectorTab,
 } from "@/lib/kyler/inspection";
 import { ContextPanel, MemoryPanel, RolloutPanel } from "./inspection-panels";
@@ -25,6 +34,10 @@ type InspectionState = {
   tab: InspectorTab | null;
   setTab: (tab: InspectorTab | null) => void;
   context?: ContextInspection;
+  analytics?: InspectionAnalytics;
+  analyticsLoading: boolean;
+  analyticsError: string;
+  refreshAnalytics: () => Promise<void>;
   error: string;
   loading: boolean;
   active: boolean;
@@ -66,6 +79,31 @@ export function SessionInspectorProvider({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const opener = useRef<HTMLButtonElement | null>(null);
+  const [analytics, setAnalytics] = useState<InspectionAnalytics>();
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const analyticsOperation = useRef<AbortController | null>(null);
+  const refreshAnalytics = useCallback(async () => {
+    analyticsOperation.current?.abort();
+    const controller = new AbortController();
+    analyticsOperation.current = controller;
+    setAnalyticsLoading(true);
+    try {
+      const result = await api<InspectionAnalytics>(`sessions/${session}/analytics`, {
+        signal: controller.signal,
+      });
+      if (result.session_id !== session) throw new Error("Session analytics mismatch.");
+      if (!controller.signal.aborted) {
+        setAnalytics(result);
+        setAnalyticsError("");
+      }
+    } catch (failure) {
+      if (!controller.signal.aborted)
+        setAnalyticsError(`Chart history could not load: ${(failure as Error).message}`);
+    } finally {
+      if (!controller.signal.aborted) setAnalyticsLoading(false);
+    }
+  }, [session]);
   const running = useAuiState((state) => state.thread.isRunning);
   useEffect(() => {
     if (!enabled) return;
@@ -99,6 +137,18 @@ export function SessionInspectorProvider({
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [session, running, active, enabled]);
+  useEffect(() => {
+    if (!active || !enabled) return;
+    void refreshAnalytics();
+    const focus = () => {
+      if (document.visibilityState !== "hidden") void refreshAnalytics();
+    };
+    window.addEventListener("focus", focus);
+    return () => {
+      analyticsOperation.current?.abort();
+      window.removeEventListener("focus", focus);
+    };
+  }, [active, enabled, running, refreshAnalytics]);
   return (
     <Inspection.Provider
       value={{
@@ -107,6 +157,10 @@ export function SessionInspectorProvider({
         tab,
         setTab,
         context,
+        analytics: analytics?.session_id === session ? analytics : undefined,
+        analyticsLoading,
+        analyticsError,
+        refreshAnalytics,
         error,
         loading,
         active,
@@ -129,7 +183,21 @@ export function SessionInspectorProvider({
 }
 
 export function SessionInspectorPage() {
-  const { session, name, tab, setTab, active, visited, context, error, loading } = useInspection();
+  const {
+    session,
+    name,
+    tab,
+    setTab,
+    active,
+    visited,
+    context,
+    error,
+    loading,
+    analytics,
+    analyticsError,
+    analyticsLoading,
+    refreshAnalytics,
+  } = useInspection();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (active) heading.current?.focus();
@@ -143,7 +211,7 @@ export function SessionInspectorPage() {
       aria-label="Session inspector"
     >
       <header className="px-6 pb-0 pt-6 sm:px-10">
-        <div className="mx-auto w-full max-w-5xl">
+        <div className="mx-auto w-full max-w-6xl">
           <h1
             ref={heading}
             tabIndex={-1}
@@ -161,36 +229,54 @@ export function SessionInspectorPage() {
           <p title={name} className="mt-2 truncate text-xs text-muted-foreground">
             {name}
           </p>
-          <div role="tablist" aria-label="Session inspection" className="mt-5 flex gap-1">
-            {tabs.map(({ id, label, Icon }) => (
-              <button
-                key={id}
-                id={`inspect-tab-${id}`}
-                role="tab"
-                type="button"
-                aria-selected={tab === id}
-                aria-controls={`inspect-panel-${id}`}
-                tabIndex={tab === id ? 0 : -1}
-                onClick={() => setTab(id)}
-                onKeyDown={(event) => {
-                  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-                  event.preventDefault();
-                  const index = tabs.findIndex((item) => item.id === tab);
-                  const next =
-                    event.key === "Home"
-                      ? 0
-                      : event.key === "End"
-                        ? 2
-                        : (index + (event.key === "ArrowRight" ? 1 : 2)) % 3;
-                  setTab(tabs[next].id);
-                  document.getElementById(`inspect-tab-${tabs[next].id}`)?.focus();
-                }}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm sm:px-4 ${tab === id ? "bg-foreground font-medium text-background" : "text-muted-foreground hover:bg-muted"}`}
-              >
-                <Icon className="size-4" />
-                {label}
-              </button>
-            ))}
+          {analyticsError && (
+            <p role="alert" className="mt-3 text-xs text-destructive">
+              {analyticsError}
+            </p>
+          )}
+          <div className="mt-5 flex items-center justify-between gap-4">
+            <div role="tablist" aria-label="Session inspection" className="flex gap-1">
+              {tabs.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  id={`inspect-tab-${id}`}
+                  role="tab"
+                  type="button"
+                  aria-selected={tab === id}
+                  aria-controls={`inspect-panel-${id}`}
+                  tabIndex={tab === id ? 0 : -1}
+                  onClick={() => setTab(id)}
+                  onKeyDown={(event) => {
+                    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                    event.preventDefault();
+                    const index = tabs.findIndex((item) => item.id === tab);
+                    const next =
+                      event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? 2
+                          : (index + (event.key === "ArrowRight" ? 1 : 2)) % 3;
+                    setTab(tabs[next].id);
+                    document.getElementById(`inspect-tab-${tabs[next].id}`)?.focus();
+                  }}
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm sm:px-4 ${tab === id ? "bg-foreground font-medium text-background" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  <Icon className="size-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={analyticsLoading}
+              aria-label="Refresh charts"
+              onClick={() => void refreshAnalytics()}
+            >
+              <RefreshCwIcon className={`size-3.5 ${analyticsLoading ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">Refresh charts</span>
+            </Button>
           </div>
         </div>
       </header>
@@ -205,15 +291,25 @@ export function SessionInspectorPage() {
             aria-labelledby={`inspect-tab-${id}`}
             tabIndex={0}
           >
-            <div className="mx-auto w-full max-w-5xl">
+            <div className="mx-auto w-full max-w-6xl">
               {visited[id] && id === "rollout" && (
-                <RolloutPanel session={session} active={active && tab === id} />
+                <RolloutPanel
+                  session={session}
+                  active={active && tab === id}
+                  analytics={analytics}
+                />
               )}
               {visited[id] && id === "memory" && (
                 <MemoryPanel session={session} active={active && tab === id} />
               )}
               {visited[id] && id === "context" && (
-                <ContextPanel data={context} error={error} loading={loading} />
+                <ContextPanel
+                  data={context}
+                  error={error}
+                  loading={loading}
+                  analytics={analytics}
+                  active={active && tab === id}
+                />
               )}
             </div>
           </div>

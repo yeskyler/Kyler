@@ -133,6 +133,27 @@ including connection and first-token latency and excluding tools. Requests witho
 usable token counts or timing show `— tokens/s`. The measurement is retained in the
 session checkpoint and is separate from cumulative usage and subagent activity.
 
+## Session inspection charts
+
+Context, Memory, and Rollout use the same card layout and read-only charts.
+Context distinguishes provider-reported input from local category estimates and marks
+model/budget changes and compression events. Summary and fact contents remain readable
+text, with complete details in drawers.
+
+`GET /v1/sessions/{id}/analytics` summarizes the complete committed rollout, independently
+of timeline pagination. Event updates are deduplicated by event identity, and tool
+results are matched within their execution. The response includes the latest 300
+request snapshots, latest 100 compression snapshots and execution summaries, up to
+24 activity buckets, and the top 20 tools plus an aggregate of remaining tools.
+Arguments, messages and tool outputs are excluded. Charts refresh when inspection
+opens, a turn changes state, the window regains focus, or Refresh charts is selected;
+the full rollout is not rescanned on the timeline's polling timer.
+
+Memory activity charts cover the API's latest 30 explicit operations, including failures.
+Tag counts measure facts per tag and can overlap. No retrieval hit-rate or memory quality
+score is inferred. Timeline details remain paginated and are fetched on demand; raw
+event downloads retain the existing redaction and preview limits.
+
 ## Session execution paths
 
 Managed server sessions use private execution directories beneath

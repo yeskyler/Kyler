@@ -194,3 +194,69 @@ export function mergeRollout(previous: RolloutItem[], incoming: RolloutItem[]) {
 export function inspectionTime(value: number | null | undefined) {
   return value == null ? "Unavailable" : new Date(value).toLocaleString();
 }
+
+export type InspectionAnalytics = {
+  session_id: string;
+  records: number;
+  execution_count: number;
+  tool_calls: number;
+  failed_tool_calls: number;
+  last_activity_ms: number | null;
+  context_request_count: number;
+  context_requests: {
+    execution_id: string;
+    step: number;
+    timestamp_ms: number;
+    model: string;
+    capacity: number;
+    input_tokens: number;
+    estimated: boolean;
+  }[];
+  compactions: NonNullable<ContextInspection["last_compaction"]>[];
+  tools: { name: string; calls: number; succeeded: number; failed: number; pending: number }[];
+  activity: {
+    timestamp_ms: number;
+    messages: number;
+    tools: number;
+    compactions: number;
+    subagents: number;
+  }[];
+  executions: {
+    execution_id: string;
+    status: string;
+    started_at: number;
+    finished_at: number | null;
+    steps: number;
+  }[];
+};
+export function memoryTagCounts(entries: MemoryInspection["entries"]) {
+  const tags = new Map<string, number>();
+  for (const entry of entries)
+    for (const tag of new Set(entry.tags)) tags.set(tag, (tags.get(tag) ?? 0) + 1);
+  return [...tags]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, 8);
+}
+export function memoryActivityBuckets(activity: MemoryInspection["activity"]) {
+  const buckets = new Map<
+    number,
+    { timestamp: number; searches: number; writes: number; deletes: number; other: number }
+  >();
+  for (const event of activity) {
+    const timestamp = Math.floor(event.timestamp / 3600) * 3600000;
+    const bucket = buckets.get(timestamp) ?? {
+      timestamp,
+      searches: 0,
+      writes: 0,
+      deletes: 0,
+      other: 0,
+    };
+    if (event.action === "search") bucket.searches++;
+    else if (["save", "put"].includes(event.action)) bucket.writes++;
+    else if (event.action === "delete") bucket.deletes++;
+    else bucket.other++;
+    buckets.set(timestamp, bucket);
+  }
+  return [...buckets.values()].sort((a, b) => a.timestamp - b.timestamp);
+}

@@ -83,6 +83,7 @@ export function permittedPath(path: string, method: string) {
     ["GET", `sessions/${id}/rollout`],
     ["GET", `sessions/${id}/rollout/[0-9]+`],
     ["GET", `sessions/${id}/context`],
+    ["GET", `sessions/${id}/analytics`],
     ["GET", `sessions/${id}/artifacts`],
     ["GET", `sessions/${id}/workspace-files`],
     ["GET", `sessions/${id}/artifacts/${id}/content`],

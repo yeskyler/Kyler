@@ -1,4 +1,5 @@
 //! Session inspection reads committed checkpoints; it never runs tools or models.
+pub mod analytics;
 use crate::{
     error::{ApiError, ApiResult, valid_id},
     state::AppState,

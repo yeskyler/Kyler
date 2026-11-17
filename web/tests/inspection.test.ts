@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   contextUsage,
+  memoryTagCounts,
+  memoryActivityBuckets,
   modelThroughput,
   contextComponents,
   formatCheckpointTokens,
@@ -202,4 +204,34 @@ test("model throughput uses request output and duration and rejects missing metr
   ]) {
     assert.equal(modelThroughput(metrics), null);
   }
+});
+
+test("memory tag charts count facts once per tag and recent activity preserves failed attempts", () => {
+  const entries = [
+    {
+      key: "one",
+      content: "one",
+      tags: ["rust", "rust", "ui"],
+      revision: 1,
+      updated_at: 1,
+      source_session: "s",
+    },
+    { key: "two", content: "two", tags: ["rust"], revision: 1, updated_at: 1, source_session: "s" },
+  ];
+  assert.deepEqual(memoryTagCounts(entries), [
+    { name: "rust", count: 2 },
+    { name: "ui", count: 1 },
+  ]);
+  const common = { call_id: "call", key: null, execution_id: "e" };
+  const activity = memoryActivityBuckets([
+    { ...common, timestamp: 4000, action: "search", status: "error" },
+    { ...common, timestamp: 4010, action: "save", status: "success" },
+    { ...common, timestamp: 8000, action: "delete", status: "pending" },
+  ]);
+  assert.equal(activity.length, 2);
+  assert.equal(activity[0].searches, 1);
+  assert.equal(activity[0].writes, 1);
+  assert.equal(activity[1].deletes, 1);
+  assert.equal(permittedPath("sessions/session-id/analytics", "GET"), true);
+  assert.equal(permittedPath("sessions/session-id/analytics", "POST"), false);
 });

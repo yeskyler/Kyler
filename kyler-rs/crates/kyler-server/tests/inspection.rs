@@ -41,6 +41,13 @@ async fn inspection_is_session_scoped_committed_and_does_not_call_the_model() {
         .await
         .unwrap();
     assert!(initial.latest_request.is_none());
+    assert_eq!(
+        reqwest::get(format!("{}/v1/sessions/{id}/analytics", h.url))
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
     let mut session = h.store.load(&id).await.unwrap();
     session
         .state
@@ -281,6 +288,34 @@ async fn request_snapshot_is_visible_while_streaming_and_survives_reloading() {
     assert_eq!(
         completed.latest_request.unwrap().provider_input_tokens,
         Some(10)
+    );
+    let analytics: kyler_protocol::api::inspection::InspectionAnalytics = h
+        .client
+        .get(format!("{}/v1/sessions/{id}/analytics", h.url))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(analytics.session_id, id);
+    assert!(analytics.records > 0);
+    assert!(analytics.execution_count > 0);
+    assert_eq!(
+        analytics.context_request_count,
+        analytics.context_requests.len()
+    );
+    assert!(
+        analytics
+            .context_requests
+            .iter()
+            .any(|point| point.input_tokens == 10 && !point.estimated)
+    );
+    assert_eq!(
+        analytics.tool_calls,
+        analytics.tools.iter().map(|tool| tool.calls).sum::<u64>()
     );
     let stored = h.store.load(&id).await.unwrap();
     assert_eq!(

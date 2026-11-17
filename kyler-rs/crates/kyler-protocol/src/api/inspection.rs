@@ -81,3 +81,54 @@ pub struct RolloutDetail {
     pub item: RolloutItem,
     pub data: Value,
 }
+
+/// Bounded chart data derived from the complete committed session history.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InspectionAnalytics {
+    pub session_id: String,
+    pub records: u64,
+    pub execution_count: usize,
+    pub tool_calls: u64,
+    pub failed_tool_calls: u64,
+    pub last_activity_ms: Option<i64>,
+    pub context_request_count: usize,
+    pub context_requests: Vec<ContextTrendPoint>,
+    pub compactions: Vec<CompactionSnapshot>,
+    pub tools: Vec<ToolAggregate>,
+    pub activity: Vec<ActivityBucket>,
+    pub executions: Vec<ExecutionAggregate>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextTrendPoint {
+    pub execution_id: String,
+    pub step: u32,
+    pub timestamp_ms: i64,
+    pub model: String,
+    pub capacity: usize,
+    pub input_tokens: usize,
+    pub estimated: bool,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ToolAggregate {
+    pub name: String,
+    pub calls: u64,
+    pub succeeded: u64,
+    pub failed: u64,
+    pub pending: u64,
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ActivityBucket {
+    pub timestamp_ms: i64,
+    pub messages: u64,
+    pub tools: u64,
+    pub compactions: u64,
+    pub subagents: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionAggregate {
+    pub execution_id: String,
+    pub status: String,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+    pub steps: u32,
+}
