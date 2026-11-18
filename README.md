@@ -3,91 +3,57 @@
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
     <img src="docs/assets/logo-light.svg" width="328" height="104" alt="Kyler">
   </picture>
-  <h3>A general-purpose AI assistant for research, creation, and getting things done.</h3>
+  <h3>An AI assistant for coding, research, and document work.</h3>
   <p>
     <a href="https://github.com/yeskyler/Kyler/releases"><img src="https://img.shields.io/github/v/release/yeskyler/Kyler?style=flat-square&amp;color=3b82f6" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/yeskyler/Kyler?style=flat-square&amp;color=22c55e" alt="License"></a>
     <a href="https://github.com/yeskyler/Kyler/stargazers"><img src="https://img.shields.io/github/stars/yeskyler/Kyler?style=flat-square&amp;color=eab308" alt="GitHub stars"></a>
   </p>
-  <p>
-    <a href="docs/development.md"><img src="https://img.shields.io/badge/runtime-Rust-dea584?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust runtime"></a>
-    <a href="docs/architecture.md"><img src="https://img.shields.io/badge/interfaces-Web%20%2F%20TUI%20%2F%20CLI-475569?style=flat-square" alt="Web, TUI, and CLI"></a>
-    <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sandbox-MXC-0078d4?style=flat-square" alt="MXC Sandbox"></a>
-    <a href="docs/configuration.md"><img src="https://img.shields.io/badge/connectors-MCP-6366f1?style=flat-square" alt="MCP connectors"></a>
-    <a href="docs/configuration.md"><img src="https://img.shields.io/badge/extensions-Skills-10b981?style=flat-square" alt="Skills"></a>
-  </p>
   <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
   <p><a href="#installation">Install</a> · <a href="#demo">Demo</a> · <a href="#capabilities">Capabilities</a> · <a href="#documentation">Documentation</a></p>
 </div>
 
-Kyler is a general-purpose AI assistant for research, writing, analysis, and software
-development. It combines conversations, tools, and task deliverables in one workspace,
-with Web, TUI, and CLI interfaces powered by a shared Rust runtime. Models connect
-through OpenAI-compatible Chat Completions endpoints.
+Kyler is an AI assistant for coding, research, and document work. It combines
+conversation, tool execution, and project workspaces to help you understand problems,
+complete tasks, and deliver results. Use it through Web, TUI, or CLI with models
+served through OpenAI-compatible Chat Completions APIs.
 
 ## Demo
 
-https://github.com/user-attachments/assets/465709d2-ddc2-4ce1-a77d-3ef427dfc7ca
+![Kyler Web interface](demo/example-1.png)
 
 ## Capabilities
 
-- Streaming responses, structured tool activity, and persistent conversations.
-- File operations, managed commands, sandbox permissions, and execution approvals.
-- MCP connectors and system, user, and project skills.
-- Image and document attachments, downloadable deliverables, and artifact previews.
-- Context management, project memory, and session inspection.
-- Asynchronous subagents and independent read-only code reviews.
+- **Coding**: understand projects, write code, debug issues, and run tests.
+- **Research**: read materials, analyze information, compare approaches, and organize documents.
+- **Continuity**: work across project workspaces, persistent conversations, and memory.
+- **Extensions and automation**: connect MCP tools, load skills, and schedule tasks.
+- **Visibility and control**: inspect context, tool calls, and deliverables; manage sandbox permissions and approvals.
 
 ## Installation
 
-Install from [GitHub Releases](https://github.com/yeskyler/Kyler/releases).
-The complete package includes the backend, Web application, and Node.js runtime.
-
-Download and run the installer:
+Available for macOS and Linux. Complete bundles include the backend, Web application,
+and Node.js runtime.
 
 ```sh
 curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-Follow setup to configure the model, API URL, API key, and local or local-network access.
-The backend and Web service start automatically. Open the displayed Web address
-and sign in with the generated Web token (`kyler service token`).
+Follow setup to configure the model and access scope. Open the displayed Web address
+and sign in with the generated token, or run `kyler tui` for the terminal interface.
 
 ```sh
-kyler service status
-kyler service stop
-kyler service start
+kyler service status   # Check service status
+kyler service token    # View the Web token
 ```
+
+See the [installation guide](docs/installation.md) and [GitHub Releases](https://github.com/yeskyler/Kyler/releases) for details.
 
 ## Development
 
-On macOS or Linux, install stable [Rust](https://rust-lang.org/tools/install/) and
-[Node.js 24](https://nodejs.org/en/download) with npm.
-
-```sh
-git clone https://github.com/yeskyler/Kyler.git
-cd Kyler
-```
-
-Configure the backend on first use, then start it. `cargo run` builds it automatically:
-
-```sh
-cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --web
-cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
-```
-
-Both services use `~/.kyler/config.toml` by default. Skip `configure` if it is already
-configured with a Web token. Start Web in a second terminal from the repository root:
-
-```sh
-cd web
-npm ci
-npm run dev -- --hostname 127.0.0.1 --port 30002
-```
-
-Open **http://127.0.0.1:30002**. Development and installed services must use separate
-ports when running together.
+Requires stable Rust and Node.js 24 with npm. See the [development guide](docs/development.md)
+for build, startup, and validation instructions.
 
 ## Documentation
 

@@ -3,90 +3,54 @@
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
     <img src="docs/assets/logo-light.svg" width="328" height="104" alt="Kyler">
   </picture>
-  <h3>面向研究、创作与任务执行的通用 AI 助手。</h3>
+  <h3>面向编码、研究与文档工作的 AI 助手。</h3>
   <p>
     <a href="https://github.com/yeskyler/Kyler/releases"><img src="https://img.shields.io/github/v/release/yeskyler/Kyler?style=flat-square&amp;color=3b82f6" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/yeskyler/Kyler?style=flat-square&amp;color=22c55e" alt="License"></a>
     <a href="https://github.com/yeskyler/Kyler/stargazers"><img src="https://img.shields.io/github/stars/yeskyler/Kyler?style=flat-square&amp;color=eab308" alt="GitHub stars"></a>
   </p>
-  <p>
-    <a href="docs/development.md"><img src="https://img.shields.io/badge/runtime-Rust-dea584?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust runtime"></a>
-    <a href="docs/architecture.md"><img src="https://img.shields.io/badge/interfaces-Web%20%2F%20TUI%20%2F%20CLI-475569?style=flat-square" alt="Web, TUI, and CLI"></a>
-    <a href="docs/architecture.md"><img src="https://img.shields.io/badge/sandbox-MXC-0078d4?style=flat-square" alt="MXC Sandbox"></a>
-    <a href="docs/configuration.md"><img src="https://img.shields.io/badge/connectors-MCP-6366f1?style=flat-square" alt="MCP connectors"></a>
-    <a href="docs/configuration.md"><img src="https://img.shields.io/badge/extensions-Skills-10b981?style=flat-square" alt="Skills"></a>
-  </p>
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
   <p><a href="#安装">安装</a> · <a href="#演示">演示</a> · <a href="#主要能力">主要能力</a> · <a href="#文档导航">文档导航</a></p>
 </div>
 
-Kyler 是面向研究、写作、分析和软件开发的通用 AI 助手，将对话、工具与任务产物
-整合在同一个工作空间中。Web、TUI 和 CLI 共用 Rust 运行时，通过兼容
-OpenAI Chat Completions 的接口连接模型服务。
+Kyler 是一个面向编码、研究与文档工作的 AI 助手。通过对话、工具执行和项目工作区，
+帮助你理解问题、推进任务并交付成果。支持 Web、终端界面（TUI）和 CLI，
+可连接兼容 OpenAI Chat Completions 的模型服务。
 
 ## 演示
 
-https://github.com/user-attachments/assets/465709d2-ddc2-4ce1-a77d-3ef427dfc7ca
+![Kyler Web 界面](demo/example-1.png)
 
 ## 主要能力
 
-- 流式回复、结构化工具活动和持久化会话。
-- 文件操作、进程管理、沙箱权限和执行审批。
-- MCP 连接器，以及系统级、用户级和项目级技能。
-- 图片与文档附件、可下载产物和产物预览。
-- 上下文管理、项目记忆和会话状态查看。
-- 异步子智能体和独立的只读代码审查。
+- **编码开发**：理解项目、编写代码、排查问题和执行测试。
+- **研究整理**：阅读资料、分析信息、比较方案并整理文档。
+- **持续协作**：通过工作区、持久化会话和记忆延续任务。
+- **扩展与自动化**：连接 MCP 工具、加载技能、设置定时任务。
+- **查看与控制**：查看上下文、工具调用和产物，管理沙箱权限与执行审批。
 
 ## 安装
 
-通过 [GitHub Releases](https://github.com/yeskyler/Kyler/releases) 安装。
-完整发行包包含后端、Web 前端和 Node.js 运行时。
-
-下载并运行安装程序：
+支持 macOS 和 Linux，完整发行包包含后端、Web 前端和 Node.js 运行时。
 
 ```sh
 curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-按提示配置模型、API 地址、密钥，并选择仅本机或局域网访问。
-前后端服务会自动启动。
-在浏览器打开安装结束时显示的 Web 地址，粘贴自动生成的 Web token 登录。
-使用 `kyler service token` 查看 token。
+按提示配置模型与访问方式。安装后打开显示的 Web 地址，使用自动生成的 token 登录。
+也可以运行 `kyler tui` 使用终端界面。
 
 ```sh
-kyler service status
-kyler service stop
-kyler service start
+kyler service status   # 查看服务状态
+kyler service token    # 查看 Web token
 ```
+
+更多说明见 [安装指南](docs/installation.md) 和 [GitHub Releases](https://github.com/yeskyler/Kyler/releases)。
 
 ## 开发
 
-在 macOS 或 Linux 上安装 stable [Rust](https://rust-lang.org/tools/install/) 和
-[Node.js 24](https://nodejs.org/en/download)，Node.js 自带 npm。
-
-```sh
-git clone https://github.com/yeskyler/Kyler.git
-cd Kyler
-```
-
-首次使用时配置后端，然后启动；`cargo run` 会自动完成所需的编译：
-
-```sh
-cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- configure --web
-cargo run --manifest-path kyler-rs/Cargo.toml -p kyler-cli -- serve
-```
-
-前后端默认使用 `~/.kyler/config.toml`。已有包含 Web token 的有效配置时，可以跳过 `configure`。
-在另一个终端中，从仓库根目录启动 Web：
-
-```sh
-cd web
-npm ci
-npm run dev -- --hostname 127.0.0.1 --port 30002
-```
-
-打开 **http://127.0.0.1:30002**。开发服务与已安装的服务同时运行时，应使用不同端口。
+需要 stable Rust 和 Node.js 24（含 npm）。构建、启动和验证步骤见 [开发指南](docs/development.md)。
 
 ## 文档导航
 
