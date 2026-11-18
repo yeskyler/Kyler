@@ -1,8 +1,33 @@
 # Changelog
 
-Changes below describe implemented work that has not been assigned a published
-release in this document. Package version `0.1.0` alone does not establish a
-publication date. Earlier development history remains available in Git.
+## 0.2.0 — 2026-11-18
+
+### Added
+
+- SQLite-backed automations, session indexes, and shared Web navigation preferences.
+- Product-style plugin management and chart-based session inspection panels.
+- Configurable model context windows and bounded parallel execution of compatible tools.
+
+### Changed
+
+- Session execution uses `cwd`, with project identity and managed-directory ownership
+  separated from host sandbox authority.
+- Web, TUI, CLI, automations, and artifact paths use the canonical directory contract.
+- Application database schema v3 removes obsolete directory index columns.
+
+### Fixed
+
+- Isolated-session permission coverage now verifies confirmed Full access selection
+  and preserves the selected execution directory.
+- Session creation forwarding accepts `cwd`; deletion preserves unmanaged project files.
+
+### Upgrade notes
+
+- Back up application data before upgrading. Removed session environment fields and
+  old automation directory aliases are not accepted. Export or migrate old-format
+  histories and task definitions before use; upgrading does not delete them.
+- Database indexes upgrade automatically from schema v1/v2 to v3. Older binaries
+  cannot open the upgraded index. See [session persistence](docs/session-persistence.md).
 
 ## Unreleased
 
