@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Upgrade Next.js to 16.4.5 to incorporate the November security fixes.
 - Isolated-session permission coverage now verifies confirmed Full access selection
   and preserves the selected execution directory.
 - Session creation forwarding accepts `cwd`; deletion preserves unmanaged project files.
