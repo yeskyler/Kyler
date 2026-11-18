@@ -27,9 +27,7 @@ pub async fn list(
     let Some(manager) = agent.skill_manager() else {
         return Ok(Json(Vec::new()));
     };
-    let workspace = agent
-        .workspace_environment()
-        .map(|e| e.workspace_root.as_path());
+    let workspace = agent.workspace_environment().map(|e| e.cwd.as_path());
     manager.list(workspace, false).await.map(Json).map_err(|_| {
         ApiError::bad("Unable to discover skills. Check configured directories and skill state.")
     })
@@ -43,12 +41,7 @@ pub async fn reload(
         .skill_manager()
         .ok_or_else(|| ApiError::bad("Skills are disabled."))?;
     manager
-        .list(
-            agent
-                .workspace_environment()
-                .map(|e| e.workspace_root.as_path()),
-            true,
-        )
+        .list(agent.workspace_environment().map(|e| e.cwd.as_path()), true)
         .await
         .map(Json)
         .map_err(|_| {
@@ -65,9 +58,7 @@ pub async fn details(
         .ok_or_else(|| ApiError::bad("Skills are disabled."))?;
     manager
         .details(
-            agent
-                .workspace_environment()
-                .map(|e| e.workspace_root.as_path()),
+            agent.workspace_environment().map(|e| e.cwd.as_path()),
             &skill,
         )
         .await
@@ -88,7 +79,7 @@ pub async fn action(
     let manager = agent
         .skill_manager()
         .ok_or_else(|| ApiError::bad("Skills are disabled."))?;
-    manager.action(agent.workspace_environment().map(|e|e.workspace_root.as_path()),&skill,action,&request.fingerprint).await.map_err(|_|ApiError::bad("Skill changed, is shadowed, or approval could not be saved. Reload and review the current version."))?;
+    manager.action(agent.workspace_environment().map(|e|e.cwd.as_path()),&skill,action,&request.fingerprint).await.map_err(|_|ApiError::bad("Skill changed, is shadowed, or approval could not be saved. Reload and review the current version."))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -105,7 +96,7 @@ pub async fn create(
     let manager = agent
         .skill_manager()
         .ok_or_else(|| ApiError::bad("Skills are disabled."))?;
-    let info = manager.save(agent.workspace_environment().map(|e| e.workspace_root.as_path()), request).await
+    let info = manager.save(agent.workspace_environment().map(|e| e.cwd.as_path()), request).await
         .map_err(|_| ApiError::bad("Cannot save skill. Check the skill name, SKILL.md metadata, package limits, and whether the skill already exists."))?;
     Ok((StatusCode::CREATED, Json(info)))
 }

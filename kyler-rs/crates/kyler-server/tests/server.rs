@@ -525,7 +525,7 @@ async fn runtime_metadata_and_session_usage_are_server_authoritative_and_authent
     assert_eq!(info.model, "test");
     assert_eq!(info.context_window_tokens, 128000);
     assert_eq!(info.sliding_window_tokens, Some(76800));
-    assert!(info.workspace_root.is_none());
+    assert!(info.cwd.is_none());
     let session = h.session().await;
     for index in 0..2 {
         let run = h.run(&session, "hello", &format!("usage-{index}")).await;

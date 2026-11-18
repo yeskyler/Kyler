@@ -44,7 +44,7 @@ async fn default_workspace_is_server_owned_without_authorizing_its_config_parent
         .environment_for_create(None)
         .unwrap()
         .unwrap();
-    assert_eq!(snapshot.workspace_root, default);
+    assert_eq!(snapshot.cwd, default);
     assert!(
         server
             .state
@@ -116,10 +116,10 @@ async fn default_workspace_is_server_owned_without_authorizing_its_config_parent
         .json()
         .await
         .unwrap();
-    assert_eq!(draft["workspace_root"], info["default_workspace"]);
+    assert_eq!(draft["cwd"], info["default_workspace"]);
     let saved: Value = http
         .post(format!("{base}/v1/sessions"))
-        .json(&json!({"workspace_root":project}))
+        .json(&json!({"cwd":project}))
         .send()
         .await
         .unwrap()
@@ -129,7 +129,7 @@ async fn default_workspace_is_server_owned_without_authorizing_its_config_parent
         .await
         .unwrap();
     assert_eq!(
-        saved["workspace_root"],
+        saved["cwd"],
         project.canonicalize().unwrap().to_string_lossy().as_ref()
     );
     let id = saved["session_id"].as_str().unwrap().to_owned();
@@ -148,7 +148,7 @@ async fn default_workspace_is_server_owned_without_authorizing_its_config_parent
         .unwrap();
     let saved = server.state.runs.store.load(&id).await.unwrap();
     assert_eq!(
-        saved.environment.unwrap().project_root.unwrap(),
+        saved.environment.unwrap().project_root().cloned().unwrap(),
         project.canonicalize().unwrap()
     );
     assert_eq!(
@@ -158,7 +158,7 @@ async fn default_workspace_is_server_owned_without_authorizing_its_config_parent
             .environment_for_create(None)
             .unwrap()
             .unwrap()
-            .workspace_root,
+            .cwd,
         config.workspace.default_directory.canonicalize().unwrap()
     );
 }
@@ -224,4 +224,113 @@ fn networking_defaults_do_not_widen_previously_bound_offline_sessions() {
         broader.restore(&saved).is_err(),
         "network compatibility must not accept changed filesystem boundaries"
     );
+}
+
+#[tokio::test]
+async fn managed_directories_require_the_saved_owner_and_are_the_only_deleted_workspaces() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(project.join("keep.txt"), "project").unwrap();
+    let mut config = AppConfig::default();
+    config.llm.api_key = SecretString::new("fixture");
+    config.llm.model = "fixture".into();
+    config.llm.base_url = "http://127.0.0.1:1/v1".into();
+    config.session.enabled = true;
+    config.session.directory = root.path().join("sessions");
+    config.skills.enabled = false;
+    let factory = WorkspaceFactory::configured(
+        std::env::current_exe().unwrap(),
+        vec![project.clone()],
+        config.sandbox.clone(),
+    )
+    .unwrap();
+    let server = Server::from_config_with_workspaces(&config, Arc::new(factory))
+        .await
+        .unwrap();
+    let store = server.state.runs.store.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(server.serve(listener, async {
+        let _ = stopped.await;
+    }));
+    let client = reqwest::Client::new();
+    let mut created = Vec::new();
+    for _ in 0..2 {
+        let value: Value = client
+            .post(format!("{base}/v1/sessions"))
+            .json(&json!({"cwd":project,"workspace_mode":"isolated"}))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        created.push(
+            store
+                .load(value["session_id"].as_str().unwrap())
+                .await
+                .unwrap(),
+        );
+    }
+    let first = &created[0];
+    let first_root = first
+        .environment
+        .as_ref()
+        .unwrap()
+        .managed
+        .as_ref()
+        .unwrap()
+        .root
+        .clone();
+    assert!(first_root.is_dir());
+    assert!(!first_root.join("keep.txt").exists());
+    assert_eq!(first.environment.as_ref().unwrap().cwd, first_root);
+    let mut forged = kyler_core::Session::new();
+    forged.environment = first.environment.clone();
+    store.save(&mut forged).await.unwrap();
+    assert!(
+        client
+            .get(format!(
+                "{base}/v1/sessions/{}/permissions",
+                forged.session_id
+            ))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_client_error()
+    );
+    assert!(
+        client
+            .delete(format!("{base}/v1/sessions/{}", first.session_id))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success()
+    );
+    assert!(!first_root.exists());
+    assert!(project.join("keep.txt").exists());
+    let second = &created[1];
+    let second_root = &second.environment.as_ref().unwrap().cwd;
+    std::fs::remove_dir(second_root).unwrap();
+    assert!(
+        client
+            .get(format!(
+                "{base}/v1/sessions/{}/permissions",
+                second.session_id
+            ))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_client_error()
+    );
+    assert!(!second_root.exists());
+    stop.send(()).unwrap();
+    task.await.unwrap().unwrap();
 }

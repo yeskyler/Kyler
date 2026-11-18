@@ -77,10 +77,9 @@ impl Agent {
         let environment = environment
             .map(|environment| {
                 serde_json::to_string(&serde_json::json!({
-                    "project_root": environment.session_environment().project_root,
-                    "workspace_root": environment.session_environment().workspace_root,
-                    "working_directory": environment.session_environment().working_directory,
-                    "sandbox_policy_id": environment.session_environment().sandbox_policy_id,
+                    "project": environment.session_environment().project,
+                    "cwd": environment.session_environment().cwd,
+                    "sandbox_policy_id": environment.session_environment().sandbox.policy_id,
                     "sandbox_mode": environment.policy().mode,
                     "filesystem": environment.policy().filesystem,
                     "network": { "mode": match environment.policy().network {

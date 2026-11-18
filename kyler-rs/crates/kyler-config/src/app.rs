@@ -85,6 +85,9 @@ pub struct AgentSettings {
     pub max_steps: u32,
     pub additional_instructions: Option<String>,
     pub tool_output_max_bytes: usize,
+    pub max_parallel_calls: usize,
+    /// None omits the provider parameter; false disables model-side parallel calls.
+    pub parallel_tool_calls: Option<bool>,
 }
 impl Default for AgentSettings {
     fn default() -> Self {
@@ -92,6 +95,8 @@ impl Default for AgentSettings {
             max_steps: 50,
             additional_instructions: None,
             tool_output_max_bytes: 8192,
+            max_parallel_calls: 8,
+            parallel_tool_calls: None,
         }
     }
 }

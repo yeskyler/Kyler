@@ -11,16 +11,16 @@ test("new chat precreates a real draft and lets the server bind its default work
     return Response.json({
       session_id: `server-${bodies.length}`,
       draft: true,
-      workspace_root: "/default",
+      cwd: "/default",
     });
   });
   assert.equal((await createDraftSession()).session_id, "server-1");
-  assert.equal((await createDraftSession(null)).workspace_root, "/default");
+  assert.equal((await createDraftSession(null)).cwd, "/default");
   await createDraftSession("/project");
   assert.deepEqual(bodies, [
     { draft: true, workspace_mode: "project" },
     { draft: true, workspace_mode: "project" },
-    { draft: true, workspace_mode: "project", workspace_root: "/project" },
+    { draft: true, workspace_mode: "project", cwd: "/project" },
   ]);
 });
 

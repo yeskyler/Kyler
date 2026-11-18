@@ -48,9 +48,7 @@ impl AutomationExecutor {
             .await
             .map_err(|error| ApiError::bad(&error.to_string()))?;
         // A changed symlink or model default cannot silently retarget a saved task.
-        if config.workspace_root != run.snapshot.workspace_root
-            || config.model_profile != run.snapshot.model_profile
-        {
+        if config.cwd != run.snapshot.cwd || config.model_profile != run.snapshot.model_profile {
             return Err(ApiError::bad(
                 "Saved task configuration changed; edit and save the task before running it.",
             ));
@@ -60,18 +58,11 @@ impl AutomationExecutor {
             Err(error) if error.to_string() == "session not found" => {
                 let mut session = Session::new();
                 session.session_id = run.session_id.clone();
-                session.environment =
-                    manager.environment_for_create(Some(&config.workspace_root))?;
-                if config.workspace_mode == WorkspaceMode::Project {
-                    session
-                        .environment
-                        .as_mut()
-                        .ok_or_else(|| {
-                            ApiError::bad("Task execution requires an authorized workspace.")
-                        })?
-                        .workspace_mode = WorkspaceMode::Project;
+                session.environment = manager.environment_for_create(Some(&config.cwd))?;
+                if config.workspace_mode == WorkspaceMode::Isolated {
+                    manager.allocate_session_directory(&mut session)?;
                 }
-                manager.isolate_session(&mut session).await?;
+                manager.validate_session_environment(&session)?;
                 session.state.insert(
                     "automation".into(),
                     serde_json::json!({"task_id":run.task_id,"run_id":run.id}),
@@ -125,16 +116,16 @@ impl ScheduledExecutor for AutomationExecutor {
     async fn validate(&self, config: &mut TaskConfig) -> Result<()> {
         let manager = self.manager()?;
         let snapshot = manager
-            .environment_for_create(Some(&config.workspace_root))
+            .environment_for_create(Some(&config.cwd))
             .map_err(|_| {
                 Error::Invalid(
                     "Workspace is outside the service's allowed roots or is unavailable.".into(),
                 )
             })?
             .ok_or_else(|| Error::Invalid("Automation requires an execution workspace.".into()))?;
-        config.workspace_root = snapshot.workspace_root.to_string_lossy().into_owned();
+        config.cwd = snapshot.cwd.to_string_lossy().into_owned();
         let environment = if let Some(factory) = &manager.workspaces {
-            Some(factory.create(&snapshot.workspace_root)?)
+            Some(factory.create(&snapshot.cwd)?)
         } else {
             manager.agent.execution_environment()
         };

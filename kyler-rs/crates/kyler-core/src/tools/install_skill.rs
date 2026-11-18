@@ -75,10 +75,10 @@ impl Tool for InstallSkillTool {
     async fn execute(&self, args: &str, context: &mut ToolContext<'_>) -> Result<String> {
         let request: InstallSkillRequest = serde_json::from_str(args)?;
         if let Some(environment) = context.environment {
-            environment.policy().filesystem.check_read(
-                &environment.session_environment().working_directory,
-                &request.path,
-            )?;
+            environment
+                .policy()
+                .filesystem
+                .check_read(&environment.session_environment().cwd, &request.path)?;
         }
         // The loader determines the actual destination name before publication.
         super::install_skill::check_access(

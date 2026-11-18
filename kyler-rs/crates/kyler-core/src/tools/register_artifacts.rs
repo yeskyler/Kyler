@@ -61,7 +61,7 @@ impl Tool for RegisterArtifactsTool {
         "register_artifacts"
     }
     fn description(&self) -> &str {
-        "Replace this execution's final deliverable list. Use local workspace-relative URL-encoded paths, optional display names (default source filename; missing source extensions are appended, conflicting extensions are rejected), and at most one primary file for automatic preview. Only register completed deliverables, never intermediate files or secrets. An empty list clears registration. Files are validated now and retained by the host at task completion."
+        "Replace this execution's final deliverable list. Use local cwd-relative URL-encoded paths, optional display names (default source filename; missing source extensions are appended, conflicting extensions are rejected), and at most one primary file for automatic preview. Only register completed deliverables, never intermediate files or secrets. An empty list clears registration. Files are validated now and retained by the host at task completion."
     }
     fn parameters(&self) -> Value {
         serde_json::to_value(schema_for!(RegisterArtifactsArgs)).expect("valid artifact schema")

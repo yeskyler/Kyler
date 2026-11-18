@@ -251,7 +251,7 @@ pub async fn context(
 #[derive(Serialize)]
 pub struct MemoryInspection {
     session_id: String,
-    workspace_root: Option<String>,
+    cwd: Option<String>,
     scope: String,
     summary: Option<String>,
     summary_timestamp_ms: Option<i64>,
@@ -323,10 +323,10 @@ pub async fn memory(
     }
     Ok(Json(MemoryInspection {
         session_id: id,
-        workspace_root: session
+        cwd: session
             .environment
             .as_ref()
-            .map(|e| e.workspace_root.to_string_lossy().into_owned()),
+            .map(|e| e.cwd.to_string_lossy().into_owned()),
         scope,
         summary: session.memory.summary.clone(),
         summary_timestamp_ms: session

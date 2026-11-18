@@ -191,7 +191,7 @@ export function ComposerMenu() {
               <Menu.Item
                 className={itemClass}
                 onClick={() => {
-                  if (!session.workspace_root) {
+                  if (!session.project) {
                     setNotice("Choose a workspace to upload attachments.");
                     return;
                   }

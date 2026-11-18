@@ -236,10 +236,20 @@ impl Tool for GrepFilesTool {
         CompressedToolOutput::compressed(output, content, budget)
     }
 
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Parallel
+    }
     async fn execute(
         &self,
         args_json: &str,
-        _context: &mut ToolContext<'_>,
+        context: &mut ToolContext<'_>,
+    ) -> anyhow::Result<String> {
+        self.execute_parallel(args_json, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        args_json: &str,
+        _context: &crate::tools::ParallelToolContext<'_>,
     ) -> anyhow::Result<String> {
         if let Some(environment) = _context.environment {
             return environment.run_tool(self.name(), args_json).await;

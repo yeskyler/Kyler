@@ -91,7 +91,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
             .status(),
         401
     );
-    let request = json!({"config":{"name":"Review","prompt":"Review the project","workspace_root":workspace,"workspace_mode":"project","cron":"0 9 * * *","timezone":"Asia/Shanghai","model_profile":null,"thinking":"high","permission":"workspace_access","timeout_seconds":60,"wait_timeout_seconds":30},"enabled":false,"request_id":uuid::Uuid::new_v4().to_string()});
+    let request = json!({"config":{"name":"Review","prompt":"Review the project","cwd":workspace,"workspace_mode":"project","cron":"0 9 * * *","timezone":"Asia/Shanghai","model_profile":null,"thinking":"high","permission":"workspace_access","timeout_seconds":60,"wait_timeout_seconds":30},"enabled":false,"request_id":uuid::Uuid::new_v4().to_string()});
     let mut full_request = request.clone();
     full_request["config"]["permission"] = json!("full_access");
     assert_eq!(
@@ -106,7 +106,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
         400
     );
     let mut invalid_root = request.clone();
-    invalid_root["config"]["workspace_root"] = json!("/unavailable-automation-workspace");
+    invalid_root["config"]["cwd"] = json!("/unavailable-automation-workspace");
     assert_eq!(
         client
             .post(format!("{base}/automations"))

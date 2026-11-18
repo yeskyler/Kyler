@@ -14,11 +14,15 @@ fn defaults_validation_and_unknown_fields() {
     let config = loader::parse(VALID).unwrap();
     config.validate().unwrap();
     assert_eq!(config.agent.max_steps, 50);
+    assert_eq!(config.agent.max_parallel_calls, 8);
+    assert_eq!(config.agent.parallel_tool_calls, None);
     assert!(!config.session.enabled && !config.subagent.enabled);
     assert!(loader::parse(&format!("{VALID}\n[agent]\nmax_step = 3")).is_err());
     assert!(loader::parse(&format!("{VALID}\n[embed]\nmodel = 'obsolete'")).is_err());
     for invalid in [
         "[agent]\nmax_steps=0",
+        "[agent]\nmax_parallel_calls=0",
+        "[agent]\nmax_parallel_calls=65",
         "[context]\nwindow_ratio=0.9",
         "[subagent]\npersist_sessions=true",
         "[logging]\nfilter='info['",
@@ -413,4 +417,15 @@ enable_thinking=false
         config.effective_models().profiles["fast"].enable_thinking,
         Some(false)
     );
+}
+
+#[test]
+fn parallel_execution_limit_and_model_hint_are_independent() {
+    let config = loader::parse(&format!(
+        "{VALID}\n[agent]\nmax_parallel_calls=1\nparallel_tool_calls=true"
+    ))
+    .unwrap();
+    config.validate().unwrap();
+    assert_eq!(config.agent.max_parallel_calls, 1);
+    assert_eq!(config.agent.parallel_tool_calls, Some(true));
 }

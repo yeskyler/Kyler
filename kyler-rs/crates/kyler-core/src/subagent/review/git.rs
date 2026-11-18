@@ -497,12 +497,7 @@ pub(crate) async fn execute(request: &WorkerRequest) -> Result<String> {
     let operation: GitRead = serde_json::from_value(request.arguments.clone())?;
     if let GitRead::Discover { request: target } = &operation {
         return Ok(serde_json::to_string(
-            &discover(
-                target,
-                &request.environment.workspace_root,
-                &request.filesystem,
-            )
-            .await?,
+            &discover(target, &request.environment.cwd, &request.filesystem).await?,
         )?);
     }
     let context = match &operation {
@@ -520,7 +515,7 @@ pub(crate) async fn execute(request: &WorkerRequest) -> Result<String> {
         "Review Git metadata must be host prepared"
     );
     ensure!(
-        context.worktree == request.environment.workspace_root
+        context.worktree == request.environment.cwd
             && context.worktree.starts_with(&context.repository_root)
             && context
                 .worktree

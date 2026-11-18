@@ -191,7 +191,7 @@ async fn approval_gates_side_effects_and_permissions_update_during_run() {
         .await
         .unwrap();
     std::fs::write(
-        std::path::Path::new(session.working_directory.as_ref().unwrap()).join("review-target.txt"),
+        std::path::Path::new(session.cwd.as_ref().unwrap()).join("review-target.txt"),
         "review target",
     )
     .unwrap();
@@ -269,7 +269,12 @@ async fn approval_gates_side_effects_and_permissions_update_during_run() {
     );
     assert_eq!(switched.selected.mode, PermissionMode::WorkspaceAccess);
     let completed = terminal(&http, &base, &run.run_id).await;
-    assert_eq!(completed.status, RunStatus::Completed);
+    assert_eq!(
+        completed.status,
+        RunStatus::Completed,
+        "{:?}",
+        completed.error
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     // The old approval cannot authorize an operation after a policy revision.
     assert_eq!(

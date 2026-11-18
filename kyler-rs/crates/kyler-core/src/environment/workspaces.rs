@@ -238,21 +238,23 @@ impl WorkspaceFactory {
     }
     pub fn restore(&self, snapshot: &SessionEnvironment) -> Result<Arc<ExecutionEnvironment>> {
         let restore = |factory: &Self| -> Result<Arc<ExecutionEnvironment>> {
-            if let Some(project) = &snapshot.project_root {
+            if let Some(managed) = &snapshot.managed {
+                let project = &snapshot.sandbox.base_directory;
                 return Ok(Arc::new(
                     factory
                         .create(project)?
-                        .isolated_session(&snapshot.workspace_root, project)?,
+                        .isolated_session(&managed.root, project)?
+                        .with_cwd(&snapshot.cwd)?,
                 ));
             }
-            let environment =
-                factory.build(&snapshot.workspace_root, &snapshot.working_directory)?;
-            if snapshot.workspace_mode == kyler_protocol::api::session::WorkspaceMode::Project {
-                return Ok(Arc::new(environment.as_ref().clone().project_workspace()?));
-            }
-            Ok(environment)
+            factory.build(&snapshot.sandbox.base_directory, &snapshot.cwd)
         };
-        let environment = restore(self)?;
+        let environment = Arc::new(
+            restore(self)?
+                .as_ref()
+                .clone()
+                .with_project_identity(snapshot.project.clone()),
+        );
         if environment.session_environment() != snapshot
             && self.sandbox.mode == SandboxMode::WorkspaceWrite
             && self.network
@@ -261,7 +263,12 @@ impl WorkspaceFactory {
             let mut offline = self.clone();
             offline.network = false;
             offline.sandbox.network_access = false;
-            let previous = restore(&offline)?;
+            let previous = Arc::new(
+                restore(&offline)?
+                    .as_ref()
+                    .clone()
+                    .with_project_identity(snapshot.project.clone()),
+            );
             if previous.session_environment() == snapshot {
                 return Ok(previous);
             }

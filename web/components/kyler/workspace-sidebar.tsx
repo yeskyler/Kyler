@@ -150,7 +150,7 @@ export function WorkspaceSidebar({
       setBusy(false);
     }
   }
-  async function newChat(workspace: string | null = session.workspace_root) {
+  async function newChat(workspace: string | null = session.project) {
     setBusy(true);
     setError("");
     try {
@@ -186,7 +186,7 @@ export function WorkspaceSidebar({
       await api(`workspaces/${removingProject.id}`, { method: "DELETE" });
       const remaining = workspaces.filter((item) => item.id !== removingProject.id);
       setWorkspaces(remaining);
-      if (session.workspace_root === removingProject.path) await createSession(null);
+      if (session.project === removingProject.path) await createSession(null);
       setRemovingProject(undefined);
       setVersion((value) => value + 1);
     } catch (error) {
@@ -198,7 +198,7 @@ export function WorkspaceSidebar({
   const visibleSessions = mergeSessionHistory(sessions, localSessions);
   const workspaceGroups = groupWorkspaceSessions(
     visibleSessions,
-    session.workspace_root,
+    session.project,
     workspaces,
     defaultWorkspace ?? null,
   );
@@ -291,7 +291,7 @@ export function WorkspaceSidebar({
       >
         {workspaceGroups.map((group) => {
           const key = group.path ?? "__default__";
-          const active = group.path === session.workspace_root;
+          const active = group.path === session.project;
           const matchesWorkspace = `${group.name} ${group.path ?? ""}`
             .toLowerCase()
             .includes(query.trim().toLowerCase());
@@ -446,7 +446,7 @@ export function WorkspaceSidebar({
         )}
         {query.trim() &&
           !sessions.some((item) =>
-            `${sessionTitle(item.title, item.placeholder)} ${item.workspace_root ?? "Default workspace"}`
+            `${sessionTitle(item.title, item.placeholder)} ${item.project ?? "Default workspace"}`
               .toLowerCase()
               .includes(query.trim().toLowerCase()),
           ) && <p className="px-3 py-4 text-xs text-sidebar-foreground/50">No matching chats.</p>}
@@ -488,7 +488,7 @@ export function WorkspaceSidebar({
             Removes the empty project from Kyler. The local directory and its files are kept.
           </DialogDescription>
           <p className="rounded-lg bg-muted p-3 text-sm">{removingProject?.title}</p>
-          {session.workspace_root === removingProject?.path && (
+          {session.project === removingProject?.path && (
             <p className="text-xs text-muted-foreground">The current draft will be closed.</p>
           )}
           {error && (
@@ -502,7 +502,7 @@ export function WorkspaceSidebar({
             </Button>
             <Button
               variant="destructive"
-              disabled={busy || (running && session.workspace_root === removingProject?.path)}
+              disabled={busy || (running && session.project === removingProject?.path)}
               onClick={removeProject}
             >
               Remove project

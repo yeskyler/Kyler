@@ -64,6 +64,14 @@ pub async fn apply_patch(args: ApplyPatchArgs) -> anyhow::Result<String> {
 }
 
 pub(crate) async fn apply_patch_in(root: &Path, input: &str) -> anyhow::Result<String> {
+    apply_patch_authorized(root, input, None).await
+}
+pub(crate) async fn apply_patch_authorized(
+    root: &Path,
+    input: &str,
+    policy: Option<&FilesystemPolicy>,
+) -> anyhow::Result<String> {
+    let resolve_path = |base: &Path, path: &str| resolve_authorized(base, path, policy);
     let patch = parse_patch(input)?;
     let root = std::fs::canonicalize(root)?;
     let root = root.as_path();
@@ -344,14 +352,14 @@ pub(crate) fn validate_patch_access(
     for operation in parse_patch(input)?.operations {
         match operation {
             FileOperation::Add { path, .. } | FileOperation::Delete { path } => {
-                policy.check_write(root, &resolve_path(root, &path)?)?;
+                resolve_authorized(root, &path, Some(policy))?;
             }
             FileOperation::Update {
                 path, move_path, ..
             } => {
-                policy.check_write(root, &resolve_path(root, &path)?)?;
+                resolve_authorized(root, &path, Some(policy))?;
                 if let Some(destination) = move_path {
-                    policy.check_write(root, &resolve_path(root, &destination)?)?;
+                    resolve_authorized(root, &destination, Some(policy))?;
                 }
             }
         }
@@ -438,13 +446,25 @@ fn validate_path_syntax(raw_path: &str) -> anyhow::Result<()> {
 }
 
 fn resolve_path(root: &Path, raw_path: &str) -> anyhow::Result<PathBuf> {
+    resolve_authorized(root, raw_path, None)
+}
+fn resolve_authorized(
+    root: &Path,
+    raw_path: &str,
+    policy: Option<&FilesystemPolicy>,
+) -> anyhow::Result<PathBuf> {
     validate_path_syntax(raw_path)?;
-    let root = std::fs::canonicalize(root).context("failed to resolve patch workspace")?;
-    let path = crate::sandbox::paths::resolve_path(&root, Path::new(raw_path))?;
-    anyhow::ensure!(
-        path != root && path.starts_with(&root),
-        "patch file path escapes the workspace: `{raw_path}`"
-    );
+    let cwd = std::fs::canonicalize(root).context("failed to resolve patch cwd")?;
+    let path = crate::sandbox::paths::resolve_path(&cwd, Path::new(raw_path))?;
+    anyhow::ensure!(path != cwd, "patch target must be a file");
+    if let Some(policy) = policy {
+        policy.check_write(&cwd, &path)?;
+    } else {
+        anyhow::ensure!(
+            path.starts_with(&cwd),
+            "patch file path escapes the workspace: `{raw_path}`"
+        );
+    }
     Ok(path)
 }
 
@@ -997,7 +1017,7 @@ impl Tool for ApplyPatchTool {
          Normally include three unchanged lines before and after each edit, enough to identify exactly one location. Do not duplicate overlapping context between adjacent edits; combine them into one hunk. Context lines start with one space; added/removed lines start with +/-. \
          Every added line, including blank lines, must start with +; use + alone for an empty line. \
          Use *** Delete File: path to delete and *** Move to: path after an Update header to rename. \
-         Paths are relative to workspace_root, or absolute paths inside that workspace. \
+         Paths are relative to cwd. Absolute targets must be allowed by the effective filesystem policy. \
          Do not use bare Begin Patch, File:, unified diff headers or Markdown fences."
     }
 

@@ -100,7 +100,7 @@ export function WorkspacePicker({
             }
             disabled={busy || running || browsing}
             aria-label={iconOnly ? "Add workspace" : "Choose workspace"}
-            title={iconOnly ? "Add workspace" : (session.workspace_root ?? "Choose workspace")}
+            title={iconOnly ? "Add workspace" : (session.project ?? "Choose workspace")}
           />
         }
       >
@@ -110,7 +110,7 @@ export function WorkspacePicker({
           <>
             <FolderIcon className="size-3.5" />
             <span className="truncate">
-              {session.workspace_root ? workspaceName(session.workspace_root) : "Choose workspace"}
+              {session.project ? workspaceName(session.project) : "Choose workspace"}
             </span>
             <ChevronDownIcon className="size-3" />
           </>

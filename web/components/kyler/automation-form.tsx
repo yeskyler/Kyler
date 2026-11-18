@@ -41,7 +41,7 @@ export function AutomationForm({
       task?.config ?? {
         name: "",
         prompt: "",
-        workspace_root: options.defaultWorkspace,
+        cwd: options.defaultWorkspace,
         workspace_mode: "project",
         cron: "0 9 * * *",
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -123,15 +123,12 @@ export function AutomationForm({
   }
   const roots = [
     ...new Map(
-      [
-        ...options.workspaces,
-        { path: config.workspace_root, title: workspaceLabel(config.workspace_root) },
-      ]
+      [...options.workspaces, { path: config.cwd, title: workspaceLabel(config.cwd) }]
         .filter((entry) => entry.path)
         .map((entry) => [entry.path, entry]),
     ).values(),
   ];
-  const validContent = !!config.name.trim() && !!config.prompt.trim() && !!config.workspace_root;
+  const validContent = !!config.name.trim() && !!config.prompt.trim() && !!config.cwd;
   const validExecution =
     Number.isFinite(config.timeout_seconds) &&
     config.timeout_seconds >= 1 &&
@@ -196,8 +193,8 @@ export function AutomationForm({
               <label className="block space-y-2 text-sm font-medium">
                 <span>Workspace</span>
                 <select
-                  value={config.workspace_root}
-                  onChange={(event) => change("workspace_root", event.target.value)}
+                  value={config.cwd}
+                  onChange={(event) => change("cwd", event.target.value)}
                   className={selectClass}
                 >
                   {roots.map((entry) => (
@@ -207,7 +204,7 @@ export function AutomationForm({
                   ))}
                 </select>
                 <span className="block break-all text-xs font-normal text-muted-foreground">
-                  {config.workspace_root || "Add a workspace from the sidebar first."}
+                  {config.cwd || "Add a workspace from the sidebar first."}
                 </span>
               </label>
               <fieldset className="space-y-2">
@@ -408,7 +405,7 @@ export function AutomationForm({
                   {scheduleLabel(config.cron)} · {config.timezone}
                 </p>
                 <p className="mt-1 break-all text-muted-foreground">
-                  {config.workspace_root} ·{" "}
+                  {config.cwd} ·{" "}
                   {config.workspace_mode === "project"
                     ? "Project directory"
                     : "Private directory per run"}

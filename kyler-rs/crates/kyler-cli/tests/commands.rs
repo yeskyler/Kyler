@@ -102,10 +102,10 @@ impl Fixture {
 }
 async fn session() -> Json<SessionSummary> {
     Json(SessionSummary {
+        cwd: None,
         title: None,
         draft: false,
-        workspace_root: None,
-        working_directory: None,
+        project: None,
         session_id: SESSION.into(),
         created_at: 0,
         updated_at: 0,

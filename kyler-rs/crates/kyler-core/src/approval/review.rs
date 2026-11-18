@@ -63,7 +63,7 @@ pub(crate) fn review_in_environment(
             .as_str()
             .and_then(|input| {
                 crate::tools::apply_patch::automatic_patch_targets(
-                    &environment.session_environment().workspace_root,
+                    &environment.session_environment().cwd,
                     input,
                 )
                 .ok()
@@ -75,7 +75,7 @@ pub(crate) fn review_in_environment(
                         ordinary_writable_path(
                             environment,
                             path,
-                            &environment.session_environment().workspace_root,
+                            &environment.session_environment().cwd,
                         )
                     })
             }),
@@ -151,7 +151,7 @@ fn ordinary_writable_path(
     path: &std::path::Path,
     base: &std::path::Path,
 ) -> bool {
-    let workspace = &environment.session_environment().workspace_root;
+    let workspace = &environment.session_environment().cwd;
     let logical = if path.is_absolute() {
         path.to_owned()
     } else {
@@ -206,10 +206,7 @@ fn trusted_program(
                 let directory = if directory.is_absolute() {
                     directory
                 } else {
-                    environment
-                        .session_environment()
-                        .working_directory
-                        .join(directory)
+                    environment.session_environment().cwd.join(directory)
                 };
                 directory.join(name)
             })
@@ -264,20 +261,13 @@ fn ordinary_command(
             return false;
         }
         let path = std::path::Path::new(argument);
-        if !ordinary_writable_path(
-            environment,
-            path,
-            &environment.session_environment().working_directory,
-        ) {
+        if !ordinary_writable_path(environment, path, &environment.session_environment().cwd) {
             return false;
         }
         let target = if path.is_absolute() {
             path.to_owned()
         } else {
-            environment
-                .session_environment()
-                .working_directory
-                .join(path)
+            environment.session_environment().cwd.join(path)
         };
         if name == "touch" && target.is_dir() {
             return false;
@@ -313,7 +303,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let workspace = root.path().canonicalize().unwrap();
         std::fs::create_dir_all(workspace.join("nested")).unwrap();
-        std::fs::write(workspace.join("existing.txt"), "old\n").unwrap();
+        std::fs::write(workspace.join("nested/existing.txt"), "old\n").unwrap();
         let environment = ExecutionEnvironment::new(
             &workspace,
             workspace.join("nested"),
@@ -352,7 +342,7 @@ mod tests {
         assert!(
             !environment
                 .session_environment()
-                .working_directory
+                .cwd
                 .join("assets")
                 .exists()
         );
@@ -370,13 +360,8 @@ mod tests {
             );
         }
         assert_eq!(
-            std::fs::read_to_string(
-                environment
-                    .session_environment()
-                    .workspace_root
-                    .join("existing.txt")
-            )
-            .unwrap(),
+            std::fs::read_to_string(environment.session_environment().cwd.join("existing.txt"))
+                .unwrap(),
             "old\n"
         );
     }
@@ -456,7 +441,7 @@ mod tests {
     #[test]
     fn links_shadowed_programs_and_sandbox_denials_do_not_get_auto_approval() {
         let (_root, environment) = environment();
-        let workspace = &environment.session_environment().workspace_root;
+        let workspace = &environment.session_environment().cwd;
         let outside = tempfile::tempdir().unwrap();
         std::os::unix::fs::symlink(outside.path(), workspace.join("external")).unwrap();
         std::fs::write(workspace.join(".env"), "placeholder").unwrap();

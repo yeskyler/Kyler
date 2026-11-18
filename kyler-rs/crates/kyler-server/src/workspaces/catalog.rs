@@ -47,7 +47,7 @@ impl RunManager {
         let environment = self
             .environment_for_create(Some(&request.path))?
             .ok_or_else(|| ApiError::bad("This server has no configured workspace environment."))?;
-        let directory = environment.workspace_root.to_string_lossy().into_owned();
+        let directory = environment.cwd.to_string_lossy().into_owned();
         let _guard = self.workspace_catalog.lock().await;
         let path = self.store.directory().join("_workspaces.json");
         tokio::task::spawn_blocking(move || -> Result<WorkspaceInfo> {
@@ -104,7 +104,10 @@ impl RunManager {
                 .await
                 .map_err(ApiError::storage)?;
             if session.environment.as_ref().is_some_and(|e| {
-                e.project_root.as_deref().unwrap_or(&e.workspace_root) == Path::new(&selected.path)
+                e.project_root()
+                    .map(|path| path.as_path())
+                    .unwrap_or(&e.cwd)
+                    == Path::new(&selected.path)
             }) && (!drafts.contains(&info.session_id)
                 || session.is_running()
                 || registry.active.contains_key(&info.session_id))

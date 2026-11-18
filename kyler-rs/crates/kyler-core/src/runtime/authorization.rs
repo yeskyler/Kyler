@@ -110,7 +110,7 @@ impl Agent {
                                     && host.allows_full_access())),
                     "MCP connection belongs to a different sandbox boundary."
                 );
-                let cwd = &environment.session_environment().working_directory;
+                let cwd = &environment.session_environment().cwd;
                 ensure!(
                     tool.execution_mode() != ToolExecutionMode::Unspecified,
                     "Tool has no sandbox execution strategy."
@@ -148,7 +148,7 @@ impl Agent {
                         )?;
                     }
                     "apply_patch" => crate::tools::apply_patch::validate_patch_access(
-                        &environment.session_environment().workspace_root,
+                        &environment.session_environment().cwd,
                         arguments["input"].as_str().context("Missing patch input")?,
                         &policy.filesystem,
                     )?,
@@ -242,12 +242,10 @@ impl Agent {
             operation: operation.label().into(),
             requires_user: status == ApprovalStatus::Pending,
             preview: crate::tools::output::text_prefix(&preview, 32768).to_owned(),
-            working_directory: self.environment.as_ref().map(|e| {
-                e.session_environment()
-                    .working_directory
-                    .to_string_lossy()
-                    .into_owned()
-            }),
+            working_directory: self
+                .environment
+                .as_ref()
+                .map(|e| e.session_environment().cwd.to_string_lossy().into_owned()),
             policy: policy.clone(),
             digest: format!(
                 "{:x}",

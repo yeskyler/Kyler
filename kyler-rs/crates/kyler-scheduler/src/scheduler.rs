@@ -335,9 +335,7 @@ pub fn validate(config: &TaskConfig) -> Result<()> {
         invalid("Instructions must contain 1 to 32000 bytes.")
     );
     ensure!(
-        !config.workspace_root.is_empty()
-            && config.workspace_root.len() <= 4096
-            && !config.workspace_root.contains('\0'),
+        !config.cwd.is_empty() && config.cwd.len() <= 4096 && !config.cwd.contains('\0'),
         invalid("Choose a workspace.")
     );
     ensure!(

@@ -123,7 +123,7 @@ async fn snapshot(state: &AppState, session: &str) -> ApiResult<Vec<TaskInfo>> {
             working_directory: saved
                 .environment
                 .as_ref()
-                .map(|environment| environment.working_directory.to_string_lossy().into_owned()),
+                .map(|environment| environment.cwd.to_string_lossy().into_owned()),
             exit_code: None,
             total_tokens: Some(u64::from(task.usage.total_tokens)),
             output: task

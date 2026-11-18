@@ -24,7 +24,7 @@ export function workspaceName(path: string | null) {
   return path?.split("/").filter(Boolean).at(-1) ?? "Default workspace";
 }
 
-export function groupWorkspaceSessions<T extends { workspace_root: string | null }>(
+export function groupWorkspaceSessions<T extends { project: string | null }>(
   sessions: T[],
   current: string | null,
   workspaces: { path: string; title: string }[] = [],
@@ -43,7 +43,7 @@ export function groupWorkspaceSessions<T extends { workspace_root: string | null
     if (!groups.has(workspace.path))
       groups.set(workspace.path, { path: workspace.path, name: workspace.title, sessions: [] });
   for (const session of sessions) {
-    const path = session.workspace_root;
+    const path = session.project;
     if (!groups.has(path))
       groups.set(path, { path, name: titles.get(path ?? "") ?? workspaceName(path), sessions: [] });
     groups.get(path)!.sessions.push(session);

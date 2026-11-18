@@ -85,10 +85,10 @@ async fn managed_background_server_starts_reuses_restarts_and_stops_by_identity(
     );
     let client = h.client();
     let first = client.info().await.unwrap();
-    assert!(first.workspace_root.is_none());
+    assert!(first.cwd.is_none());
     let session = client.create_session_in(h.root.path()).await.unwrap();
     assert_eq!(
-        session.workspace_root.as_deref(),
+        session.project.as_deref(),
         Some(h.root.path().canonicalize().unwrap().to_str().unwrap())
     );
     let out = h.call(&["service", "start"]).await;
@@ -118,12 +118,8 @@ async fn managed_background_server_starts_reuses_restarts_and_stops_by_identity(
     assert_ne!(next.instance_id, first.instance_id);
     assert_eq!(next.model, "test");
     assert_eq!(
-        client
-            .session(&session.session_id)
-            .await
-            .unwrap()
-            .workspace_root,
-        session.workspace_root
+        client.session(&session.session_id).await.unwrap().project,
+        session.project
     );
     // A stale identity must never shut down the current instance.
     assert_eq!(

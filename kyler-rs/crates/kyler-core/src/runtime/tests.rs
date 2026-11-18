@@ -1,3 +1,4 @@
+mod concurrency;
 mod review;
 use super::Agent;
 use crate::{
@@ -583,6 +584,8 @@ async fn application_config_constructs_runtime_services_and_configured_tools() {
     config.agent.max_steps = 3;
     config.agent.additional_instructions = Some("Application instructions from config.".into());
     config.agent.tool_output_max_bytes = 1234;
+    config.agent.max_parallel_calls = 3;
+    config.agent.parallel_tool_calls = Some(true);
     config.context.output_tokens = 512;
     config.session.enabled = true;
     config.session.directory = directory.path().join("sessions");
@@ -593,6 +596,8 @@ async fn application_config_constructs_runtime_services_and_configured_tools() {
     assert_eq!(agent.max_steps, 3);
     assert_eq!(agent.context_policy.output_tokens, 512);
     assert_eq!(agent.tool_output_budget.max_bytes, 1234);
+    assert_eq!(agent.max_parallel_calls, 3);
+    assert_eq!(agent.parallel_tool_calls, Some(true));
     assert!(agent.toolbox.contains_key("delegate_task"));
     let process_agent = agent
         .clone()

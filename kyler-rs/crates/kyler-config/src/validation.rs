@@ -21,6 +21,10 @@ impl AppConfig {
             (1..=64 * 1024 * 1024).contains(&self.agent.tool_output_max_bytes),
             "agent.tool_output_max_bytes must be in 1..=67108864"
         );
+        ensure!(
+            (1..=64).contains(&self.agent.max_parallel_calls),
+            "agent.max_parallel_calls must be in 1..=64"
+        );
         let c = &self.context;
         ensure!(
             c.window_ratio > 0.0 && c.window_ratio < c.trigger_ratio && c.trigger_ratio < 1.0,

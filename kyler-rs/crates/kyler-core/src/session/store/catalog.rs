@@ -40,19 +40,17 @@ pub fn summary(session: &Session) -> SessionSummary {
             _ => None,
         });
     SessionSummary {
-        title,
-        draft: false,
-        workspace_root: session.environment.as_ref().map(|e| {
-            e.project_root
-                .as_ref()
-                .unwrap_or(&e.workspace_root)
-                .to_string_lossy()
-                .into_owned()
-        }),
-        working_directory: session
+        cwd: session
             .environment
             .as_ref()
-            .map(|e| e.working_directory.to_string_lossy().into_owned()),
+            .map(|e| e.cwd.to_string_lossy().into_owned()),
+        title,
+        draft: false,
+        project: session
+            .environment
+            .as_ref()
+            .and_then(|e| e.project_root())
+            .map(|path| path.to_string_lossy().into_owned()),
         session_id: session.session_id.clone(),
         created_at: session.created_at,
         updated_at: session.updated_at,
@@ -94,12 +92,24 @@ impl Catalog {
         )?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
         ensure!(
-            version <= 1,
+            version <= 3,
             "Application database schema is newer than this binary"
         );
         if version == 0 {
             connection.execute_batch(include_str!("catalog.sql"))?;
+        } else if version < 3 {
+            connection.execute_batch("BEGIN IMMEDIATE;")?;
+            let current: i64 =
+                connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            if current == 1 {
+                connection.execute_batch("ALTER TABLE sessions ADD COLUMN cwd TEXT;")?;
+            }
+            if current < 3 {
+                connection.execute_batch("ALTER TABLE sessions ADD COLUMN project TEXT; ALTER TABLE sessions DROP COLUMN workspace_root; ALTER TABLE sessions DROP COLUMN workspace_mode; UPDATE sessions SET signature=''; PRAGMA user_version=3;")?;
+            }
+            connection.execute_batch("COMMIT;")?;
         }
+
         Ok(Self {
             connection: Mutex::new(connection),
             scope: root.to_string_lossy().into_owned(),
@@ -124,11 +134,6 @@ impl Catalog {
     pub fn upsert(&self, root: &Path, session: &Session) -> Result<()> {
         let item = summary(session);
         let json = serde_json::to_string(&item)?;
-        let mode = session
-            .environment
-            .as_ref()
-            .map(|e| serde_json::to_string(&e.workspace_mode))
-            .transpose()?;
         let preview = session
             .events
             .iter()
@@ -142,7 +147,7 @@ impl Catalog {
                 }
                 _ => None,
             });
-        self.lock()?.execute("INSERT INTO sessions(scope,session_id,title,workspace_root,workspace_mode,created_at,updated_at,revision,signature,summary_json,last_message_preview,is_draft) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(scope,session_id) DO UPDATE SET title=excluded.title,workspace_root=excluded.workspace_root,workspace_mode=excluded.workspace_mode,updated_at=excluded.updated_at,revision=excluded.revision,signature=excluded.signature,summary_json=excluded.summary_json,last_message_preview=excluded.last_message_preview,is_draft=excluded.is_draft",params![self.scope,session.session_id,item.title,item.workspace_root,mode,item.created_at,item.updated_at,session.revision as i64,Self::signature(root,&session.session_id)?,json,preview,root.join("_runs").join(format!("{}.draft",session.session_id)).exists()])?;
+        self.lock()?.execute("INSERT INTO sessions(scope,session_id,title,cwd,project,created_at,updated_at,revision,signature,summary_json,last_message_preview,is_draft) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(scope,session_id) DO UPDATE SET title=excluded.title,cwd=excluded.cwd,project=excluded.project,updated_at=excluded.updated_at,revision=excluded.revision,signature=excluded.signature,summary_json=excluded.summary_json,last_message_preview=excluded.last_message_preview,is_draft=excluded.is_draft",params![self.scope,session.session_id,item.title,item.cwd,item.project,item.created_at,item.updated_at,session.revision as i64,Self::signature(root,&session.session_id)?,json,preview,root.join("_runs").join(format!("{}.draft",session.session_id)).exists()])?;
         Ok(())
     }
     pub fn reconcile(&self, root: &Path) -> Result<()> {
@@ -457,5 +462,76 @@ mod tests {
         drop(store);
         let restored = SessionStore::new(&directory).await.unwrap();
         assert_eq!(restored.list().await.unwrap().len(), 1);
+    }
+    #[tokio::test]
+    async fn old_indexes_drop_obsolete_columns_without_losing_preferences() {
+        for version in [1, 2] {
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("sessions");
+            fs::create_dir(&directory).unwrap();
+            let directory = directory.canonicalize().unwrap();
+            let database = root.path().join("app.sqlite3");
+            let connection = Connection::open(&database).unwrap();
+            let old_schema = include_str!("catalog.sql")
+                .replace(
+                    "cwd TEXT, project TEXT,",
+                    if version == 1 {
+                        "workspace_root TEXT, workspace_mode TEXT,"
+                    } else {
+                        "cwd TEXT, workspace_root TEXT, workspace_mode TEXT,"
+                    },
+                )
+                .replace("user_version=3", &format!("user_version={version}"));
+            connection.execute_batch(&old_schema).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO ui_preferences(scope,sidebar_collapsed,revision) VALUES(?,1,7)",
+                    [directory.to_string_lossy().as_ref()],
+                )
+                .unwrap();
+            drop(connection);
+            let mut session = Session::new();
+            session.environment = Some(
+                serde_json::from_value(serde_json::json!({
+                    "cwd":root.path(),
+                    "sandbox":{"base_directory":root.path(),"policy_id":"fixture"}
+                }))
+                .unwrap(),
+            );
+            fs::write(
+                directory.join(format!("{}.json", session.session_id)),
+                serde_json::to_vec(&session).unwrap(),
+            )
+            .unwrap();
+            let store = SessionStore::new(&directory).await.unwrap();
+            assert_eq!(
+                store.page(0, 50).await.unwrap().sessions[0].cwd.as_deref(),
+                root.path().to_str()
+            );
+            assert!(store.catalog().preferences().unwrap().sidebar_collapsed);
+            assert_eq!(store.catalog().preferences().unwrap().revision, 7);
+            let connection = Connection::open(database).unwrap();
+            assert_eq!(
+                connection
+                    .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                3
+            );
+            connection
+                .prepare("SELECT cwd,project FROM sessions")
+                .unwrap();
+            assert!(
+                connection
+                    .prepare("SELECT workspace_root FROM sessions")
+                    .is_err()
+            );
+            assert!(
+                connection
+                    .prepare("SELECT workspace_mode FROM sessions")
+                    .is_err()
+            );
+            drop(store);
+            assert!(SessionStore::new(&directory).await.is_ok());
+        }
     }
 }

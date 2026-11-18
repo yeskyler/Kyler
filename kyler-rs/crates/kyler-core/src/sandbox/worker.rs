@@ -2,7 +2,7 @@ use super::{WorkerRequest, WorkerResponse};
 use crate::{
     attachments::AttachmentStore,
     tools::{
-        apply_patch::{ApplyPatchArgs, apply_patch_in, validate_patch_access},
+        apply_patch::{ApplyPatchArgs, apply_patch_authorized, validate_patch_access},
         grep_files::{GrepFilesArgs, grep_files},
         list_dir::{ListDirArgs, list_dir},
         read_file::{ReadFileArgs, read_file},
@@ -48,7 +48,7 @@ async fn execute(
     request: WorkerRequest,
     mut control: Option<UnboundedReceiver<super::ProcessInput>>,
 ) -> Result<String> {
-    let cwd = &request.environment.working_directory;
+    let cwd = &request.environment.cwd;
     let fs = &request.filesystem;
     match request.tool.as_str() {
         "sandbox_diagnostics" => super::diagnostics::probe(request.arguments).await,
@@ -112,8 +112,8 @@ async fn execute(
         }
         "apply_patch" => {
             let args: ApplyPatchArgs = serde_json::from_value(request.arguments)?;
-            validate_patch_access(&request.environment.workspace_root, &args.input, fs)?;
-            apply_patch_in(&request.environment.workspace_root, &args.input).await
+            validate_patch_access(&request.environment.cwd, &args.input, fs)?;
+            apply_patch_authorized(&request.environment.cwd, &args.input, Some(fs)).await
         }
         "run_command" => {
             ensure!(

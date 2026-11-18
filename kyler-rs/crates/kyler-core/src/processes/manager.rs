@@ -84,7 +84,7 @@ impl ProcessManager {
             "Sandbox blocks commands"
         );
         command.directory(
-            &environment.session_environment().working_directory,
+            &environment.session_environment().cwd,
             &environment.policy().filesystem,
         )?;
         if let Some(timeout) = command.timeout_ms {
@@ -179,7 +179,7 @@ impl ProcessManager {
             command: command.chars().take(160).collect(),
             working_directory: serde_json::from_value::<RunCommandArgs>(args.clone())?
                 .directory(
-                    &environment.session_environment().working_directory,
+                    &environment.session_environment().cwd,
                     &environment.policy().filesystem,
                 )?
                 .to_string_lossy()

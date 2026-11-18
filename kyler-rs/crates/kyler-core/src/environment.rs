@@ -16,20 +16,37 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
-/// Persisted directory context and policy identity, never the authority to grant access.
+/// Project identity is metadata, never an additional readable or writable root.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectIdentity {
+    pub root: PathBuf,
+}
+/// A host binding is revalidated against current host policy on every restore.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxBinding {
+    pub base_directory: PathBuf,
+    pub policy_id: String,
+}
+/// Directory ownership is independent of the command's current directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedDirectory {
+    pub root: PathBuf,
+}
+/// Only cwd is an execution default. Other paths identify metadata and host bindings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionEnvironment {
-    /// Optional project grouping; it does not grant filesystem access.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_root: Option<PathBuf>,
-    #[serde(
-        default,
-        skip_serializing_if = "kyler_protocol::api::session::WorkspaceMode::is_isolated"
-    )]
-    pub workspace_mode: kyler_protocol::api::session::WorkspaceMode,
-    pub workspace_root: PathBuf,
-    pub working_directory: PathBuf,
-    pub sandbox_policy_id: String,
+    pub cwd: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed: Option<ManagedDirectory>,
+    pub sandbox: SandboxBinding,
+}
+impl SessionEnvironment {
+    pub fn project_root(&self) -> Option<&PathBuf> {
+        self.project.as_ref().map(|project| &project.root)
+    }
 }
 /// Immutable, host-authorized environment shared by parent and children.
 #[derive(Clone)]
@@ -65,8 +82,8 @@ impl ExecutionEnvironment {
         let workspace = std::fs::canonicalize(workspace)?;
         let cwd = resolve_path(&workspace, cwd.as_ref())?;
         ensure!(
-            workspace.is_dir() && cwd.is_dir() && cwd.starts_with(&workspace),
-            "working directory must be an existing directory in the workspace"
+            workspace.is_dir() && cwd.is_dir(),
+            "cwd must be an existing directory"
         );
         policy.validate()?;
         policy.filesystem.normalize()?;
@@ -111,11 +128,15 @@ impl ExecutionEnvironment {
         }
         Ok(Self {
             snapshot: SessionEnvironment {
-                project_root: None,
-                workspace_mode: Default::default(),
-                workspace_root: workspace,
-                working_directory: cwd,
-                sandbox_policy_id: policy.id.clone(),
+                project: Some(ProjectIdentity {
+                    root: workspace.clone(),
+                }),
+                managed: None,
+                sandbox: SandboxBinding {
+                    base_directory: workspace,
+                    policy_id: policy.id.clone(),
+                },
+                cwd,
             },
             policy,
             worker_path: worker,
@@ -124,21 +145,26 @@ impl ExecutionEnvironment {
             narrowing_protected_paths: Vec::new(),
         })
     }
-    /// Rebind execution to a private directory. Project identity never becomes a readable root.
-    /// Keep execution in the host-authorized project instead of a private copy.
-    pub fn project_workspace(mut self) -> Result<Self> {
-        ensure!(
-            self.snapshot.project_root.is_none(),
-            "an isolated workspace cannot become a project workspace"
-        );
-        ensure!(
-            self.snapshot.workspace_root == self.snapshot.working_directory,
-            "project workspace must execute at its root"
-        );
-        self.snapshot.workspace_mode = kyler_protocol::api::session::WorkspaceMode::Project;
+    /// Replace grouping metadata without changing execution permissions.
+    pub fn with_project_identity(mut self, project: Option<ProjectIdentity>) -> Self {
+        self.snapshot.project = project;
+        self
+    }
+    /// Select a default directory without granting additional filesystem access.
+    pub fn with_cwd(mut self, cwd: &Path) -> Result<Self> {
+        let cwd = self.policy.filesystem.check_read(&self.snapshot.cwd, cwd)?;
+        ensure!(cwd.is_dir(), "cwd must be an existing readable directory");
+        if let Some(managed) = &self.snapshot.managed {
+            ensure!(
+                cwd.starts_with(&managed.root),
+                "cwd is outside its managed directory"
+            );
+        }
+        self.snapshot.cwd = cwd;
         Ok(self)
     }
 
+    /// Allocate no files: bind an existing private directory within the host policy.
     pub fn isolated_session(&self, directory: &Path, project: &Path) -> Result<Self> {
         let root = directory.canonicalize()?;
         let project = project.canonicalize()?;
@@ -149,7 +175,7 @@ impl ExecutionEnvironment {
         };
         policy.id = format!("{}:session-isolation-v1", self.policy.id);
         for protected in &self.policy.filesystem.write_protected_paths {
-            if let Ok(relative) = protected.strip_prefix(&self.snapshot.workspace_root) {
+            if let Ok(relative) = protected.strip_prefix(&self.snapshot.cwd) {
                 policy.filesystem.readonly_paths.push(root.join(relative));
                 policy
                     .filesystem
@@ -166,7 +192,7 @@ impl ExecutionEnvironment {
             .denied_paths
             .extend(self.narrowing_protected_paths.clone());
         for denied in &self.policy.filesystem.denied_paths {
-            if let Ok(relative) = denied.strip_prefix(&self.snapshot.workspace_root) {
+            if let Ok(relative) = denied.strip_prefix(&self.snapshot.cwd) {
                 policy.filesystem.denied_paths.push(root.join(relative));
             }
         }
@@ -194,7 +220,9 @@ impl ExecutionEnvironment {
             Arc::new(RestrictingSandbox)
         };
         let mut environment = Self::new(&root, &root, policy, &self.worker_path, backend)?;
-        environment.snapshot.project_root = Some(project);
+        environment.snapshot.project = Some(ProjectIdentity { root: project });
+        environment.snapshot.managed = Some(ManagedDirectory { root: root.clone() });
+        environment.snapshot.sandbox.base_directory = self.snapshot.sandbox.base_directory.clone();
         Ok(environment)
     }
     /// Build minimal Git metadata without repository hooks, filters or external helpers.
@@ -203,7 +231,7 @@ impl ExecutionEnvironment {
         discovery: &crate::subagent::review::git::Discovery,
     ) -> Result<tempfile::TempDir> {
         let filesystem = &self.policy.filesystem;
-        let root = &self.snapshot.workspace_root;
+        let root = &self.snapshot.cwd;
         let objects = filesystem.check_read(root, &discovery.common_dir.join("objects"))?;
         let directory = tempfile::Builder::new()
             .prefix("review-git-")
@@ -285,13 +313,12 @@ impl ExecutionEnvironment {
             return self.clone();
         }
         let mut environment = self.clone();
-        let mut policy =
-            SandboxPolicy::workspace_write(&self.policy.id, &self.snapshot.workspace_root);
+        let mut policy = SandboxPolicy::workspace_write(&self.policy.id, &self.snapshot.cwd);
         policy.network = NetworkAccess::AllowOutbound;
         policy.filesystem.readonly_paths.push(PathBuf::from("/"));
         policy.filesystem.denied_paths = self.narrowing_protected_paths.clone();
         for name in [".git", ".agents", ".codex", ".kyler/config.toml"] {
-            let path = self.snapshot.workspace_root.join(name);
+            let path = self.snapshot.cwd.join(name);
             policy.filesystem.readonly_paths.push(path.clone());
             policy.filesystem.write_protected_paths.push(path);
         }
@@ -383,7 +410,7 @@ mod isolation_tests {
         .unwrap();
         let isolated = base.isolated_session(&private, &project).unwrap();
         assert_eq!(isolated.policy().mode, SandboxMode::WorkspaceWrite);
-        let own = &isolated.session_environment().workspace_root;
+        let own = &isolated.session_environment().cwd;
         assert!(
             isolated
                 .policy()

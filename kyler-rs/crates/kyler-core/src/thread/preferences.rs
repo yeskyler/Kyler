@@ -197,7 +197,7 @@ impl ThreadHandle {
             options,
             workspace: environment
                 .as_ref()
-                .map(|e| e.session_environment().workspace_root.display().to_string()),
+                .map(|e| e.session_environment().cwd.display().to_string()),
             ceiling: format!(
                 "Default sandbox: {}. Full access requires explicit confirmation and host authorization.",
                 host.map(|mode| mode.label()).unwrap_or("unavailable")

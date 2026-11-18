@@ -53,7 +53,17 @@ impl Tool for SkillsResourceTool {
         let compact = fit_entries(content.len(), budget, render)?;
         CompressedToolOutput::compressed(output, compact, budget)
     }
-    async fn execute(&self, args: &str, _: &mut ToolContext<'_>) -> anyhow::Result<String> {
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Parallel
+    }
+    async fn execute(&self, args: &str, context: &mut ToolContext<'_>) -> anyhow::Result<String> {
+        self.execute_parallel(args, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        args: &str,
+        _: &crate::tools::ParallelToolContext<'_>,
+    ) -> anyhow::Result<String> {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Args {

@@ -71,7 +71,7 @@ export type RolloutPage = {
 export type RolloutDetail = { item: RolloutItem; data: Record<string, unknown> };
 export type MemoryInspection = {
   session_id: string;
-  workspace_root: string | null;
+  cwd: string | null;
   scope: string;
   summary: string | null;
   summary_timestamp_ms: number | null;

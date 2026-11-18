@@ -180,22 +180,30 @@ impl RunManager {
         if let Some(factory) = &self.workspaces {
             let default = self.default_workspace.as_deref().and_then(Path::to_str);
             let path = workspace.or(default).ok_or_else(|| {
-                ApiError::bad(
-                    "workspace_root is required; create the session from its project directory.",
-                )
+                ApiError::bad("cwd is required; create the session from its project directory.")
             })?;
             let environment=factory.create(Path::new(path)).map_err(|_|ApiError::bad("Workspace must be an existing absolute directory inside the server's allowed roots."))?;
             return Ok(Some(environment.session_environment().clone()));
         }
-        let active = self.agent.workspace_environment();
         if let Some(requested) = workspace {
-            if active.is_none_or(|snapshot| snapshot.workspace_root != Path::new(requested)) {
-                return Err(ApiError::bad(
-                    "This server does not authorize the requested session workspace.",
-                ));
+            let path = Path::new(requested);
+            if !path.is_absolute() {
+                return Err(ApiError::bad("cwd must be absolute."));
             }
+            let environment = self
+                .agent
+                .execution_environment()
+                .ok_or_else(|| ApiError::bad("This service has no execution directory."))?;
+            return environment
+                .as_ref()
+                .clone()
+                .with_cwd(path)
+                .map(|environment| Some(environment.session_environment().clone()))
+                .map_err(|_| {
+                    ApiError::bad("cwd is outside the host's readable boundary or is unavailable.")
+                });
         }
-        Ok(active.cloned())
+        Ok(self.agent.workspace_environment().cloned())
     }
     pub(crate) fn agent_for_session(&self, session: &Session) -> ApiResult<Agent> {
         let mut agent = self
@@ -210,25 +218,15 @@ impl RunManager {
             if let Some(environment) = agent.execution_environment() {
                 let mut protected = self.protected_paths.clone();
                 // Private execution is inside the store, but its parent metadata is not readable.
-                if environment.session_environment().project_root.is_none() {
+                if environment.session_environment().managed.is_none() {
                     protected.push(self.store.directory().to_path_buf());
                 }
-                if let Some(project) = &environment.session_environment().project_root {
+                if let Some(project) = &environment.session_environment().project_root() {
                     if let Ok(relative) = self.store.directory().strip_prefix(project) {
-                        protected.push(
-                            environment
-                                .session_environment()
-                                .workspace_root
-                                .join(relative),
-                        );
+                        protected.push(environment.session_environment().cwd.join(relative));
                     }
                 }
-                protected.retain(|path| {
-                    !environment
-                        .session_environment()
-                        .workspace_root
-                        .starts_with(path)
-                });
+                protected.retain(|path| !environment.session_environment().cwd.starts_with(path));
                 if let Some((source, _)) =
                     &*self.model_source.read().map_err(|_| ApiError::internal())?
                 {

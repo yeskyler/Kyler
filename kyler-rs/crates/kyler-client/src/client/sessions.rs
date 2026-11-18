@@ -18,6 +18,24 @@ impl Client {
         self.json(self.request(Method::GET, &format!("/v1/sessions/{id}/usage")))
             .await
     }
+    /// Create a session directly in an authorized working directory.
+    pub async fn create_session_at(&self, cwd: &Path) -> Result<SessionSummary> {
+        if !cwd.is_absolute() {
+            return Err(Error::invalid("cwd must be an absolute path."));
+        }
+        let path = cwd
+            .to_str()
+            .ok_or_else(|| Error::invalid("cwd must be UTF-8."))?;
+        self.json(
+            self.request(Method::POST, "/v1/sessions")
+                .json(&CreateSessionRequest {
+                    cwd: Some(path.into()),
+                    draft: false,
+                    workspace_mode: None,
+                }),
+        )
+        .await
+    }
     pub async fn create_session_in(&self, workspace: &Path) -> Result<SessionSummary> {
         self.create_session_with_mode(workspace, WorkspaceMode::Isolated)
             .await
@@ -40,9 +58,9 @@ impl Client {
         self.json(
             self.request(Method::POST, "/v1/sessions")
                 .json(&CreateSessionRequest {
-                    workspace_root: Some(path.into()),
+                    cwd: Some(path.into()),
                     draft: false,
-                    workspace_mode,
+                    workspace_mode: Some(workspace_mode),
                 }),
         )
         .await

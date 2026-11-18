@@ -103,11 +103,7 @@ async fn local_thread_streams_persists_and_resumes_its_original_workspace() {
         .await
         .unwrap();
     assert_eq!(
-        resumed
-            .session_configured
-            .environment
-            .unwrap()
-            .working_directory,
+        resumed.session_configured.environment.unwrap().cwd,
         root.path().canonicalize().unwrap()
     );
     assert!(!resumed.thread.session().await.events.is_empty());

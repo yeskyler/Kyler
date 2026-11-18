@@ -216,7 +216,7 @@ fn supervise(mut request: SandboxRequest, cancel: Arc<AtomicBool>) -> Result<Wor
         request
             .worker_request
             .environment
-            .working_directory
+            .cwd
             .to_string_lossy()
             .into_owned(),
     );

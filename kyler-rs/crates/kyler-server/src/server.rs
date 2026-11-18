@@ -101,11 +101,8 @@ impl Server {
         let runs =
             Arc::get_mut(&mut server.state.runs).expect("new manager has no external owners");
         runs.workspaces = factory;
-        runs.default_workspace = default_workspace.or_else(|| {
-            runs.agent
-                .workspace_environment()
-                .map(|e| e.workspace_root.clone())
-        });
+        runs.default_workspace =
+            default_workspace.or_else(|| runs.agent.workspace_environment().map(|e| e.cwd.clone()));
         runs.approval_settings = config.approval.clone();
         for path in [&config.skills.state_file, &config.skills.user_directory] {
             if path.is_absolute() {

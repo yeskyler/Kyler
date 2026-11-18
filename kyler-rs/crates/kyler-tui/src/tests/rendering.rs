@@ -154,7 +154,12 @@ fn narrow_layouts_resize_without_losing_draft_and_wrap_graphemes() {
 #[test]
 fn older_server_without_window_metadata_does_not_infer_a_ratio() {
     let mut state = ready();
-    state.info=Some(serde_json::from_value(serde_json::json!({"model":"legacy-model","context_window_tokens":64000,"workspace_root":null,"working_directory":null})).unwrap());
+    state.info = Some(
+        serde_json::from_value(
+            serde_json::json!({"model":"legacy-model","context_window_tokens":64000,"cwd":null}),
+        )
+        .unwrap(),
+    );
     assert_eq!(
         status::text(&state),
         "Read-only · Workspace access · Full access"

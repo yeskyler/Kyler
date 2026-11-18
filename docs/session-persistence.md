@@ -35,7 +35,7 @@ conversation history.
 
 ## Responsibilities and consistency
 
-- `sessions` indexes ID, title, workspace/layout, timestamps, revision, message
+- `sessions` indexes ID, title, cwd, project/layout, timestamps, revision, message
   counts, a bounded ordinary-message preview, and draft visibility. Session-list
   pagination queries SQLite rather than replaying each conversation.
 - `session_runs` indexes durable run-manifest status, execution identity, timestamps,
@@ -80,3 +80,20 @@ run's full final output is fetched/returned even when transient replay is gone.
 A network/replay error alone never cancels a backend task; explicit Stop still does.
 Server restart recovers recorded history and terminal/interrupted status rather
 than automatically rerunning tools or restoring OS processes.
+
+## Directory format and database migration
+
+Session environments use `cwd` as their execution directory. Optional `project`
+metadata groups sessions, and `managed.root` records host-owned private directories.
+The removed directory aliases are not accepted in saved environments or creation
+requests. Export or explicitly migrate old-format histories and automation records
+before upgrading; the service does not relocate or delete them automatically.
+Deleting a session never deletes an unmanaged project directory. Artifact snapshots
+retain their session/execution ownership independently of cwd.
+
+Application database schema version 3 stores `cwd` and `project` and removes the
+obsolete directory columns. Versions 1 and 2 migrate automatically and session
+summaries rebuild from authoritative history; shared Web preferences remain intact.
+Older binaries cannot open schema version 3. Before upgrading, stop services and
+back up both databases and the session store if rollback is required. Do not
+downgrade against the upgraded data.

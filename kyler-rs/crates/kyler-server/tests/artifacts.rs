@@ -44,7 +44,7 @@ async fn final_response_files_are_retained_authorized_replayed_and_deleted_with_
         .unwrap()
         .environment
         .unwrap()
-        .workspace_root;
+        .cwd;
     std::fs::write(
         private.join("\u{62a5}\u{544a}.pptx"),
         b"immutable-presentation",
@@ -177,13 +177,14 @@ async fn final_response_files_are_retained_authorized_replayed_and_deleted_with_
         assert_eq!(bytes.as_ref(), b"workspace notes");
     }
     let mut isolated = kyler_core::session::Session::new();
-    isolated.environment = Some(kyler_core::environment::SessionEnvironment {
-        project_root: None,
-        workspace_root: h.root.path().join("other-workspace"),
-        working_directory: h.root.path().join("other-workspace"),
-        sandbox_policy_id: "isolated".into(),
-        workspace_mode: Default::default(),
-    });
+    isolated.environment = Some(
+        serde_json::from_value(serde_json::json!({
+            "cwd":h.root.path().join("other-workspace"),
+            "sandbox":{"base_directory":h.root.path().join("other-workspace"),"policy_id":"isolated"}
+
+        }))
+        .unwrap(),
+    );
     h.store.save(&mut isolated).await.unwrap();
     let separate: WorkspaceFiles = h
         .client

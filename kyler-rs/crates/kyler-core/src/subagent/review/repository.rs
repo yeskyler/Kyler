@@ -48,7 +48,7 @@ impl Repository {
         let metadata = environment.prepare_review_git(&discovery)?;
         let git = GitContext {
             directory: metadata.path().to_path_buf(),
-            worktree: environment.session_environment().workspace_root.clone(),
+            worktree: environment.session_environment().cwd.clone(),
             repository_root: discovery.root,
             prefix: discovery.prefix,
             head: discovery.head,

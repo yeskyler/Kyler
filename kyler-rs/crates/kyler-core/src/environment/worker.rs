@@ -104,7 +104,7 @@ impl ExecutionEnvironment {
             let command: crate::tools::shell::RunCommandArgs =
                 serde_json::from_value(arguments.clone())?;
             command.validate()?;
-            command.directory(&self.snapshot.working_directory, &filesystem)?;
+            command.directory(&self.snapshot.cwd, &filesystem)?;
             if let Some(timeout) = command.timeout_ms {
                 ensure!(
                     timeout <= policy.process.timeout_ms,

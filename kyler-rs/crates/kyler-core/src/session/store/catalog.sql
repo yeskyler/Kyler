@@ -1,7 +1,6 @@
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS sessions (
- scope TEXT NOT NULL, session_id TEXT NOT NULL, title TEXT, workspace_root TEXT,
- workspace_mode TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+ scope TEXT NOT NULL, session_id TEXT NOT NULL, title TEXT, cwd TEXT, project TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
  revision INTEGER NOT NULL, signature TEXT NOT NULL, summary_json TEXT NOT NULL,
  last_message_preview TEXT, is_draft INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(scope,session_id)
@@ -18,5 +17,5 @@ CREATE TABLE IF NOT EXISTS ui_preferences (
  scope TEXT PRIMARY KEY, last_session_id TEXT, sidebar_collapsed INTEGER NOT NULL DEFAULT 0,
  revision INTEGER NOT NULL DEFAULT 0
 );
-PRAGMA user_version=1;
+PRAGMA user_version=3;
 COMMIT;

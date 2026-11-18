@@ -136,7 +136,17 @@ impl Tool for ExecCommandTool {
     fn execution_mode(&self) -> ToolExecutionMode {
         ToolExecutionMode::ManagedProcess
     }
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Parallel
+    }
     async fn execute(&self, args: &str, context: &mut ToolContext<'_>) -> Result<String> {
+        self.execute_parallel(args, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        args: &str,
+        context: &crate::tools::ParallelToolContext<'_>,
+    ) -> Result<String> {
         let command = serde_json::from_str::<ExecCommandArgs>(args)?.into_command()?;
         let manager = context
             .processes

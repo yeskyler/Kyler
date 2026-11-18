@@ -13,7 +13,7 @@ pub(crate) fn config() -> TaskConfig {
     TaskConfig {
         name: "Daily review".into(),
         prompt: "Review changes".into(),
-        workspace_root: "/project".into(),
+        cwd: "/project".into(),
         workspace_mode: WorkspaceMode::Project,
         cron: "* * * * *".into(),
         timezone: "UTC".into(),

@@ -39,8 +39,7 @@ pub struct ServerInfo {
     pub sliding_window_tokens: Option<usize>,
     #[serde(default)]
     pub default_workspace: Option<String>,
-    pub workspace_root: Option<String>,
-    pub working_directory: Option<String>,
+    pub cwd: Option<String>,
 }
 /// Persisted session-wide provider usage, including accounted delegated work.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

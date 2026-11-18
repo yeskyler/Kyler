@@ -176,7 +176,7 @@ async fn review_is_delegated_collected_and_persisted_through_the_server() {
         .unwrap()
         .environment
         .unwrap()
-        .workspace_root;
+        .cwd;
     assert!(
         Command::new("git")
             .args(["clone", "--quiet", "--no-hardlinks", "--local"])

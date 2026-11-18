@@ -135,7 +135,7 @@ async fn native_file_permissions_symlinks_and_patch_preflight() {
     assert!(!outside.path().join("new.txt").exists());
 }
 #[tokio::test]
-async fn working_directories_are_per_request_and_patch_is_workspace_relative() {
+async fn working_directories_are_per_request_and_patch_is_cwd_relative() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
     std::fs::create_dir(root.join("a")).unwrap();
@@ -171,8 +171,8 @@ async fn working_directories_are_per_request_and_patch_is_workspace_relative() {
     )
     .await
     .unwrap();
-    assert!(root.join("root.txt").exists());
-    assert!(!root.join("a/root.txt").exists());
+    assert!(!root.join("root.txt").exists());
+    assert!(root.join("a/root.txt").exists());
     let absolute = root.join("absolute.txt");
     a.run_tool("apply_patch", &json!({"input":format!("*** Begin Patch\n*** Add File: {}\n+absolute\n*** End Patch", absolute.display())}).to_string()).await.unwrap();
     assert_eq!(std::fs::read_to_string(&absolute).unwrap(), "absolute\n");

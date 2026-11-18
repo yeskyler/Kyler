@@ -596,3 +596,46 @@ fn patch_statistics_render_green_additions_and_red_deletions() {
     assert!(colored(Color::Green).contains("+12"));
     assert!(colored(Color::Red).contains("−4"));
 }
+
+#[test]
+fn parallel_tools_finish_out_of_order_without_changing_sibling_status() {
+    let mut state = ready();
+    state.run = Some("run".into());
+    for (seq, id) in [(1, "a"), (2, "b")] {
+        server(
+            &mut state,
+            seq,
+            EventPayload::ToolStarted {
+                call_id: id.into(),
+                name: "shell".into(),
+                summary: None,
+                activity: kyler_protocol::activity::ActivityKind::Execute,
+                source: Default::default(),
+            },
+        );
+    }
+    server(
+        &mut state,
+        3,
+        EventPayload::ToolFinished {
+            call_id: "b".into(),
+            name: "shell".into(),
+            status: "success".into(),
+            output_bytes: 12,
+            error: None,
+            patch: None,
+        },
+    );
+    let statuses: Vec<_> = state
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            if let Entry::Tool { id, status, .. } = entry {
+                Some((id.as_str(), status.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(statuses, [("a", "running"), ("b", "success")]);
+}

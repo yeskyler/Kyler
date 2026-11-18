@@ -52,7 +52,7 @@ async fn sessions_share_only_project_identity_and_commands_cannot_escape_their_p
     ) -> SessionSummary {
         client
             .post(format!("{base}/v1/sessions"))
-            .json(&json!({"workspace_root":project}))
+            .json(&json!({"cwd":project,"workspace_mode":"isolated"}))
             .send()
             .await
             .unwrap()
@@ -64,13 +64,13 @@ async fn sessions_share_only_project_identity_and_commands_cannot_escape_their_p
     }
     let first = create(&client, &base, &project).await;
     let second = create(&client, &base, &project).await;
-    assert_eq!(first.workspace_root, second.workspace_root);
-    assert_ne!(first.working_directory, second.working_directory);
+    assert_eq!(first.project, second.project);
+    assert_ne!(first.cwd, second.cwd);
     let a = store.load(&first.session_id).await.unwrap();
     let b = store.load(&second.session_id).await.unwrap();
     let environment = factory.restore(a.environment.as_ref().unwrap()).unwrap();
-    let other = b.environment.as_ref().unwrap().workspace_root.clone();
-    let own = environment.session_environment().workspace_root.clone();
+    let other = b.environment.as_ref().unwrap().cwd.clone();
+    let own = environment.session_environment().cwd.clone();
     std::fs::write(own.join("own.txt"), "session-a").unwrap();
     std::fs::write(other.join("other.txt"), "session-b").unwrap();
     for path in [
@@ -145,62 +145,38 @@ async fn sessions_share_only_project_identity_and_commands_cannot_escape_their_p
         .await
         .unwrap();
     assert!(
-        !permissions["options"]
+        permissions["options"]
             .as_array()
             .unwrap()
             .iter()
             .any(|option| option["mode"] == "full_access" && option["available"] == true)
     );
-    // Legacy sessions retain their records but are rebound before a new execution.
-    let mut legacy = Session::new();
-    legacy.environment = Some(
-        factory
-            .create(&project)
-            .unwrap()
-            .session_environment()
-            .clone(),
-    );
-    store.save(&mut legacy).await.unwrap();
-    std::fs::write(project.join("owned.txt"), "legacy-owned-output").unwrap();
-    kyler_core::artifacts::ArtifactStore::new(config.session.directory.join("_artifacts"))
-        .capture(
-            &legacy.session_id,
-            &uuid::Uuid::new_v4().to_string(),
-            "[Owned](owned.txt)",
-            Some(&factory.create(&project).unwrap()),
-        )
-        .unwrap();
-    let admitted:Value=client.post(format!("{base}/v1/sessions/{}/runs",legacy.session_id)).json(&json!({"input":"fixture connection failure","client_request_id":"isolation-migration"})).send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
-    for _ in 0..100 {
-        let run: Value = client
-            .get(format!(
-                "{base}/v1/runs/{}",
-                admitted["run_id"].as_str().unwrap()
-            ))
+    // Full access is an explicit capability; selecting it requires confirmation.
+    let endpoint = format!("{base}/v1/sessions/{}/permissions", first.session_id);
+    assert!(
+        client
+            .put(&endpoint)
+            .json(&json!({"mode":"full_access"}))
             .send()
             .await
             .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if matches!(
-            run["status"].as_str(),
-            Some("failed" | "completed" | "cancelled")
-        ) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    let migrated = store.load(&legacy.session_id).await.unwrap();
-    let migrated = migrated.environment.unwrap();
-    assert_eq!(migrated.project_root, Some(project.canonicalize().unwrap()));
-    assert_ne!(migrated.workspace_root, project);
-    assert!(!migrated.workspace_root.join("public.txt").exists());
-    assert_eq!(
-        std::fs::read_to_string(migrated.workspace_root.join("owned.txt")).unwrap(),
-        "legacy-owned-output"
+            .status()
+            .is_client_error()
     );
-    assert!(project.join("public.txt").exists());
+    let selected: Value = client
+        .put(&endpoint)
+        .json(&json!({"mode":"full_access","confirm_full_access":true}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(selected["selected"]["mode"], "full_access");
+    let unchanged = store.load(&first.session_id).await.unwrap();
+    assert_eq!(unchanged.environment, a.environment);
     // A missing private workspace is not silently replaced by its public project.
     let missing = create(&client, &base, &project).await;
     let path = store
@@ -209,7 +185,7 @@ async fn sessions_share_only_project_identity_and_commands_cannot_escape_their_p
         .unwrap()
         .environment
         .unwrap()
-        .workspace_root;
+        .cwd;
     std::fs::remove_dir(&path).unwrap();
     assert!(
         !client
@@ -291,9 +267,9 @@ async fn project_sessions_execute_in_project_with_independent_history_and_host_b
         let summary: SessionSummary = client
             .post(format!("{base}/v1/sessions"))
             .json(&if index == 0 {
-                json!({"workspace_root":project,"workspace_mode":"project"})
+                json!({"cwd":project})
             } else {
-                json!({"workspace_mode":"project","draft":true})
+                json!({"draft":true})
             })
             .send()
             .await
@@ -304,7 +280,7 @@ async fn project_sessions_execute_in_project_with_independent_history_and_host_b
             .await
             .unwrap();
         assert_eq!(
-            summary.working_directory.as_deref(),
+            summary.cwd.as_deref(),
             project.canonicalize().unwrap().to_str()
         );
         sessions.push(summary);
@@ -312,10 +288,7 @@ async fn project_sessions_execute_in_project_with_independent_history_and_host_b
     assert_ne!(sessions[0].session_id, sessions[1].session_id);
     let mut first = store.load(&sessions[0].session_id).await.unwrap();
     let snapshot = first.environment.clone().unwrap();
-    assert_eq!(
-        snapshot.workspace_mode,
-        kyler_protocol::api::session::WorkspaceMode::Project
-    );
+    assert!(snapshot.managed.is_none());
     assert!(
         !store
             .directory()
@@ -346,7 +319,7 @@ async fn project_sessions_execute_in_project_with_independent_history_and_host_b
         )
         .unwrap();
     assert_eq!(
-        restored.session_environment().working_directory,
+        restored.session_environment().cwd,
         project.canonicalize().unwrap()
     );
     let read = restored
@@ -376,14 +349,30 @@ async fn project_sessions_execute_in_project_with_independent_history_and_host_b
     );
     let denied = client
         .post(format!("{base}/v1/sessions"))
-        .json(&json!({"workspace_root":root.path(),"workspace_mode":"project"}))
+        .json(&json!({"cwd":root.path()}))
         .send()
         .await
         .unwrap();
     assert!(denied.status().is_client_error());
+    let conflicting = client
+        .post(format!("{base}/v1/sessions"))
+        .json(&json!({"cwd":project,"workspace_root":root.path()}))
+        .send()
+        .await
+        .unwrap();
+    assert!(conflicting.status().is_client_error());
+    let deleted = client
+        .delete(format!("{base}/v1/sessions/{}", sessions[1].session_id))
+        .send()
+        .await
+        .unwrap();
+    assert!(deleted.status().is_success());
+    assert_eq!(
+        std::fs::read_to_string(project.join("source.txt")).unwrap(),
+        "changed"
+    );
     let mut forged = snapshot;
-    forged.workspace_root = root.path().canonicalize().unwrap();
-    forged.working_directory = forged.workspace_root.clone();
+    forged.cwd = root.path().canonicalize().unwrap();
     assert!(factory.restore(&forged).is_err());
     let _ = stop.send(());
     task.await.unwrap().unwrap();

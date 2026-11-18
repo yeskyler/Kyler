@@ -301,7 +301,7 @@ export function PermissionControl() {
               aria-label={
                 permissions ? permissionLabels[permissions.selected.mode] : "Sandbox permissions"
               }
-              disabled={!session.workspace_root || busy || running}
+              disabled={!session.project || busy || running}
               aria-busy={busy}
             />
           }

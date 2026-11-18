@@ -45,7 +45,7 @@ roots follow configuration path resolution.
 | --- | --- | --- |
 | `llm` | Model, API base URL, credentials, capabilities | Setup default: `deepseek-ai/DeepSeek-V4-Flash` |
 | `models` | Named provider/model profiles | When configured, replaces the legacy single `llm` profile |
-| `agent` | Step limit and tool output budget | 50 steps; 8192-byte tool model-view budget |
+| `agent` | Step limit, tool concurrency and output budget | 50 steps; 8 parallel calls; 8192-byte tool model-view budget |
 | `context` | Window, compaction, output reservation | 128000 tokens; window ratio 0.6; trigger ratio 0.8 |
 | `workspace` | Default task directory | `workspace`, normally `~/.kyler/workspace` |
 | `session` | Persistent conversation storage | Template disabled; installer enables it |
@@ -62,6 +62,21 @@ roots follow configuration path resolution.
 The complete field reference is defined by `config/default.toml` and the Rust
 configuration types. Configuration files containing credentials must remain outside
 version control.
+
+## Tool concurrency
+
+`agent.max_parallel_calls` defaults to 8 and accepts 1–64. Independent reads and
+commands can overlap; file edits and session mutations remain ordered barriers.
+Task waits have a separate lane with the same limit. Limits apply per agent
+runtime, not across sessions or child agents, and do not bound the lifetime of
+background processes. Setting the limit to 1 serializes ordinary parallel tools;
+task waits can still overlap them.
+
+`agent.parallel_tool_calls` separately controls the optional model request hint.
+Leave it unset to use provider defaults, or set it to `true`/`false` when the
+endpoint supports it. This hint does not change tool permissions or runtime
+barriers. See [Tool concurrency](development.md#tool-concurrency) for tool
+classification and authoring details.
 
 ## Environment overrides
 

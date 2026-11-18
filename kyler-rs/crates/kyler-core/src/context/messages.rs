@@ -175,7 +175,50 @@ pub(crate) fn build_messages_with_attachments(
             );
         }
     }
+    order_tool_results(&mut messages);
     Ok(messages)
+}
+
+fn order_tool_results(messages: &mut [ChatCompletionRequestMessage]) {
+    let mut order = std::collections::HashMap::new();
+    let mut offset = 0;
+    while offset < messages.len() {
+        match &messages[offset] {
+            ChatCompletionRequestMessage::Assistant(assistant) => {
+                order.clear();
+                for (index, call) in assistant.tool_calls.iter().flatten().enumerate() {
+                    if let ChatCompletionMessageToolCalls::Function(call) = call {
+                        order.insert(call.id.clone(), index);
+                    }
+                }
+            }
+            ChatCompletionRequestMessage::Tool(_) => {
+                let end = offset
+                    + messages[offset..]
+                        .iter()
+                        .take_while(|message| {
+                            matches!(message, ChatCompletionRequestMessage::Tool(_))
+                        })
+                        .count();
+                messages[offset..end].sort_by_key(|message| {
+                    if let ChatCompletionRequestMessage::Tool(result) = message {
+                        order
+                            .get(&result.tool_call_id)
+                            .copied()
+                            .unwrap_or(usize::MAX)
+                    } else {
+                        usize::MAX
+                    }
+                });
+                offset = end;
+                continue;
+            }
+            _ => {
+                order.clear();
+            }
+        }
+        offset += 1;
+    }
 }
 
 fn append_image(messages: &mut [ChatCompletionRequestMessage], image: &UserImage) -> Result<()> {

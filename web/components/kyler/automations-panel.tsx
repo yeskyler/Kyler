@@ -118,13 +118,13 @@ export function AutomationsPanel({
     Promise.all([
       api<ModelCatalog>("models", { signal: controller.signal }),
       api<Workspace[]>("workspaces", { signal: controller.signal }),
-      api<{ default_workspace?: string; workspace_root?: string }>("info", {
+      api<{ default_workspace?: string; cwd?: string }>("info", {
         signal: controller.signal,
       }),
     ])
       .then(([models, projects, info]) => {
         if (controller.signal.aborted) return;
-        const root = defaultWorkspace ?? info.default_workspace ?? info.workspace_root ?? "";
+        const root = defaultWorkspace ?? info.default_workspace ?? info.cwd ?? "";
         const all = [
           ...(root ? [{ path: root, title: "Default workspace" }] : []),
           ...projects.map((workspace) => ({
@@ -520,12 +520,10 @@ export function AutomationsPanel({
                       <ClockIcon className="size-3.5 shrink-0" />
                       {scheduleLabel(task.config.cron)} · {task.config.timezone}
                     </p>
-                    <p className="flex items-center gap-2" title={task.config.workspace_root}>
+                    <p className="flex items-center gap-2" title={task.config.cwd}>
                       <FolderIcon className="size-3.5 shrink-0" />
-                      <span className="truncate">
-                        {workspaceLabel(task.config.workspace_root)}
-                      </span>{" "}
-                      · {task.config.workspace_mode === "project" ? "Project" : "Isolated"}
+                      <span className="truncate">{workspaceLabel(task.config.cwd)}</span> ·{" "}
+                      {task.config.workspace_mode === "project" ? "Project" : "Isolated"}
                     </p>
                     <p>
                       Next run:{" "}
@@ -649,7 +647,7 @@ export function AutomationsPanel({
                       ? taskTime(selected.next_run_at, selected.config.timezone)
                       : "Paused",
                   ],
-                  ["Workspace", selected.config.workspace_root],
+                  ["Workspace", selected.config.cwd],
                   [
                     "Directory",
                     selected.config.workspace_mode === "project"

@@ -96,7 +96,7 @@ async fn supervise(
     payload.push(b'\n');
     let mut command = Command::new(&request.worker_path);
     command
-        .current_dir(&request.worker_request.environment.working_directory)
+        .current_dir(&request.worker_request.environment.cwd)
         .env_clear()
         .envs(&request.environment)
         .stdin(Stdio::piped())

@@ -52,7 +52,7 @@ type Loaded = {
   approvals: Approval[];
   recoverRun?: string;
 };
-type Info = { model: string; default_workspace?: string; workspace_root?: string | null };
+type Info = { model: string; default_workspace?: string; cwd?: string | null };
 
 export function Assistant() {
   const [loaded, updateLoaded] = useState<Loaded>();
@@ -140,7 +140,7 @@ export function Assistant() {
           activeKey.current = session.session_id;
           setLoaded({
             key: session.session_id,
-            defaultWorkspace: info.default_workspace ?? info.workspace_root ?? undefined,
+            defaultWorkspace: info.default_workspace ?? info.cwd ?? undefined,
             session,
             messages: [],
             model: info.model,
@@ -169,7 +169,7 @@ export function Assistant() {
         }
         setLoaded({
           key: session.session_id,
-          defaultWorkspace: info.default_workspace ?? info.workspace_root ?? undefined,
+          defaultWorkspace: info.default_workspace ?? info.cwd ?? undefined,
           session,
           messages,
           model: model.active?.model ?? model.selected?.model ?? info.model,
@@ -238,7 +238,7 @@ export function Assistant() {
     setError("");
     setLoaded({
       key: session.session_id,
-      defaultWorkspace: info.default_workspace ?? info.workspace_root ?? undefined,
+      defaultWorkspace: info.default_workspace ?? info.cwd ?? undefined,
       initialText,
       session,
       messages: [],
@@ -271,7 +271,12 @@ export function Assistant() {
     setLive((items) => Object.fromEntries(Object.entries(items).filter(([key]) => key !== id)));
     if (loaded?.session.session_id === id) {
       if (fallback) selectSession(fallback, "replace");
-      else await createSession(loaded.session.workspace_root ?? undefined, "", "replace");
+      else
+        await createSession(
+          loaded.session.project ?? loaded.session.cwd ?? undefined,
+          "",
+          "replace",
+        );
     }
   };
   useEffect(() => {

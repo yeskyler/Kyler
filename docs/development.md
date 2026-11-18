@@ -170,3 +170,34 @@ cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-server --test session_ca
 
 The server test uses temporary storage and a loopback fake model. It does not call
 a paid provider or read an installed user's configuration.
+
+## Tool concurrency
+
+The core runtime executes adjacent explicitly parallel tools concurrently, with
+`agent.max_parallel_calls = 8` by default (valid range: 1–64). File reads, searches,
+directory listings, commands (`shell`, `run_command`, `exec_command`), attachment
+reads and skill reads opt in. `get_task` is parallel; `wait_tasks` uses a separate
+lane with the same limit so waiting cannot exhaust command slots. Process input,
+patches, skill writes, session mutations, questions, task creation/cancellation,
+MCP calls and undeclared extension tools remain exclusive barriers. Tools before
+a barrier finish before it starts, and later tools wait for it to finish.
+
+Each agent runtime has its own limits; these are not workspace-wide locks.
+Background processes and child agents may outlive their initiating tool call.
+The model must keep dependent commands and conflicting writes in separate batches;
+the runtime does not infer command dependencies or filesystem conflicts.
+
+Tool authors opt in through `Tool::concurrency()` and implement
+`execute_parallel()` using `ParallelToolContext`, which provides execution services
+without mutable session state. Approval and sandbox strategy are independent of
+concurrency. Authorization remains ordered and completes for a parallel group
+before its execution starts. Execution slots are acquired only after authorization.
+Results are checkpointed and streamed as tools finish; model messages order them
+by the original calls while retaining their call IDs. Cancellation drops pending
+tool futures and the existing execution cleanup handles managed processes/tasks.
+
+`agent.parallel_tool_calls` is an optional model-request hint, independent of
+runtime concurrency. Leave it unset for provider compatibility, set it to `true`
+for supporting endpoints, or `false` to ask the model for sequential tool use.
+It does not override runtime barriers or permissions. Tool execution begins after
+the model response completes, not while argument deltas are still arriving.

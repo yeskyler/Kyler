@@ -153,8 +153,7 @@ impl AgentHandle {
             context_window_tokens: agent.context_window_tokens(),
             sliding_window_tokens: Some(agent.sliding_window_tokens()),
             default_workspace: None,
-            workspace_root: None,
-            working_directory: None,
+            cwd: None,
         })
     }
     pub async fn create_project_session_in(&self, cwd: &Path) -> Result<SessionSummary> {
@@ -311,9 +310,7 @@ impl AgentHandle {
         match agent.skill_manager() {
             Some(m) => {
                 m.list(
-                    agent
-                        .workspace_environment()
-                        .map(|e| e.workspace_root.as_path()),
+                    agent.workspace_environment().map(|e| e.cwd.as_path()),
                     reload,
                 )
                 .await
@@ -328,9 +325,7 @@ impl AgentHandle {
             .skill_manager()
             .context("skills are disabled")?
             .details(
-                agent
-                    .workspace_environment()
-                    .map(|e| e.workspace_root.as_path()),
+                agent.workspace_environment().map(|e| e.cwd.as_path()),
                 skill,
             )
             .await
@@ -348,9 +343,7 @@ impl AgentHandle {
             .skill_manager()
             .context("skills are disabled")?
             .action(
-                agent
-                    .workspace_environment()
-                    .map(|e| e.workspace_root.as_path()),
+                agent.workspace_environment().map(|e| e.cwd.as_path()),
                 skill,
                 action,
                 &fingerprint,
@@ -386,6 +379,7 @@ impl AgentHandle {
 async fn summary(thread: &ThreadHandle) -> Result<SessionSummary> {
     let s = thread.session().await;
     Ok(SessionSummary {
+        cwd: s.environment.as_ref().map(|e| e.cwd.display().to_string()),
         draft: false,
         title: None,
         session_id: s.session_id,
@@ -394,12 +388,10 @@ async fn summary(thread: &ThreadHandle) -> Result<SessionSummary> {
         event_count: s.events.len(),
         execution_count: s.executions.len() + usize::from(s.execution.is_some()),
         status: None,
-        workspace_root: s
+        project: s
             .environment
             .as_ref()
-            .map(|e| e.workspace_root.display().to_string()),
-        working_directory: s
-            .environment
-            .map(|e| e.working_directory.display().to_string()),
+            .and_then(|e| e.project_root())
+            .map(|p| p.display().to_string()),
     })
 }

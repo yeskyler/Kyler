@@ -137,6 +137,9 @@ impl Agent {
                 builder.tools(tools.clone());
             }
             let mut request = builder.build()?;
+            if !tools.is_empty() {
+                request.parallel_tool_calls = self.parallel_tool_calls;
+            }
             crate::models::set_output_limit(
                 &mut request,
                 self.output_token_parameter(),

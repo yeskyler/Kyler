@@ -21,11 +21,7 @@ pub fn lines(state: &State, width: u16) -> Vec<Line<'static>> {
     let workspace = state
         .info
         .as_ref()
-        .and_then(|i| {
-            i.working_directory
-                .as_deref()
-                .or(i.workspace_root.as_deref())
-        })
+        .and_then(|i| i.cwd.as_deref())
         .unwrap_or("Waiting for session workspace");
     let edge = |left: &str, right: &str| {
         Line::styled(

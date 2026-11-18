@@ -268,29 +268,40 @@ conflict; project memory retains its existing project scope.
 
 ## Private session execution
 
-Legacy isolated sessions and API clients using the isolated mode treat the selected
-workspace as a project grouping. Each isolated session receives a private directory under
-`<session.directory>/_execution/<session-id>/workspace/`. Its serialized environment
-stores the grouping in `project_root`, while `workspace_root` and `working_directory`
-both identify the private execution directory. Public session summaries continue to
-expose the project grouping for navigation.
+Sessions use `cwd` as the execution directory. Relative file, patch, command, and
+artifact paths resolve from that directory. Changing a command's `working_directory`
+affects only that invocation. Neither setting grants filesystem access: the host
+filesystem and sandbox policy are checked independently.
 
-The server derives the private path from the owning session ID, checks it on restore,
-and restores the host policy before narrowing filesystem access. Built-in file tools,
-patch paths, working directories and native command containment all use the private
-root. Global extra filesystem roots do not become shared session access; host-installed
-runtime paths remain available read-only. A session cannot select unrestricted execution
-to bypass this boundary. Subagents belonging to a parent task inherit that parent's
-private execution environment.
+The serialized environment separates `cwd`, optional `project` grouping metadata,
+optional `managed` directory ownership, and a host-revalidated `sandbox` binding.
+The binding's base directory reconstructs the saved host policy; tools do not use
+it as their working directory. Project grouping does not authorize reading the
+project or other sessions.
 
-Existing sessions are narrowed when continued. History, uploads and retained artifact
-copies are preserved; only that session's retained output snapshots are restored into
-its private directory. Public project files are neither copied nor moved. New private
-workspaces start empty. Task inputs are supplied through session attachments or created
-and retrieved within the owning session. An absent private directory or a mismatched
-owner fails closed instead of rebinding to the public workspace. Session deletion
-removes the owning session's private execution directory, records, and attachments.
-Project directories and other sessions remain unchanged.
+Ordinary new sessions work directly in the requested authorized `cwd` or the
+server's default directory. Sessions with the same cwd share disk files, while
+history and task state remain separate. This does not introduce cross-session file
+locks. Use distinct directories when concurrent edits must not share a working copy.
+
+Explicit isolated-mode API requests and automation runs allocate an empty directory
+under `<session.directory>/_execution/<session-id>/workspace/` before starting core.
+The saved `managed.root` identifies that host-owned directory. The server verifies
+its owner and narrows access when restoring it. Missing directories fail closed;
+project files are never automatically copied or relocated. Child agents inherit
+the parent's directory, and deleting a child cannot remove the parent's workspace.
+
+Session creation accepts `cwd` and an optional explicit `workspace_mode` for
+server-managed isolation. Session summaries expose `cwd` and optional `project`
+grouping. Removed directory aliases are rejected rather than silently interpreted.
+Saved environments use the same canonical structure; old environment records must
+be exported or migrated separately before upgrading.
+
+Artifacts resolve relative to cwd, then retain immutable copies associated with the
+session and execution. Explicit sources outside cwd must pass read permissions.
+Deleting an ordinary session removes its history, attachments, and artifact copies,
+never its project directory. Only verified host-managed private directories are
+removed with their owning session.
 
 ## Tool progress events
 

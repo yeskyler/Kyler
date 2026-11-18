@@ -5,14 +5,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
     #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
     pub draft: bool,
     pub session_id: String,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
-    pub workspace_root: Option<String>,
-    #[serde(default)]
-    pub working_directory: Option<String>,
+    pub project: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub event_count: usize,
@@ -55,11 +55,12 @@ impl WorkspaceMode {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateSessionRequest {
-    #[serde(default, skip_serializing_if = "WorkspaceMode::is_isolated")]
-    pub workspace_mode: WorkspaceMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_mode: Option<WorkspaceMode>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub draft: bool,
-    pub workspace_root: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {

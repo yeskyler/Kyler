@@ -92,17 +92,44 @@ impl Agent {
                 }
             }
         }
-        for call in calls {
-            let ChatCompletionMessageToolCalls::Function(f) = call else {
-                continue;
+        let mut offset = 0;
+        while offset < calls.len() {
+            let parallel = |call: &ChatCompletionMessageToolCalls| {
+                if let ChatCompletionMessageToolCalls::Function(call) = call {
+                    self.toolbox.get(&call.function.name).is_some_and(|tool| {
+                        tool.concurrency() != crate::tools::ToolConcurrency::Exclusive
+                    })
+                } else {
+                    false
+                }
             };
-            let arguments =
-                serde_json::from_str(&f.function.arguments).context("invalid tool arguments")?;
-            let clean_arguments = crate::approval::policy::arguments(&arguments)
-                .map(|(value, _)| value)
-                .unwrap_or_else(|_| arguments.clone());
-            let execution_arguments = serde_json::to_string(&clean_arguments)?;
-            let ambiguous = session.current_execution()?.resumed_from.is_some()
+            if parallel(&calls[offset]) {
+                let end = offset
+                    + calls[offset..]
+                        .iter()
+                        .take_while(|call| parallel(call))
+                        .count();
+                self.execute_parallel_calls(session, &calls[offset..end], scope, stream)
+                    .await?;
+                offset = end;
+            } else {
+                self.execute_exclusive_calls(session, &calls[offset..offset + 1], scope, stream)
+                    .await?;
+                offset += 1;
+            }
+        }
+        Ok(())
+    }
+
+    async fn authorize_call(
+        &self,
+        session: &mut Session,
+        f: &async_openai::types::chat::ChatCompletionMessageToolCall,
+        arguments: &serde_json::Value,
+        clean_arguments: &serde_json::Value,
+    ) -> Result<Option<std::sync::Arc<crate::ExecutionEnvironment>>> {
+        let ambiguous =
+            session.current_execution()?.resumed_from.is_some()
                 && session
                     .events
                     .iter()
@@ -122,7 +149,7 @@ impl Agent {
                                 "start_process" | "run_command" | "exec_command" | "shell"
                             );
                             (name == &f.function.name || same_command)
-                                && old == &arguments
+                                && old == arguments
                                 && session.events.iter().flat_map(|event| &event.content).any(
                                     |item| match item {
                                         crate::context::ContentItem::ToolResult {
@@ -141,25 +168,173 @@ impl Agent {
                             false
                         }
                     });
-            let read_only = self
-                .toolbox
-                .get(&f.function.name)
-                .and_then(|tool| tool.approval_requirement(&clean_arguments).ok())
-                .is_some_and(|operation| {
-                    matches!(
-                        operation,
-                        crate::approval::ToolOperation::Read
-                            | crate::approval::ToolOperation::State
-                    )
-                });
-            let authorization = if ambiguous && !read_only {
-                Err(anyhow::anyhow!(
-                    "Previous operation completed or has an unknown outcome. Inspect state; repetition requires a new explicit user instruction."
-                ))
-            } else {
-                self.authorize_tool(session, &f.function.name, &f.id, &arguments)
-                    .await
+        let read_only = self
+            .toolbox
+            .get(&f.function.name)
+            .and_then(|tool| tool.approval_requirement(clean_arguments).ok())
+            .is_some_and(|operation| {
+                matches!(
+                    operation,
+                    crate::approval::ToolOperation::Read | crate::approval::ToolOperation::State
+                )
+            });
+        if ambiguous && !read_only {
+            Err(anyhow::anyhow!(
+                "Previous operation completed or has an unknown outcome. Inspect state; repetition requires a new explicit user instruction."
+            ))
+        } else {
+            self.authorize_tool(session, &f.function.name, &f.id, arguments)
+                .await
+        }
+    }
+
+    async fn execute_parallel_calls(
+        &self,
+        session: &mut Session,
+        calls: &[ChatCompletionMessageToolCalls],
+        scope: Option<&SubagentScope>,
+        stream: Option<&StreamControl>,
+    ) -> Result<()> {
+        use crate::tools::{ParallelToolContext, ToolConcurrency};
+        use futures::{StreamExt, stream::FuturesUnordered};
+
+        let session_id = session.session_id.clone();
+        let mut prepared = Vec::new();
+        for call in calls {
+            let ChatCompletionMessageToolCalls::Function(f) = call else {
+                continue;
             };
+            let arguments =
+                serde_json::from_str(&f.function.arguments).context("invalid tool arguments")?;
+            let clean = crate::approval::policy::arguments(&arguments)
+                .map(|(value, _)| value)
+                .unwrap_or_else(|_| arguments.clone());
+            let authorization = self.authorize_call(session, f, &arguments, &clean).await;
+            prepared.push((f, arguments, serde_json::to_string(&clean)?, authorization));
+        }
+        // Authorization mutates the durable session. Tool execution never borrows it.
+        let mut prepared = std::collections::VecDeque::from(prepared);
+        let mut pending = FuturesUnordered::new();
+        let mut running = 0;
+        let mut waiting = 0;
+        loop {
+            while let Some(index) = prepared.iter().position(|(f, _, _, _)| {
+                if self.toolbox[&f.function.name].concurrency() == ToolConcurrency::Wait {
+                    waiting < self.max_parallel_calls
+                } else {
+                    running < self.max_parallel_calls
+                }
+            }) {
+                let (f, arguments, clean, authorization) =
+                    prepared.remove(index).expect("queued call");
+                let tool = self.toolbox[&f.function.name].clone();
+                let is_wait = tool.concurrency() == ToolConcurrency::Wait;
+                if is_wait {
+                    waiting += 1;
+                } else {
+                    running += 1;
+                }
+                if authorization.is_ok() {
+                    if let Some(metadata) = session
+                        .current_execution_mut()?
+                        .tool_presentations
+                        .get_mut(&f.id)
+                    {
+                        metadata.started_at = Some(chrono::Utc::now().timestamp_millis());
+                    }
+                    if let Some(stream) = stream {
+                        stream
+                            .emit(AgentStreamEvent::ToolStarted {
+                                call_id: f.id.clone(),
+                                name: f.function.name.clone(),
+                                source: tool.source_for_arguments(&arguments),
+                                activity: tool.activity_kind(),
+                                arguments,
+                            })
+                            .await?;
+                    }
+                }
+                let session_id = &session_id;
+                pending.push(async move {
+                    let started = Instant::now();
+                    tracing::info!(tool=%f.function.name, tool_call_id=%f.id, "tool execution started");
+                    let result = match authorization {
+                        Err(error) => Err(error),
+                        Ok(environment) => {
+                            let context = ParallelToolContext {
+                                processes: self.process_manager.as_deref(),
+                                session_id, tool_call_id: &f.id, subagents: scope,
+                                environment: environment.as_deref(),
+                            };
+                            match (environment.as_deref(), tool.execution_mode()) {
+                                (Some(environment), ToolExecutionMode::Worker) =>
+                                    environment.run_tool(&f.function.name, &clean).await,
+                                (Some(_), ToolExecutionMode::Unspecified) => Err(anyhow::anyhow!(
+                                    "tool {} has no declared sandbox execution strategy", f.function.name)),
+                                _ => tool.execute_parallel(&clean, &context).await,
+                            }
+                        }
+                    };
+                    tracing::info!(tool=%f.function.name, tool_call_id=%f.id,
+                        elapsed_ms=started.elapsed().as_millis() as u64,
+                        success=result.is_ok(), "tool execution finished");
+                    (f, is_wait, result)
+                });
+            }
+            let Some((f, is_wait, result)) = pending.next().await else {
+                break;
+            };
+            if is_wait {
+                waiting -= 1;
+            } else {
+                running -= 1;
+            }
+            let (status, output) = match result {
+                Ok(output) => (ToolResultStatus::Success, output),
+                Err(error) => (
+                    ToolResultStatus::Error,
+                    format!("Tool execution error:{error:#}"),
+                ),
+            };
+            self.record_tool_result(session, &f.id, &f.function.name, status, output.clone())?;
+            if let Some(scope) = scope {
+                session.record_subagent_tasks(&scope.list());
+            }
+            self.checkpoint(session).await?;
+            if let Some(stream) = stream {
+                stream
+                    .emit(AgentStreamEvent::ToolFinished {
+                        call_id: f.id.clone(),
+                        name: f.function.name.clone(),
+                        status,
+                        output,
+                    })
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn execute_exclusive_calls(
+        &self,
+        session: &mut Session,
+        calls: &[ChatCompletionMessageToolCalls],
+        scope: Option<&SubagentScope>,
+        stream: Option<&StreamControl>,
+    ) -> Result<()> {
+        for call in calls {
+            let ChatCompletionMessageToolCalls::Function(f) = call else {
+                continue;
+            };
+            let arguments =
+                serde_json::from_str(&f.function.arguments).context("invalid tool arguments")?;
+            let clean_arguments = crate::approval::policy::arguments(&arguments)
+                .map(|(value, _)| value)
+                .unwrap_or_else(|_| arguments.clone());
+            let execution_arguments = serde_json::to_string(&clean_arguments)?;
+            let authorization = self
+                .authorize_call(session, f, &arguments, &clean_arguments)
+                .await;
             if authorization.is_ok() {
                 if let Some(metadata) = session
                     .current_execution_mut()?

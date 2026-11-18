@@ -327,8 +327,7 @@ async fn info(State(state): State<AppState>) -> axum::Json<ServerInfo> {
             .default_workspace
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned()),
-        workspace_root: environment.map(|e| e.workspace_root.to_string_lossy().into_owned()),
-        working_directory: environment.map(|e| e.working_directory.to_string_lossy().into_owned()),
+        cwd: environment.map(|e| e.cwd.to_string_lossy().into_owned()),
     })
 }
 

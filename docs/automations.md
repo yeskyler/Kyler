@@ -6,7 +6,7 @@ not call a model. **Run now** and scheduled executions do call the selected mode
 
 ## Configuration
 
-1. Enter a name, instructions, and an authorized workspace. **Project directory**
+1. Enter a name, instructions, and an authorized execution directory (`cwd`). **Project directory**
    runs in the selected project and can change it according to the selected
    permissions. **Isolated directory** creates a separate execution directory;
    it does not automatically copy the project contents.
@@ -68,3 +68,6 @@ configuration and are not stored in task snapshots.
 
 The initial limits are 256 visible tasks, a 32,000-byte prompt, and per-task execution
 and wait limits between 1 and 86,400 seconds. Run history uses cursor pagination.
+
+Task records use `cwd`; obsolete directory field aliases are rejected.
+The directory mode controls allocation by the server, not filesystem authority.

@@ -183,7 +183,17 @@ impl Tool for ShellTool {
     ) -> Result<CompressedToolOutput> {
         RunCommandTool.compress_output(output, budget)
     }
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Parallel
+    }
     async fn execute(&self, arguments: &str, context: &mut ToolContext<'_>) -> Result<String> {
+        self.execute_parallel(arguments, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        arguments: &str,
+        context: &crate::tools::ParallelToolContext<'_>,
+    ) -> Result<String> {
         let mut command = serde_json::from_str::<ShellArgs>(arguments)?.into_command()?;
         let env = context
             .environment
@@ -192,10 +202,7 @@ impl Tool for ShellTool {
             env.policy().process.allow_commands,
             "Sandbox blocks commands"
         );
-        command.directory(
-            &env.session_environment().working_directory,
-            &env.policy().filesystem,
-        )?;
+        command.directory(&env.session_environment().cwd, &env.policy().filesystem)?;
         let timeout = command
             .timeout_ms
             .unwrap_or(env.policy().process.timeout_ms);
@@ -302,7 +309,17 @@ impl Tool for RunCommandTool {
     fn parameters(&self) -> Value {
         serde_json::to_value(schema_for!(RunCommandArgs)).expect("command schema is serializable")
     }
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Parallel
+    }
     async fn execute(&self, args: &str, context: &mut ToolContext<'_>) -> anyhow::Result<String> {
+        self.execute_parallel(args, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        args: &str,
+        context: &crate::tools::ParallelToolContext<'_>,
+    ) -> anyhow::Result<String> {
         let command: RunCommandArgs = serde_json::from_str(args)?;
         command.validate()?;
         let environment = context

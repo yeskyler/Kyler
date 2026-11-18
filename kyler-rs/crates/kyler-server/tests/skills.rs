@@ -122,11 +122,10 @@ async fn skill_api_requires_current_reviewed_fingerprint_and_preserves_workspace
         .json()
         .await
         .unwrap();
-    let private_skill = std::path::Path::new(session.working_directory.as_ref().unwrap())
-        .join(".kyler/skills/review");
-    std::fs::create_dir_all(&private_skill).unwrap();
-    std::fs::copy(skill.join("SKILL.md"), private_skill.join("SKILL.md")).unwrap();
-    let skill = private_skill;
+    assert_eq!(
+        session.cwd.as_deref(),
+        workspace.canonicalize().unwrap().to_str()
+    );
     let url = format!("{base}/v1/sessions/{}/skills", session.session_id);
     assert_eq!(anonymous.get(&url).send().await.unwrap().status(), 401);
     let list: Vec<SkillInfo> = http.get(&url).send().await.unwrap().json().await.unwrap();
@@ -304,7 +303,7 @@ async fn skill_api_requires_current_reviewed_fingerprint_and_preserves_workspace
     assert_eq!(catalog[0]["status"], "disconnected");
     assert!(config.session.directory.join("_connectors.json").is_file());
     let projects = format!("{base}/v1/workspaces");
-    let request = json!({"path": session.workspace_root.clone().unwrap(), "title": "My project"});
+    let request = json!({"path": session.project.clone().unwrap(), "title": "My project"});
     assert_eq!(
         anonymous
             .post(&projects)

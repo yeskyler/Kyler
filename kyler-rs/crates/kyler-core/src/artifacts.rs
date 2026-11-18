@@ -295,7 +295,7 @@ pub(crate) fn read_source(
         !decoded.chars().any(char::is_control) && !decoded.contains('\\'),
         "invalid file reference"
     );
-    let root = &environment.session_environment().workspace_root;
+    let root = &environment.session_environment().cwd;
     let path = Path::new(decoded.as_ref());
     ensure!(
         !path
@@ -303,11 +303,36 @@ pub(crate) fn read_source(
             .any(|part| matches!(part, Component::ParentDir)),
         "parent traversal is not allowed"
     );
-    let relative = if path.is_absolute() {
-        path.strip_prefix(root)?
+    if let Some(relative) = if path.is_relative() {
+        Some(path)
     } else {
-        path
+        path.strip_prefix(root).ok()
+    } {
+        let mut entry = root.clone();
+        for component in relative.components() {
+            entry.push(component);
+            ensure!(
+                !fs::symlink_metadata(&entry)?.file_type().is_symlink(),
+                "artifact symlinks are not allowed"
+            );
+        }
+    } else {
+        ensure!(
+            !fs::symlink_metadata(path)?.file_type().is_symlink(),
+            "artifact symlinks are not allowed"
+        );
+    }
+    let authorized = environment.policy().filesystem.check_read(root, path)?;
+    let anchor = if authorized.starts_with(root) {
+        root.clone()
+    } else {
+        authorized
+            .parent()
+            .context("artifact parent is missing")?
+            .to_path_buf()
     };
+    let root = &anchor;
+    let relative = authorized.strip_prefix(root)?;
     let relative = relative
         .components()
         .filter(|part| !matches!(part, Component::CurDir))

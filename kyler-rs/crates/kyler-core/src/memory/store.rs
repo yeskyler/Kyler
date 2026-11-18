@@ -41,7 +41,14 @@ impl MemoryStore {
                 session
                     .environment
                     .as_ref()
-                    .map(|environment| environment.workspace_root.to_string_lossy().into_owned())
+                    .map(|environment| environment
+                        .managed
+                        .as_ref()
+                        .map(|managed| &managed.root)
+                        .or(environment.project_root())
+                        .unwrap_or(&environment.cwd)
+                        .to_string_lossy()
+                        .into_owned())
                     .unwrap_or_else(|| session.session_id.clone())
             )
         )

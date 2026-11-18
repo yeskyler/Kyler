@@ -109,7 +109,7 @@ impl RunManager {
                 "The concurrent run limit has been reached.",
             )
         })?;
-        let mut session = self
+        let session = self
             .store
             .load(&session_id)
             .await
@@ -138,12 +138,7 @@ impl RunManager {
             }
         }
 
-        if self.isolate_session(&mut session).await? {
-            self.store
-                .save(&mut session)
-                .await
-                .map_err(ApiError::storage)?;
-        }
+        self.validate_session_environment(&session)?;
         let selection = self.read_model_selection(&session_id).await?;
         let agent = self
             .agent_for_session(&session)?

@@ -147,8 +147,7 @@ impl Effects {
                     }
                 };
                 let mut info = client.info(&session.session_id).await?;
-                info.workspace_root = session.workspace_root.clone();
-                info.working_directory = session.working_directory.clone();
+                info.cwd = session.cwd.clone();
                 let usage = client.session_usage(&session.session_id).await?;
                 let mut events = Vec::new();
                 let mut executions = std::collections::HashMap::new();

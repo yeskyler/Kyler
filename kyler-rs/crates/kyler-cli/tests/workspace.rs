@@ -308,7 +308,7 @@ async fn check(workspace_write: bool) {
     );
     let default_session = client.create_session().await.unwrap();
     assert_eq!(
-        default_session.workspace_root.as_deref(),
+        default_session.project.as_deref(),
         Some(
             dir.path()
                 .join("workspace")

@@ -296,7 +296,7 @@ test("proxy rejects cross-site writes and forwards an explicit workspace with th
     assert.equal(url.href, "http://127.0.0.1:30001/v1/sessions");
     assert.equal(new Headers(init.headers).get("authorization"), "Bearer private-test-token");
     assert.deepEqual(JSON.parse(new TextDecoder().decode(init.body as Uint8Array)), {
-      workspace_root: "/chosen/project",
+      cwd: "/chosen/project",
     });
     return Response.json({ session_id: "s1" }, { status: 201 });
   });
@@ -314,7 +314,7 @@ test("proxy rejects cross-site writes and forwards an explicit workspace with th
     new Request("http://localhost:3002/api/kyler/sessions", {
       method: "POST",
       headers: { origin: "http://127.0.0.1:3002", host: "127.0.0.1:3002" },
-      body: JSON.stringify({ workspace_root: "/chosen/project" }),
+      body: JSON.stringify({ cwd: "/chosen/project" }),
     }),
     ["sessions"],
   );
@@ -452,10 +452,13 @@ test("workspace selection rejects relative paths and unknown fields before forwa
     return Response.json({});
   });
   for (const body of [
-    { workspace_root: "../outside" },
-    { workspace_root: 12 },
-    { workspace_root: "/project", privileged: true },
-    { workspace_root: "/project", workspace_mode: "unrestricted" },
+    { workspace_root: "/project" },
+    { working_directory: "/project" },
+    { project_root: "/project" },
+    { cwd: "../outside" },
+    { cwd: 12 },
+    { cwd: "/project", privileged: true },
+    { cwd: "/project", workspace_mode: "unrestricted" },
     { workspace_mode: 1 },
   ]) {
     const response = await proxyRequest(
@@ -542,9 +545,9 @@ test("model setting edits keep service authorization separate from the model key
 
 test("workspace groups retain separate absolute roots and prioritize the current workspace", () => {
   const sessions = [
-    { session_id: "a", workspace_root: "/work/first/project" },
-    { session_id: "b", workspace_root: "/work/second/project" },
-    { session_id: "c", workspace_root: "/work/first/project" },
+    { session_id: "a", project: "/work/first/project" },
+    { session_id: "b", project: "/work/second/project" },
+    { session_id: "c", project: "/work/first/project" },
   ];
   const groups = groupWorkspaceSessions(sessions, "/work/second/project");
   assert.equal(groups.length, 3);
@@ -712,7 +715,7 @@ test("draft creation forwards its hidden history flag without adding arbitrary f
   process.env.KYLER_CLIENT_SERVER_URL = "http://127.0.0.1:30001";
   t.mock.method(globalThis, "fetch", async (_url: URL, init: RequestInit) => {
     assert.deepEqual(JSON.parse(new TextDecoder().decode(init.body as Uint8Array)), {
-      workspace_root: "/project",
+      cwd: "/project",
       draft: true,
       workspace_mode: "project",
     });
@@ -721,7 +724,7 @@ test("draft creation forwards its hidden history flag without adding arbitrary f
   const response = await proxyRequest(
     new Request("http://localhost:3002/api/kyler/sessions", {
       method: "POST",
-      body: JSON.stringify({ workspace_root: "/project", draft: true, workspace_mode: "project" }),
+      body: JSON.stringify({ cwd: "/project", draft: true, workspace_mode: "project" }),
     }),
     ["sessions"],
   );
@@ -862,7 +865,7 @@ test("default drafts defer workspace selection to the server and preserve its au
     });
     return Response.json({
       session_id: "draft",
-      workspace_root: "/server/config/workspace",
+      cwd: "/server/config/workspace",
       draft: true,
     });
   });
@@ -875,7 +878,7 @@ test("default drafts defer workspace selection to the server and preserve its au
     }),
     ["sessions"],
   );
-  assert.equal((await created.json()).workspace_root, "/server/config/workspace");
+  assert.equal((await created.json()).cwd, "/server/config/workspace");
 });
 
 test("background drafts stay reachable while running and empty drafts stay hidden", () => {
@@ -1499,4 +1502,45 @@ test("patch statistics arrive with the finished event without a details request"
     final = update;
   const tool = final?.content?.find((part) => part.type === "tool-call");
   assert.deepEqual(tool?.providerMetadata?.kyler?.patch, patch);
+});
+
+test("parallel tool completion updates only its matching call", async (t) => {
+  t.mock.method(globalThis, "fetch", async (path: string) => {
+    if (path.endsWith("/runs")) return Response.json({ run_id: "parallel-run" });
+    if (path.endsWith("/events"))
+      return stream([
+        { seq: 1, type: "step_started", step: 1 },
+        { seq: 2, type: "tool_started", call_id: "a", name: "shell" },
+        { seq: 3, type: "tool_started", call_id: "b", name: "shell" },
+        {
+          seq: 4,
+          type: "tool_finished",
+          call_id: "b",
+          name: "shell",
+          status: "success",
+          output: "second",
+        },
+        {
+          seq: 5,
+          type: "tool_finished",
+          call_id: "a",
+          name: "shell",
+          status: "success",
+          output: "first",
+        },
+        { seq: 6, type: "run_completed", output: "Done" },
+      ]);
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  let observedOutOfOrder = false;
+  for await (const update of chatAdapter("parallel", () => {}).run({
+    messages: [{ role: "user", content: [{ type: "text", text: "Check" }], attachments: [] }],
+    abortSignal: new AbortController().signal,
+  } as never) as AsyncGenerator<ChatModelRunResult>) {
+    const calls = update.content?.filter((part) => part.type === "tool-call");
+    const a = calls?.find((part) => part.toolCallId === "a");
+    const b = calls?.find((part) => part.toolCallId === "b");
+    if (b?.result === "success" && a?.result === undefined) observedOutOfOrder = true;
+  }
+  assert.equal(observedOutOfOrder, true);
 });

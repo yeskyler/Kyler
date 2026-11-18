@@ -2,7 +2,7 @@ import type { ModelCatalog, PermissionMode } from "./types.ts";
 export type TaskConfig = {
   name: string;
   prompt: string;
-  workspace_root: string;
+  cwd: string;
   workspace_mode: "isolated" | "project";
   cron: string;
   timezone: string;

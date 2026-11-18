@@ -132,10 +132,20 @@ impl Tool for GetTaskTool {
     fn parameters(&self) -> Value {
         serde_json::to_value(schema_for!(GetTaskArgs)).expect("tool schema is serializable")
     }
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Parallel
+    }
     async fn execute(
         &self,
         args_json: &str,
         context: &mut ToolContext<'_>,
+    ) -> anyhow::Result<String> {
+        self.execute_parallel(args_json, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        args_json: &str,
+        context: &crate::tools::ParallelToolContext<'_>,
     ) -> anyhow::Result<String> {
         let args: GetTaskArgs = serde_json::from_str(args_json)?;
         let scope = context

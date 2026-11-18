@@ -49,30 +49,40 @@ impl RunManager {
             .map_err(ApiError::storage)?;
         self.processes.forget_session(id);
         // This derived directory contains only this session's execution files.
+        let owned = existing
+            .environment
+            .as_ref()
+            .and_then(|environment| environment.managed.as_ref());
+        let owns_directory = owned.is_some() && existing.parent.is_none();
         let directory = self.store.directory().join("_execution").join(id);
-        if directory.exists()
-            && directory
-                .canonicalize()
-                .map_err(|error| ApiError::storage(error.into()))?
-                != directory
-        {
-            return Err(ApiError::bad(
-                "Private execution directory identity changed.",
-            ));
+        if owns_directory && owned.unwrap().root != directory.join("workspace") {
+            return Err(ApiError::bad("Managed directory ownership changed."));
         }
-        match tokio::fs::symlink_metadata(&directory).await {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                tokio::fs::remove_dir_all(&directory)
-                    .await
+        if owns_directory {
+            if directory.exists()
+                && directory
+                    .canonicalize()
                     .map_err(|error| ApiError::storage(error.into()))?
-            }
-            Ok(_) => {
+                    != directory
+            {
                 return Err(ApiError::bad(
                     "Private execution directory identity changed.",
                 ));
             }
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => return Err(ApiError::storage(error.into())),
+            match tokio::fs::symlink_metadata(&directory).await {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                    tokio::fs::remove_dir_all(&directory)
+                        .await
+                        .map_err(|error| ApiError::storage(error.into()))?
+                }
+                Ok(_) => {
+                    return Err(ApiError::bad(
+                        "Private execution directory identity changed.",
+                    ));
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => return Err(ApiError::storage(error.into())),
+            }
         }
         self.store.delete(id).await.map_err(ApiError::storage)?;
         self.publish_session(id).await?;

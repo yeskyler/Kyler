@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct TaskConfig {
     pub name: String,
     pub prompt: String,
-    pub workspace_root: String,
+    pub cwd: String,
     #[serde(default)]
     pub workspace_mode: WorkspaceMode,
     pub cron: String,

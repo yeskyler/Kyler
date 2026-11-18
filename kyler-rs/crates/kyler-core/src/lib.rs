@@ -32,8 +32,8 @@ pub use sandbox::{FilesystemPolicy, MxcSandbox, NetworkAccess, ProcessPolicy, Sa
 pub use session::{Session, SessionInfo, SessionStore};
 pub use subagent::{SubagentConfig, SubagentManager, SubagentStatus, SubagentTask};
 pub use tools::{
-    CompressedToolOutput, Tool, ToolBox, ToolContext, ToolDefinition, ToolExecutionMode, ToolKind,
-    ToolOutputBudget,
+    CompressedToolOutput, ParallelToolContext, Tool, ToolBox, ToolConcurrency, ToolContext,
+    ToolDefinition, ToolExecutionMode, ToolKind, ToolOutputBudget,
 };
 
 pub mod thread;

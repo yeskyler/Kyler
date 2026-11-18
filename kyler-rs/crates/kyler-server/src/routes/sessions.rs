@@ -45,19 +45,30 @@ pub async fn create(
         .map_err(|_| ApiError::bad("Invalid session creation request."))?
         .map(|Json(value)| value)
         .unwrap_or_default();
-    let environment = state
-        .runs
-        .environment_for_create(request.workspace_root.as_deref())?;
+    let environment = state.runs.environment_for_create(request.cwd.as_deref())?;
     let mut session = Session::new();
     session.environment = environment;
-    if request.workspace_mode == kyler_protocol::api::session::WorkspaceMode::Project {
-        session
-            .environment
-            .as_mut()
-            .ok_or_else(|| ApiError::bad("Project execution requires an authorized workspace."))?
-            .workspace_mode = request.workspace_mode;
+    if let Some(environment) = session.environment.as_mut() {
+        if let Some(project) = state
+            .runs
+            .list_workspaces()
+            .await?
+            .into_iter()
+            .filter(|project| environment.cwd.starts_with(&project.path))
+            .max_by_key(|project| project.path.len())
+        {
+            environment.project = Some(kyler_core::environment::ProjectIdentity {
+                root: project.path.into(),
+            });
+        }
     }
-    state.runs.isolate_session(&mut session).await?;
+    let mode = request
+        .workspace_mode
+        .unwrap_or(kyler_protocol::api::session::WorkspaceMode::Project);
+    if mode == kyler_protocol::api::session::WorkspaceMode::Isolated {
+        state.runs.allocate_session_directory(&mut session)?;
+    }
+    state.runs.validate_session_environment(&session)?;
     if request.draft {
         state.runs.mark_draft(&session.session_id).await?;
     }

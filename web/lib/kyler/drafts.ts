@@ -7,7 +7,7 @@ export function createDraftSession(workspace?: string | null) {
     body: JSON.stringify({
       draft: true,
       workspace_mode: "project",
-      ...(workspace ? { workspace_root: workspace } : {}),
+      ...(workspace ? { cwd: workspace } : {}),
     }),
   });
 }

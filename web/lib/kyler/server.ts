@@ -198,7 +198,7 @@ export async function proxyRequest(request: Request, path: string[]) {
         offset += chunk.length;
       }
       if (route === "sessions") {
-        let requested: { workspace_root?: unknown; draft?: unknown; workspace_mode?: unknown };
+        let requested: { cwd?: unknown; draft?: unknown; workspace_mode?: unknown };
         try {
           requested = body.length ? JSON.parse(new TextDecoder().decode(body)) : {};
         } catch {
@@ -209,7 +209,7 @@ export async function proxyRequest(request: Request, path: string[]) {
           typeof requested !== "object" ||
           Array.isArray(requested) ||
           Object.keys(requested).some(
-            (key) => key !== "workspace_root" && key !== "draft" && key !== "workspace_mode",
+            (key) => key !== "cwd" && key !== "draft" && key !== "workspace_mode",
           )
         )
           return Response.json({ message: "Invalid session request." }, { status: 400 });
@@ -221,7 +221,7 @@ export async function proxyRequest(request: Request, path: string[]) {
           requested.workspace_mode !== "isolated"
         )
           return Response.json({ message: "Invalid workspace mode." }, { status: 400 });
-        const workspace = requested.workspace_root;
+        const workspace = requested.cwd;
         if (
           workspace != null &&
           (typeof workspace !== "string" ||
@@ -235,7 +235,7 @@ export async function proxyRequest(request: Request, path: string[]) {
           );
         body = new TextEncoder().encode(
           JSON.stringify({
-            ...(typeof workspace === "string" ? { workspace_root: workspace } : {}),
+            ...(typeof workspace === "string" ? { cwd: workspace } : {}),
             ...(requested.draft === undefined ? {} : { draft: requested.draft }),
             ...(requested.workspace_mode === undefined
               ? {}

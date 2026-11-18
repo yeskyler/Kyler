@@ -43,10 +43,20 @@ impl Tool for WaitTasksTool {
     fn parameters(&self) -> Value {
         serde_json::to_value(schema_for!(WaitTasksArgs)).expect("tool schema is serializable")
     }
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Wait
+    }
     async fn execute(
         &self,
         args_json: &str,
         context: &mut ToolContext<'_>,
+    ) -> anyhow::Result<String> {
+        self.execute_parallel(args_json, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        args_json: &str,
+        context: &crate::tools::ParallelToolContext<'_>,
     ) -> anyhow::Result<String> {
         let args: WaitTasksArgs = serde_json::from_str(args_json)?;
         let scope = context

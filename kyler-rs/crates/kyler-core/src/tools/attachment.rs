@@ -42,7 +42,17 @@ impl Tool for AttachmentTool {
     fn approval_requirement(&self, _: &Value) -> anyhow::Result<ToolOperation> {
         Ok(ToolOperation::Read)
     }
+    fn concurrency(&self) -> crate::tools::ToolConcurrency {
+        crate::tools::ToolConcurrency::Parallel
+    }
     async fn execute(&self, args: &str, context: &mut ToolContext<'_>) -> anyhow::Result<String> {
+        self.execute_parallel(args, &context.parallel()).await
+    }
+    async fn execute_parallel(
+        &self,
+        args: &str,
+        context: &crate::tools::ParallelToolContext<'_>,
+    ) -> anyhow::Result<String> {
         let args: ReadAttachmentRequest = serde_json::from_str(args)?;
         let session = context.session_id.to_owned();
         let store = self.store.clone();

@@ -82,7 +82,7 @@ impl Agent {
             let workspace = self
                 .environment
                 .as_ref()
-                .map(|e| e.session_environment().workspace_root.as_path());
+                .map(|e| e.session_environment().cwd.as_path());
             let snapshot = Arc::new(manager.snapshot(workspace).await?);
             self.observe(super::observation::RuntimeObservation::SkillSnapshot {
                 elapsed: started.elapsed(),

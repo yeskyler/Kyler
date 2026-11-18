@@ -27,8 +27,7 @@ fn ready() -> State {
         model: "DeepSeek V4 Flash".into(),
         context_window_tokens: 128000,
         sliding_window_tokens: Some(76800),
-        workspace_root: Some("/project".into()),
-        working_directory: Some("/project".into()),
+        cwd: Some("/project".into()),
     });
     state.usage = Some(SessionUsage {
         total_tokens: 8932,

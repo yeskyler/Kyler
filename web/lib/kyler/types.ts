@@ -1,8 +1,9 @@
 export type Session = {
+  cwd?: string | null;
   title?: string | null;
   draft?: boolean;
   session_id: string;
-  workspace_root: string | null;
+  project: string | null;
   updated_at?: number;
   status?: string | null;
 };

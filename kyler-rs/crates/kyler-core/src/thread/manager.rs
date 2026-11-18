@@ -102,7 +102,7 @@ impl ThreadManager {
         };
         let environment = match &session.environment {
             Some(saved) => factory.restore(saved)?,
-            None => Arc::new(factory.create(cwd)?.as_ref().clone().project_workspace()?),
+            None => factory.create(cwd)?,
         };
         session.environment = Some(environment.session_environment().clone());
         // A distinct lifetime lease excludes another TUI even while this thread is idle.

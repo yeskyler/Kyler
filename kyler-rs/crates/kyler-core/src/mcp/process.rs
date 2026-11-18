@@ -116,7 +116,7 @@ pub async fn launch(
     request.working_directory = Some(
         environment
             .session_environment()
-            .working_directory
+            .cwd
             .to_string_lossy()
             .into_owned(),
     );
@@ -221,7 +221,7 @@ async fn launch_direct(
     let mut command = tokio::process::Command::new(executable);
     command
         .args(args)
-        .current_dir(&environment.session_environment().working_directory)
+        .current_dir(&environment.session_environment().cwd)
         .env_clear()
         .env("PATH", &environment.policy().executable_search_path)
         .env("LANG", "C.UTF-8")

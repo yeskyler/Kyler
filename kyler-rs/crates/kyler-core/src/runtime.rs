@@ -76,6 +76,8 @@ pub struct Agent {
     max_steps: u32,
     context_policy: ContextPolicy,
     tool_output_budget: ToolOutputBudget,
+    max_parallel_calls: usize,
+    parallel_tool_calls: Option<bool>,
     session_store: Option<Arc<SessionStore>>,
     subagent_manager: Option<Arc<SubagentManager>>,
     environment: Option<Arc<ExecutionEnvironment>>,

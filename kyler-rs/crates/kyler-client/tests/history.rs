@@ -60,7 +60,7 @@ async fn project_session_creation_explicitly_requests_project_execution() {
         let captured = captured.clone();
         async move {
             captured.lock().unwrap().push(request);
-            Json(json!({"session_id":"00000000-0000-4000-8000-000000000001","workspace_root":"/project","working_directory":"/project","created_at":0,"updated_at":0,"event_count":0,"execution_count":0,"status":null}))
+            Json(json!({"session_id":"00000000-0000-4000-8000-000000000001","cwd":"/project","project":"/project","created_at":0,"updated_at":0,"event_count":0,"execution_count":0,"status":null}))
         }
     }));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -81,8 +81,8 @@ async fn project_session_creation_explicitly_requests_project_execution() {
         .await
         .unwrap();
     let requests = requests.lock().unwrap();
-    assert_eq!(requests[0]["workspace_root"], "/project");
+    assert_eq!(requests[0]["cwd"], "/project");
     assert_eq!(requests[0]["workspace_mode"], "project");
-    assert!(requests[1].get("workspace_mode").is_none());
+    assert_eq!(requests[1]["workspace_mode"], "isolated");
     task.abort();
 }

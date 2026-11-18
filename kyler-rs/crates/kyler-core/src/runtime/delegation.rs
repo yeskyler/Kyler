@@ -27,6 +27,8 @@ impl Agent {
         .with_max_steps(if repair { 1 } else { self.max_steps })
         .with_context_policy(self.context_policy.clone())
         .with_tool_output_budget(self.tool_output_budget);
+        child.max_parallel_calls = self.max_parallel_calls;
+        child.parallel_tool_calls = self.parallel_tool_calls;
         child.environment = Some(environment);
         child.model_snapshot = self.model_snapshot.clone();
         child.session_store = self.session_store.clone();
@@ -53,6 +55,8 @@ impl Agent {
         .with_max_steps(manager.config().max_steps)
         .with_context_policy(self.context_policy.clone())
         .with_tool_output_budget(self.tool_output_budget);
+        child.max_parallel_calls = self.max_parallel_calls;
+        child.parallel_tool_calls = self.parallel_tool_calls;
         child.process_manager = self.process_manager.clone();
         child.attachments = self.attachments.clone();
         child.memory_store = self.memory_store.clone();

@@ -77,6 +77,8 @@ impl Agent {
         .with_tool_output_budget(ToolOutputBudget {
             max_bytes: config.agent.tool_output_max_bytes,
         });
+        agent.max_parallel_calls = config.agent.max_parallel_calls;
+        agent.parallel_tool_calls = config.agent.parallel_tool_calls;
         let registry = Arc::new(ModelRegistry::new(config)?);
         agent.model_registry = Some(registry);
         let bound = agent.bind_model(None)?;
@@ -157,6 +159,8 @@ impl Agent {
             max_steps: AgentSettings::default().max_steps,
             context_policy: ContextPolicy::default(),
             tool_output_budget: ToolOutputBudget::default(),
+            max_parallel_calls: 8,
+            parallel_tool_calls: None,
             session_store: None,
             subagent_manager: None,
             environment: None,

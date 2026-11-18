@@ -31,7 +31,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use serde_json::Value;
 
-pub use context::ToolContext;
+pub use context::{ParallelToolContext, ToolContext};
 pub use output::{CompressedToolOutput, ToolOutputBudget};
 
 pub use kyler_protocol::{
@@ -74,8 +74,32 @@ impl ToolExecutionMode {
     }
 }
 
+/// Runtime scheduling policy, independent of sandbox permissions and approval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolConcurrency {
+    Exclusive,
+    Parallel,
+    /// A bounded wait uses a separate lane rather than command execution slots.
+    Wait,
+}
+
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
+    fn concurrency(&self) -> ToolConcurrency {
+        ToolConcurrency::Exclusive
+    }
+
+    async fn execute_parallel(
+        &self,
+        _args_json: &str,
+        _context: &ParallelToolContext<'_>,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!(
+            "tool {} has no parallel execution implementation",
+            self.name()
+        )
+    }
+
     fn validate_arguments(&self, arguments: &Value) -> anyhow::Result<()> {
         arguments::validate(&self.parameters(), arguments)
     }
