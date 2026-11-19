@@ -17,24 +17,26 @@
     <a href="docs/configuration.md"><img src="https://img.shields.io/badge/extensions-Skills-10b981?style=flat-square" alt="Skills"></a>
   </p>
   <p><a href="README.md">English</a> · <strong>简体中文</strong></p>
-  <p><a href="#安装">安装</a> · <a href="#演示">演示</a> · <a href="#主要能力">主要能力</a> · <a href="#文档导航">文档导航</a></p>
+  <p><a href="#安装">安装</a> · <a href="#演示">演示</a> · <a href="#架构">架构</a> · <a href="#文档导航">文档导航</a></p>
 </div>
 
 Kyler 是一个面向编码、研究与文档工作的 AI 助手。通过对话、工具执行和项目工作区，
-帮助你理解问题、推进任务并交付成果。支持 Web、终端界面（TUI）和 CLI，
-可连接兼容 OpenAI Chat Completions 的模型服务。
+帮助你理解问题、推进任务并交付成果。支持 Web、终端界面（TUI）和 CLI。
 
 ## 演示
 
-![Kyler Web 界面](demo/example-1.png)
+在 Kyler Web 界面中使用中文对话：
 
-## 主要能力
+![Kyler Web 中文对话演示](demo/example-1.png)
 
-- **编码开发**：理解项目、编写代码、排查问题和执行测试。
-- **研究整理**：阅读资料、分析信息、比较方案并整理文档。
-- **持续协作**：通过工作区、持久化会话和记忆延续任务。
-- **扩展与自动化**：连接 MCP 工具、加载技能、设置定时任务。
-- **查看与控制**：查看上下文、工具调用和产物，管理沙箱权限与执行审批。
+## 架构
+
+Agent Runtime 驱动执行闭环：**上下文 → 模型 → 工具 → 结果 → 上下文**。
+Memory、Skills、MCP 工具、沙箱执行与经验沉淀围绕同一个运行时协作。
+
+![Kyler Agent 以运行时为中心的架构图](docs/assets/agent-architecture.svg)
+
+[查看完整架构图](docs/assets/agent-architecture.svg) · [阅读架构说明（英文）](docs/agent-architecture.md)
 
 ## 安装
 

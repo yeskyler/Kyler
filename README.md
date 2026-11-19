@@ -17,25 +17,27 @@
     <a href="docs/configuration.md"><img src="https://img.shields.io/badge/extensions-Skills-10b981?style=flat-square" alt="Skills"></a>
   </p>
   <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
-  <p><a href="#installation">Install</a> · <a href="#demo">Demo</a> · <a href="#capabilities">Capabilities</a> · <a href="#documentation">Documentation</a></p>
+  <p><a href="#installation">Install</a> · <a href="#demo">Demo</a> · <a href="#architecture">Architecture</a> · <a href="#documentation">Documentation</a></p>
 </div>
 
 Kyler is an AI assistant for coding, research, and document work. It combines
 conversation, tool execution, and project workspaces to help you understand problems,
-complete tasks, and deliver results. Use it through Web, TUI, or CLI with models
-served through OpenAI-compatible Chat Completions APIs.
+complete tasks, and deliver results. Use it through Web, TUI, or CLI.
 
 ## Demo
 
-![Kyler Web interface](demo/example-1.png)
+An English conversation in the Kyler Web interface:
 
-## Capabilities
+![Kyler Web interface with an English conversation](demo/example.png)
 
-- **Coding**: understand projects, write code, debug issues, and run tests.
-- **Research**: read materials, analyze information, compare approaches, and organize documents.
-- **Continuity**: work across project workspaces, persistent conversations, and memory.
-- **Extensions and automation**: connect MCP tools, load skills, and schedule tasks.
-- **Visibility and control**: inspect context, tool calls, and deliverables; manage sandbox permissions and approvals.
+## Architecture
+
+Agent Runtime drives the execution loop: **Context → Model → Tools → Results → Context**.
+Memory, Skills, MCP tools, sandbox execution, and reviewed experience connect around this shared runtime.
+
+![Kyler Agent runtime-centered architecture](docs/assets/agent-architecture.svg)
+
+[View the full-size diagram](docs/assets/agent-architecture.svg) · [Explore the architecture](docs/agent-architecture.md)
 
 ## Installation
 

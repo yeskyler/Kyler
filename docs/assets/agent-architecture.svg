@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1280" viewBox="0 0 1680 1280" role="img" aria-labelledby="title desc"><title id="title">Kyler Agent: Runtime-Centered Architecture</title><desc id="desc">Agent Runtime is central. Its execution loop assembles context, invokes a model, dispatches authorized tools, records results and repeats. Interfaces enter through ThreadManager. Model providers, MCP, Skills, scoped memory, sandbox workers and persistence connect around the runtime. Reviewed experience feeds future context and skills.</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#526783"/></marker><marker id="blue" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9" fill="#2563eb"/></marker><marker id="green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#168365"/></marker></defs><style>text{font-family:Arial,Helvetica,sans-serif;fill:#18304e}.heading{font-size:18px;font-weight:700}.label{font-size:12px;font-weight:700;letter-spacing:1.5px;fill:#667b94}.body{font-size:14px;fill:#526783}.edge{fill:none;stroke:#526783;stroke-width:1.7;marker-end:url(#arrow)}.loop{fill:none;stroke:#2563eb;stroke-width:3;marker-end:url(#blue)}.feedback{fill:none;stroke:#168365;stroke-width:2;stroke-dasharray:7 5;marker-end:url(#green)}.caption{font-size:12px;fill:#526783;paint-order:stroke;stroke:#fff;stroke-width:5;stroke-linejoin:round}</style><rect width="1680" height="1280" fill="#fff"/>
+<text x="40" y="42" class="heading">KYLER AGENT — RUNTIME-CENTERED ARCHITECTURE</text>
+<text x="40" y="68" class="body">One shared execution loop · multiple interfaces · bounded tools · reviewed experience reuse</text>
+<rect x="414" y="99" width="852" height="64" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="840.0" y="128" class="heading" text-anchor="middle">Web  /  CLI  /  TUI  /  Editor (ACP)</text>
+<text x="840.0" y="153" class="body" text-anchor="middle">HTTP &amp; SSE adapters · in-process TUI · official ACP Rust SDK / stdio</text>
+<rect x="540" y="201" width="600" height="76" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="840.0" y="230" class="heading" text-anchor="middle">ThreadManager</text>
+<text x="840.0" y="255" class="body" text-anchor="middle">Session lifecycle · turn operations · cancellation · event channels</text>
+<path d="M840,163 L840,201" class="edge"/>
+<text x="850" y="186" class="caption">user turn</text>
+<rect x="400" y="327" width="880" height="579" rx="16" fill="#eff6ff" stroke="#7ca6e3" stroke-width="1.5"/>
+<text x="840" y="372" class="heading" text-anchor="middle">AGENT RUNTIME</text>
+<text x="840" y="399" class="body" text-anchor="middle">kyler-core / one admitted turn</text>
+<path d="M840,277 L840,327" class="edge"/>
+<text x="852" y="307" class="caption">admit / resume</text>
+<rect x="453" y="452" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
+<text x="606.5" y="481" class="heading" text-anchor="middle">1  Assemble Context</text>
+<text x="606.5" y="506" class="body" text-anchor="middle">History + summaries + active memory</text>
+<text x="606.5" y="527" class="body" text-anchor="middle">Loaded skills + advertised schemas</text>
+<text x="606.5" y="548" class="body" text-anchor="middle">Token budget / compaction</text>
+<rect x="920" y="452" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
+<text x="1073.5" y="481" class="heading" text-anchor="middle">2  Model Inference</text>
+<text x="1073.5" y="506" class="body" text-anchor="middle">Model snapshot + thinking preference</text>
+<text x="1073.5" y="527" class="body" text-anchor="middle">Stream text and complete tool calls</text>
+<text x="1073.5" y="548" class="body" text-anchor="middle">Usage and cancellation</text>
+<rect x="920" y="727" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
+<text x="1073.5" y="756" class="heading" text-anchor="middle">3  Dispatch Tools</text>
+<text x="1073.5" y="781" class="body" text-anchor="middle">Validate → authorize → schedule</text>
+<text x="1073.5" y="802" class="body" text-anchor="middle">Parallel / Exclusive / Wait lanes</text>
+<text x="1073.5" y="823" class="body" text-anchor="middle">Execute tools and child tasks</text>
+<rect x="453" y="727" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
+<text x="606.5" y="756" class="heading" text-anchor="middle">4  Record Results</text>
+<text x="606.5" y="781" class="body" text-anchor="middle">Associate by call_id · checkpoint</text>
+<text x="606.5" y="802" class="body" text-anchor="middle">Retain original / compress model view</text>
+<text x="606.5" y="823" class="body" text-anchor="middle">Emit structured progress events</text>
+<path d="M760,510 L920,510" class="loop"/>
+<text x="790" y="498" class="caption">model request</text>
+<path d="M1074,567 L1074,727" class="loop"/>
+<text x="1087" y="648" class="caption">tool calls</text>
+<path d="M920,785 L760,785" class="loop"/>
+<text x="791" y="773" class="caption">tool results</text>
+<path d="M606,727 L606,567" class="loop"/>
+<text x="469" y="650" class="caption">next step</text>
+<text x="840" y="616" class="label" text-anchor="middle">EXECUTE → OBSERVE → CONTINUE</text>
+<text x="840" y="648" class="body" text-anchor="middle">Repeat until final answer, cancellation</text>
+<text x="840" y="671" class="body" text-anchor="middle">or an execution limit is reached.</text>
+<text x="840" y="880" class="body" text-anchor="middle">Complete tool arguments only · host limits remain authoritative</text>
+<text x="40" y="354" class="label">CONTEXT &amp; KNOWLEDGE</text>
+<rect x="40" y="382" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="195.0" y="411" class="heading" text-anchor="middle">Scoped Memory</text>
+<text x="195.0" y="436" class="body" text-anchor="middle">Facts · preferences · lessons</text>
+<text x="195.0" y="457" class="body" text-anchor="middle">Candidate / active / rejected / invalid</text>
+<text x="195.0" y="478" class="body" text-anchor="middle">Provenance · expiry · revisions</text>
+<rect x="40" y="534" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="195.0" y="563" class="heading" text-anchor="middle">kyler-skills</text>
+<text x="195.0" y="588" class="body" text-anchor="middle">Directory → load_skill → resources</text>
+<text x="195.0" y="609" class="body" text-anchor="middle">Built-in / user / project packages</text>
+<text x="195.0" y="630" class="body" text-anchor="middle">Fingerprint review and hidden drafts</text>
+<path d="M350,434 L378,434 L378,477 L453,477" class="edge"/>
+<text x="353" y="420" class="caption">eligible records</text>
+<path d="M350,586 L388,586 L388,541 L453,541" class="edge"/>
+<rect x="40" y="703" width="310" height="139" rx="8" fill="#fffbef" stroke="#e2c77c" stroke-width="1.5"/>
+<text x="195.0" y="732" class="heading" text-anchor="middle">Host Control Plane</text>
+<text x="195.0" y="757" class="body" text-anchor="middle">Sandbox policy + tool approvals</text>
+<text x="195.0" y="778" class="body" text-anchor="middle">Filesystem / network / process limits</text>
+<text x="195.0" y="799" class="body" text-anchor="middle">Scheduler: cron / zones / leases</text>
+<text x="195.0" y="820" class="body" text-anchor="middle">Immutable run snapshots</text>
+<path d="M350,771 L379,771 L379,925 L1244,925 L1244,811 L1227,811" class="feedback"/>
+<text x="691" y="939" class="caption">policy constrains every tool call</text>
+<text x="1330" y="354" class="label">MODELS &amp; EXECUTION</text>
+<rect x="1330" y="382" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="1485.0" y="411" class="heading" text-anchor="middle">Model Provider</text>
+<text x="1485.0" y="436" class="body" text-anchor="middle">Configured inference service</text>
+<text x="1485.0" y="457" class="body" text-anchor="middle">Streaming response and usage</text>
+<text x="1485.0" y="478" class="body" text-anchor="middle">Credentials remain server-side</text>
+<path d="M1227,477 L1302,477 L1302,434 L1330,434" class="edge"/>
+<text x="1237" y="462" class="caption">inference</text>
+<rect x="1330" y="544" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="1485.0" y="573" class="heading" text-anchor="middle">Tools &amp; Sandbox</text>
+<text x="1485.0" y="598" class="body" text-anchor="middle">Files / patches / shell / processes</text>
+<text x="1485.0" y="619" class="body" text-anchor="middle">Plans / questions / artifacts / images</text>
+<text x="1485.0" y="640" class="body" text-anchor="middle">MXC worker + managed processes</text>
+<rect x="1330" y="703" width="310" height="139" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="1485.0" y="732" class="heading" text-anchor="middle">kyler-mcp</text>
+<text x="1485.0" y="757" class="body" text-anchor="middle">Nonblocking stdio / HTTP connectors</text>
+<text x="1485.0" y="778" class="body" text-anchor="middle">Versioned tool metadata catalogs</text>
+<text x="1485.0" y="799" class="body" text-anchor="middle">search_tool_bm25 → next request</text>
+<text x="1485.0" y="820" class="body" text-anchor="middle">Local BM25 → authorized MCP call</text>
+<path d="M1227,756 L1307,756 L1307,597 L1330,597" class="edge"/>
+<path d="M1227,785 L1330,785" class="edge"/>
+<text x="1262" y="773" class="caption">call</text>
+<rect x="453" y="978" width="774" height="91" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="840.0" y="1007" class="heading" text-anchor="middle">Session State &amp; Persistence</text>
+<text x="840.0" y="1032" class="body" text-anchor="middle">Rollout + checkpoints + run manifests + artifact snapshots</text>
+<text x="840.0" y="1053" class="body" text-anchor="middle">kyler-store: application SQLite indexes / preferences · scheduler-owned database</text>
+<path d="M606,842 L606,978" class="edge"/>
+<text x="618" y="958" class="caption">durable results</text>
+<rect x="1330" y="978" width="310" height="91" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
+<text x="1485.0" y="1007" class="heading" text-anchor="middle">User-visible Results</text>
+<text x="1485.0" y="1032" class="body" text-anchor="middle">Text · tool events · approvals</text>
+<text x="1485.0" y="1053" class="body" text-anchor="middle">Artifacts · previews · inspectors</text>
+<path d="M1227,1023 L1330,1023" class="edge"/>
+<text x="1257" y="1011" class="caption">project</text>
+<rect x="40" y="1122" width="1600" height="103" rx="8" fill="#edf9f3" stroke="#9dcdb6" stroke-width="1.5"/>
+<text x="840" y="1151" class="label" text-anchor="middle">REVIEWED EXPERIENCE FEEDBACK</text>
+<text x="840" y="1180" class="body" text-anchor="middle">Task experience → candidate memory → human review → active context or hidden skill draft → reviewed publication → future reuse</text>
+<text x="840" y="1205" class="body" text-anchor="middle">Memory review: exact revision  •  Skill publication: exact fingerprints  •  No automatic prompt/code rewriting or inferred-skill publication</text>
+<path d="M840,1069 L840,1122" class="feedback"/>
+<path d="M40,1174 L20,1174 L20,434 L40,434" class="feedback"/>
+<text x="40" y="1257" class="body">Foundations: kyler-protocol · kyler-config · kyler-logging · kyler-evals</text>
+<text x="1640" y="1257" class="caption" text-anchor="end">Solid: calls / data    Blue: runtime loop    Dashed green: constraints / feedback</text>
+</svg>

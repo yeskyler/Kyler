@@ -4,6 +4,9 @@ Kyler combines a Rust agent backend with Web, TUI, and CLI clients. The installe
 `kyler` executable includes the CLI, server launcher, TUI, and internal worker entry.
 The standalone Web application runs in a separate Node.js process.
 
+See the [English architecture overview](agent-architecture.md) for a full-system
+diagram, the reviewed experience feedback loop, and a feature ownership map.
+
 ## Request path
 
 ```mermaid
@@ -406,15 +409,17 @@ Partial arguments are neither published nor executed. Identity updates reuse the
 card; cancellation or failure settles unfinished preparation along with queued tools.
 
 After recording a model's complete tool-call batch, the runtime emits `tool_queued` for
-every call before authorizing and executing calls in order. `tool_started` means
+every call before authorization and scheduling. Adjacent parallel-capable calls use
+bounded execution and wait lanes; exclusive calls form barriers. `tool_started` means
 execution has begun; `tool_finished` also covers calls refused by approval. Web and TUI
 update existing nodes by call ID, distinguish queued and approval waits, and settle
 unfinished nodes when a run ends. History uses retained presentation timestamps to
 distinguish calls that have not started.
 
 The Web client loads successful plan-tool details independently of the SSE event loop,
-with a timeout and protection against older results replacing newer plans. Tool
-execution remains serial within each batch.
+with a timeout and protection against older results replacing newer plans. The
+model's parallel-call hint is independent of runtime concurrency limits; scheduling
+does not infer data dependencies or prevent cross-session file conflicts.
 
 ## Session thinking preference
 
