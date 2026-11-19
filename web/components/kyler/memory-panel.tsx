@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
 import { BrainIcon, SearchIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { api } from "@/lib/kyler/client";
+import { api, KylerApiError } from "@/lib/kyler/client";
+import { canActivateMemory, type MemoryStatus, type MemoryDetails } from "@/lib/kyler/memory";
 import {
   inspectionTime,
   memoryActivityBuckets,
@@ -32,7 +33,72 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
   const [usedOnly, setUsedOnly] = useState(false);
-  const [selectedKey, setSelectedKey] = useState<string>();
+  const [status, setStatus] = useState<MemoryStatus | "all">("candidate");
+  const [selected, setSelected] = useState<MemoryDetails>();
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [notice, setNotice] = useState("");
+  const generation = useRef(0);
+  useEffect(() => {
+    generation.current += 1;
+    setData(undefined);
+    setSelected(undefined);
+    setConfirmed(false);
+    setReviewError("");
+    setNotice("");
+    setBusy(false);
+  }, [session]);
+  async function inspect(key: string) {
+    if (busy) return;
+    const current = generation.current;
+    setBusy(true);
+    setSelected(undefined);
+    setConfirmed(false);
+    setReviewError("");
+    try {
+      const value = await api<MemoryDetails>(
+        `sessions/${session}/memory/entry?${new URLSearchParams({ key })}`,
+      );
+      if (current === generation.current) setSelected(value);
+    } catch (failure) {
+      if (current === generation.current) setReviewError((failure as Error).message);
+    } finally {
+      if (current === generation.current) setBusy(false);
+    }
+  }
+  async function act(next: Exclude<MemoryStatus, "candidate">) {
+    if (!selected || busy || !confirmed) return;
+    const current = generation.current;
+    setBusy(true);
+    setReviewError("");
+    try {
+      await api(`sessions/${session}/memory/review`, {
+        method: "POST",
+        body: JSON.stringify({
+          key: selected.entry.key,
+          expected_scope: selected.scope,
+          expected_revision: selected.entry.revision,
+          status: next,
+        }),
+      });
+      if (current !== generation.current) return;
+      setSelected(undefined);
+      setConfirmed(false);
+      setNotice(`Memory marked ${next}.`);
+      const value = await api<MemoryInspection>(`sessions/${session}/memory/inspect`);
+      if (current === generation.current) setData(value);
+    } catch (failure) {
+      if (current !== generation.current) return;
+      if (failure instanceof KylerApiError && failure.status === 409) {
+        setSelected(undefined);
+        setConfirmed(false);
+        setReviewError("Content changed. Reopen the current memory and review it again.");
+      } else setReviewError((failure as Error).message);
+    } finally {
+      if (current === generation.current) setBusy(false);
+    }
+  }
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
@@ -84,25 +150,29 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
   }));
   const entries = data.entries.filter(
     (entry) =>
+      (status === "all" || entry.status === status) &&
       (!tag || entry.tags.includes(tag)) &&
       (!usedOnly || data.retrieved_keys.includes(entry.key)) &&
       `${entry.key} ${entry.content} ${entry.tags.join(" ")}`
         .toLocaleLowerCase()
         .includes(query.trim().toLocaleLowerCase()),
   );
-  const selected = data.entries.find((entry) => entry.key === selectedKey);
   const latestUpdate = Math.max(0, ...data.entries.map((entry) => entry.updated_at));
   const clear = () => {
     setQuery("");
     setTag("");
     setUsedOnly(false);
+    setStatus("all");
   };
   return (
     <div className="space-y-5">
       <InspectionError>{error}</InspectionError>
       <InspectionMetrics
         items={[
-          { label: "Saved facts", value: data.entries.length },
+          {
+            label: "Active memories",
+            value: data.entries.filter((entry) => entry.status === "active").length,
+          },
           { label: "Used in latest request", value: data.retrieved_keys.length },
           { label: "Context compressions", value: data.compression_count },
           {
@@ -246,10 +316,29 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
         )}
       </InspectionCard>
       <InspectionCard
-        title="Saved memory"
-        description={`Explicit facts and preferences · Last updated ${latestUpdate ? inspectionTime(latestUpdate) : "—"}`}
+        title="Memory"
+        description={`Scoped facts and experience · Last updated ${latestUpdate ? inspectionTime(latestUpdate) : "—"}`}
       >
+        <InspectionError>{reviewError}</InspectionError>
+        {notice && (
+          <p role="status" className="mb-3 text-sm">
+            {notice}
+          </p>
+        )}
         <div className="mb-5 flex flex-wrap items-center gap-3">
+          <select
+            aria-label="Memory status"
+            value={status}
+            disabled={busy}
+            onChange={(event) => setStatus(event.target.value as MemoryStatus | "all")}
+            className="h-9 rounded-lg border bg-background px-3 text-xs"
+          >
+            <option value="candidate">Candidates</option>
+            <option value="active">Active</option>
+            <option value="rejected">Rejected</option>
+            <option value="invalid">Invalid</option>
+            <option value="all">All statuses</option>
+          </select>
           <div className="relative min-w-0 flex-1 basis-60">
             <SearchIcon
               aria-hidden
@@ -285,7 +374,7 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
           >
             Recently used
           </Button>
-          {(query || tag || usedOnly) && (
+          {(query || tag || usedOnly || status !== "all") && (
             <Button type="button" size="sm" variant="ghost" onClick={clear}>
               <XIcon />
               Clear
@@ -293,12 +382,12 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
           )}
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          {entries.length} of {data.entries.length} facts
+          {entries.length} of {data.entries.length} memories
         </p>
         {!entries.length ? (
           <InspectionEmpty>
-            {query || tag || usedOnly
-              ? "No matching facts. Try clearing the filters."
+            {query || tag || usedOnly || status !== "all"
+              ? "No memories match these filters. Try another status or clear the filters."
               : "No long-term facts saved yet. Conversation history is not automatically stored here."}
           </InspectionEmpty>
         ) : (
@@ -307,13 +396,17 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
               <button
                 key={entry.key}
                 type="button"
-                onClick={() => setSelectedKey(entry.key)}
+                disabled={busy}
+                onClick={() => void inspect(entry.key)}
                 className="flex w-full items-start gap-3 px-4 py-4 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
               >
                 <BrainIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="break-words text-sm font-medium">{entry.key}</span>
+                    <span className="rounded-md border px-2 py-0.5 text-[10px] capitalize">
+                      {entry.status}
+                    </span>
                     {data.retrieved_keys.includes(entry.key) && (
                       <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
                         Recently used
@@ -377,31 +470,126 @@ export function MemoryPanel({ session, active = true }: { session: string; activ
         )}
       </InspectionCard>
       <Sheet
-        open={!!selected}
+        open={!!selected || (busy && !selected)}
         onOpenChange={(open) => {
-          if (!open) setSelectedKey(undefined);
+          if (!open && !busy) {
+            setSelected(undefined);
+            setConfirmed(false);
+          }
         }}
       >
         <SheetContent className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl">
           <div className="shrink-0 border-b p-6 pr-12">
-            <SheetTitle className="break-words text-xl font-semibold">{selected?.key}</SheetTitle>
-            <SheetDescription className="mt-2">Saved fact and provenance.</SheetDescription>
+            <SheetTitle className="break-words text-xl font-semibold">
+              {selected?.entry.key ?? "Opening memory…"}
+            </SheetTitle>
+            <SheetDescription className="mt-2">
+              Review content, evidence and applicability before changing its status.
+            </SheetDescription>
           </div>
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
-            <p className="whitespace-pre-wrap break-words text-sm leading-7">{selected?.content}</p>
-            <dl className="space-y-3 border-t pt-5 text-xs">
-              {[
-                ["Revision", selected?.revision],
-                ["Updated", inspectionTime(selected?.updated_at)],
-                ["Source session", selected?.source_session],
-                ["Tags", selected?.tags.join(", ") || "None"],
-              ].map(([label, value]) => (
-                <div key={label} className="grid grid-cols-[100px_1fr] gap-4">
-                  <dt className="text-muted-foreground">{label}</dt>
-                  <dd className="break-all">{value}</dd>
+            <InspectionError>{reviewError}</InspectionError>
+            {selected && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  {selected.entry.status} · revision {selected.entry.revision} ·{" "}
+                  {selected.entry.metadata.kind}
+                </p>
+                <pre className="whitespace-pre-wrap break-words rounded-xl bg-muted/40 p-4 text-sm">
+                  {selected.entry.content}
+                </pre>
+                <dl className="space-y-3 text-sm">
+                  <div>
+                    <dt className="font-medium">Updated</dt>
+                    <dd className="text-muted-foreground">
+                      {inspectionTime(selected.entry.updated_at)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium">Tags</dt>
+                    <dd className="text-muted-foreground">
+                      {selected.entry.tags.join(", ") || "None"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium">Applies when</dt>
+                    <dd className="whitespace-pre-wrap text-muted-foreground">
+                      {selected.entry.metadata.conditions || "No conditions recorded"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium">Evidence</dt>
+                    <dd className="text-xs text-muted-foreground">
+                      Recorded references are claims; verify them before activation.
+                    </dd>
+                    <dd className="whitespace-pre-wrap text-muted-foreground">
+                      {selected.entry.metadata.evidence.join("\n") ||
+                        "No evidence recorded; review the claim independently."}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium">Source</dt>
+                    <dd className="break-all text-xs text-muted-foreground">
+                      Session {selected.entry.source_session}
+                      <br />
+                      Execution {selected.entry.source_execution ?? "not recorded"}
+                      <br />
+                      Tool call {selected.entry.source_tool_call ?? "not recorded"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium">Expiry</dt>
+                    <dd className="text-muted-foreground">
+                      {selected.entry.metadata.expires_at === null
+                        ? "No expiry set"
+                        : new Date(selected.entry.metadata.expires_at).toLocaleString()}
+                    </dd>
+                  </div>
+                </dl>
+                {!canActivateMemory(selected.entry) && (
+                  <p className="text-sm text-destructive">
+                    Expired or sensitive memory cannot be activated.
+                  </p>
+                )}
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    onChange={(event) => setConfirmed(event.target.checked)}
+                    disabled={busy}
+                  />
+                  I reviewed this content, its evidence and applicability.
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {selected.entry.status !== "active" && (
+                    <Button
+                      disabled={busy || !confirmed || !canActivateMemory(selected.entry)}
+                      onClick={() => void act("active")}
+                    >
+                      Activate
+                    </Button>
+                  )}
+                  {selected.entry.status === "candidate" && (
+                    <Button
+                      variant="outline"
+                      disabled={busy || !confirmed}
+                      onClick={() => void act("rejected")}
+                    >
+                      Reject
+                    </Button>
+                  )}
+                  {selected.entry.status === "active" && (
+                    <Button
+                      variant="outline"
+                      disabled={busy || !confirmed}
+                      onClick={() => void act("invalid")}
+                    >
+                      Mark invalid
+                    </Button>
+                  )}
                 </div>
-              ))}
-            </dl>
+              </>
+            )}
           </div>
         </SheetContent>
       </Sheet>

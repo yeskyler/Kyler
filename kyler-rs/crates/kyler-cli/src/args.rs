@@ -21,6 +21,11 @@ pub struct Args {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Review local learning candidates or publish an inspected skill draft; no model call.
+    Learning {
+        #[command(subcommand)]
+        command: LearningCommand,
+    },
     /// Serve Agent Client Protocol v1 over stdin/stdout for an editor.
     Acp,
     /// Show the last 100 lines and follow managed service logs; Ctrl+C exits.
@@ -101,6 +106,56 @@ pub enum Command {
 pub enum LogTarget {
     Backend,
     Web,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LearningCommand {
+    /// Review a specific memory store and scope returned by the memory tool.
+    Memory {
+        #[arg(long)]
+        store: PathBuf,
+        #[arg(long)]
+        scope: String,
+        #[command(subcommand)]
+        command: MemoryReviewCommand,
+    },
+    /// Inspect hidden user skill drafts using the selected local configuration.
+    Drafts {
+        #[command(subcommand)]
+        command: DraftReviewCommand,
+    },
+}
+#[derive(Debug, Subcommand)]
+pub enum MemoryReviewCommand {
+    List,
+    Review {
+        key: String,
+        #[arg(long)]
+        revision: u64,
+        #[arg(long, value_enum)]
+        status: MemoryReviewStatus,
+    },
+}
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum MemoryReviewStatus {
+    Active,
+    Rejected,
+    Invalid,
+}
+#[derive(Debug, Subcommand)]
+pub enum DraftReviewCommand {
+    List,
+    Show {
+        name: String,
+    },
+    Publish {
+        name: String,
+        #[arg(long)]
+        fingerprint: String,
+        /// Required when replacing an installed user skill.
+        #[arg(long)]
+        expected_installed: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

@@ -85,6 +85,21 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{session}/memory/{key}",
             axum::routing::delete(memory::delete),
         )
+        .route("/v1/sessions/{id}/memory/entries", get(memory::memories))
+        .route("/v1/sessions/{id}/memory/entry", get(memory::details))
+        .route(
+            "/v1/sessions/{id}/memory/review",
+            post(memory::review_memory),
+        )
+        .route("/v1/sessions/{id}/skills/drafts", get(skills::drafts))
+        .route(
+            "/v1/sessions/{session}/skills/drafts/{name}",
+            get(skills::draft),
+        )
+        .route(
+            "/v1/sessions/{session}/skills/drafts/{name}/publish",
+            post(skills::publish),
+        )
         .route("/v1/sessions/{id}/tasks", get(tasks::list))
         .route(
             "/v1/sessions/{session}/tasks/{kind}/{id}",

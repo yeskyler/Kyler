@@ -84,3 +84,37 @@ pub struct InstallSkillRequest {
     pub scope: SkillScope,
     pub expected_fingerprint: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillDraft {
+    pub name: String,
+    pub description: String,
+    pub fingerprint: String,
+    pub resources: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillDraftDetails {
+    pub info: SkillDraft,
+    pub files: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DraftReviewPage {
+    pub scope: String,
+    pub drafts: Vec<SkillDraft>,
+    pub total: usize,
+    pub next_cursor: Option<usize>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DraftReviewDetails {
+    pub scope: String,
+    pub draft: SkillDraftDetails,
+    pub installed_fingerprint: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishDraftRequest {
+    pub expected_scope: String,
+    pub fingerprint: String,
+    pub expected_installed: Option<String>,
+}

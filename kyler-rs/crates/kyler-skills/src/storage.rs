@@ -15,7 +15,128 @@ use kyler_protocol::api::skills::{
     InstallSkillRequest, SaveSkillRequest, SkillInfo, SkillScope, SkillSource,
 };
 
+pub use kyler_protocol::api::skills::{SkillDraft, SkillDraftDetails};
+fn read_draft(root: &Path, name: &str, settings: &SkillSettings) -> Result<SkillDraftDetails> {
+    ensure!(loader::safe_name(name), "invalid skill draft name");
+    checked_directory(root)?;
+    let path = root.join(name);
+    let package = loader::package(&path, SkillSource::User, settings)?;
+    ensure!(
+        package.info.name == name,
+        "Draft name does not match directory"
+    );
+    let mut files = BTreeMap::new();
+    for (relative, digest) in &package.files {
+        let bytes = loader::read_file(
+            &package.root,
+            Path::new(relative),
+            if relative == "SKILL.md" {
+                settings.max_instruction_bytes
+            } else {
+                settings.max_resource_bytes
+            },
+        )?;
+        ensure!(
+            loader::digest(&bytes) == *digest,
+            "Skill draft changed while reading"
+        );
+        files.insert(relative.clone(), String::from_utf8(bytes)?);
+    }
+    Ok(SkillDraftDetails {
+        info: SkillDraft {
+            name: package.info.name,
+            description: package.info.description,
+            fingerprint: package.info.fingerprint,
+            resources: package.info.resources,
+        },
+        files,
+    })
+}
+
 impl SkillManager {
+    /// Drafts live outside discovery and cannot shadow or enable installed skills.
+    pub async fn save_draft(&self, request: SaveSkillRequest) -> Result<SkillDraft> {
+        ensure!(
+            request.scope == SkillScope::User,
+            "Skill drafts currently use user scope only"
+        );
+        let root = self.destination(None, SkillScope::User)?.join(".drafts");
+        let settings = self.settings.clone();
+        let _write = self.writes.lock().await;
+        tokio::task::spawn_blocking(move || {
+            let info = publish(
+                &root,
+                &request.name,
+                SkillScope::User,
+                request
+                    .files
+                    .into_iter()
+                    .map(|(path, text)| (path, text.into_bytes()))
+                    .collect(),
+                request.expected_fingerprint.as_deref(),
+                &settings,
+            )?;
+            Ok(SkillDraft {
+                name: info.name,
+                description: info.description,
+                fingerprint: info.fingerprint,
+                resources: info.resources,
+            })
+        })
+        .await?
+    }
+    pub async fn draft_details(&self, name: &str) -> Result<SkillDraftDetails> {
+        let root = self.destination(None, SkillScope::User)?.join(".drafts");
+        let settings = self.settings.clone();
+        let name = name.to_owned();
+        tokio::task::spawn_blocking(move || read_draft(&root, &name, &settings)).await?
+    }
+    pub async fn drafts(&self) -> Result<Vec<SkillDraft>> {
+        let root = self.destination(None, SkillScope::User)?.join(".drafts");
+        let settings = self.settings.clone();
+        tokio::task::spawn_blocking(move || {
+            if !root.exists() {
+                return Ok(Vec::new());
+            }
+            checked_directory(&root)?;
+            let mut drafts = Vec::new();
+            for entry in fs::read_dir(&root)? {
+                let entry = entry?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with('.') {
+                    continue;
+                }
+                ensure!(drafts.len() < 128, "Skill draft capacity exceeded");
+                drafts.push(read_draft(&root, &name, &settings)?.info);
+            }
+            drafts.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(drafts)
+        })
+        .await?
+    }
+    /// Host-only promotion: publish exactly the inspected bytes through normal validation.
+    pub async fn publish_draft(
+        &self,
+        name: &str,
+        fingerprint: &str,
+        expected_installed: Option<String>,
+    ) -> Result<SkillInfo> {
+        let draft = self.draft_details(name).await?;
+        ensure!(
+            draft.info.fingerprint == fingerprint,
+            "Skill draft changed; review the current fingerprint"
+        );
+        self.save(
+            None,
+            SaveSkillRequest {
+                name: name.into(),
+                scope: SkillScope::User,
+                files: draft.files,
+                expected_fingerprint: expected_installed,
+            },
+        )
+        .await
+    }
     /// Install one user package without overwriting an existing skill.
     pub async fn install_archive(&self, bytes: Vec<u8>) -> Result<SkillInfo> {
         let root = self.destination(None, SkillScope::User)?;

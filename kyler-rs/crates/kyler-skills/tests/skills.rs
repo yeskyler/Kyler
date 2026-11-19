@@ -253,3 +253,127 @@ fn structured_references_are_bounded_and_cannot_be_paths_or_conflicting_versions
     };
     assert!(validate_references(&[reference, other]).is_err());
 }
+
+#[tokio::test]
+async fn drafts_are_invisible_until_exact_fingerprint_publication_and_preserve_live_packages() {
+    use kyler_protocol::api::skills::{SaveSkillRequest, SkillScope};
+    let root = tempfile::tempdir().unwrap();
+    let settings = settings(root.path());
+    package(&settings.user_directory, "workflow", "Installed original");
+    let manager = Arc::new(SkillManager::new(settings).unwrap());
+    let installed = manager.snapshot(None).await.unwrap().available["workflow"]
+        .info
+        .fingerprint
+        .clone();
+    let request = |text: &str, expected| SaveSkillRequest {
+        name: "workflow".into(),
+        scope: SkillScope::User,
+        files: [(
+            "SKILL.md".into(),
+            format!("---\nname: workflow\ndescription: A tested workflow\n---\n{text}"),
+        )]
+        .into(),
+        expected_fingerprint: expected,
+    };
+    let draft = manager
+        .save_draft(request("Draft instructions", None))
+        .await
+        .unwrap();
+    assert_eq!(
+        manager.snapshot(None).await.unwrap().available["workflow"].instructions,
+        "Installed original"
+    );
+    assert_eq!(manager.drafts().await.unwrap().len(), 1);
+    assert!(
+        manager
+            .publish_draft("workflow", "stale", Some(installed.clone()))
+            .await
+            .is_err()
+    );
+    assert!(
+        manager
+            .publish_draft("workflow", &draft.fingerprint, None)
+            .await
+            .is_err()
+    );
+    let next = manager
+        .save_draft(request("Revised draft", Some(draft.fingerprint.clone())))
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .publish_draft("workflow", &draft.fingerprint, Some(installed.clone()))
+            .await
+            .is_err()
+    );
+    manager
+        .publish_draft("workflow", &next.fingerprint, Some(installed))
+        .await
+        .unwrap();
+    assert_eq!(
+        manager.snapshot(None).await.unwrap().available["workflow"].instructions,
+        "Revised draft"
+    );
+}
+
+#[tokio::test]
+async fn draft_paths_cannot_escape_or_execute_resources() {
+    use kyler_protocol::api::skills::{SaveSkillRequest, SkillScope};
+    let root = tempfile::tempdir().unwrap();
+    let manager = Arc::new(SkillManager::new(settings(root.path())).unwrap());
+    let request = |name: &str, path: &str| SaveSkillRequest {
+        name: name.into(),
+        scope: SkillScope::User,
+        files: [
+            (
+                "SKILL.md".into(),
+                format!("---\nname: {name}\ndescription: A safe draft\n---\nReview first"),
+            ),
+            (path.into(), "This script must never run".into()),
+        ]
+        .into(),
+        expected_fingerprint: None,
+    };
+    assert!(
+        manager
+            .save_draft(request("../outside", "reference.txt"))
+            .await
+            .is_err()
+    );
+    assert!(
+        manager
+            .save_draft(request("safe", "../outside"))
+            .await
+            .is_err()
+    );
+    let draft = manager
+        .save_draft(request("safe", "scripts/example.sh"))
+        .await
+        .unwrap();
+    assert!(
+        !manager
+            .snapshot(None)
+            .await
+            .unwrap()
+            .available
+            .contains_key("safe")
+    );
+    assert_eq!(
+        manager
+            .draft_details("safe")
+            .await
+            .unwrap()
+            .info
+            .fingerprint,
+        draft.fingerprint
+    );
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            root.path(),
+            manager.settings.user_directory.join(".drafts/linked"),
+        )
+        .unwrap();
+        assert!(manager.draft_details("linked").await.is_err());
+    }
+}

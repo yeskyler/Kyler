@@ -483,3 +483,14 @@ responses retain the internal approval digest and cannot widen sandbox authority
 
 See [ACP usage and supported capabilities](acp.md) for launch configuration and
 first-version limits.
+
+## Reviewed learning boundary
+
+Memory candidates and active facts remain in the existing scoped file store.
+Core binds provenance to the current session/execution, filters context retrieval
+by lifecycle/expiry and builds skill drafts from exact source revisions.
+`kyler-skills` owns hidden draft validation and exact-fingerprint publication.
+The local `learning` CLI and authenticated session-bound Memory/Skills APIs provide
+explicit review. Web integrates review into its Memory page and Skills library; neither the memory
+tool nor a background task can invoke its review operation. This release adds no
+SQLite tables and no automatic model requests. See [reviewed learning](learning.md).

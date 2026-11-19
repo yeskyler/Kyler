@@ -1,3 +1,4 @@
+import type { MemoryEntry } from "./memory.ts";
 import { tokenCount, validTokenCount } from "./tokens.ts";
 
 export { tokenCount } from "./tokens.ts";
@@ -78,14 +79,7 @@ export type MemoryInspection = {
   compression_count: number;
   summarized_events: number;
   retrieved_keys: string[];
-  entries: {
-    key: string;
-    content: string;
-    tags: string[];
-    revision: number;
-    updated_at: number;
-    source_session: string;
-  }[];
+  entries: MemoryEntry[];
   activity: {
     timestamp: number;
     call_id: string;
@@ -229,7 +223,7 @@ export type InspectionAnalytics = {
     steps: number;
   }[];
 };
-export function memoryTagCounts(entries: MemoryInspection["entries"]) {
+export function memoryTagCounts(entries: ReadonlyArray<Pick<MemoryEntry, "tags">>) {
   const tags = new Map<string, number>();
   for (const entry of entries)
     for (const tag of new Set(entry.tags)) tags.set(tag, (tags.get(tag) ?? 0) + 1);

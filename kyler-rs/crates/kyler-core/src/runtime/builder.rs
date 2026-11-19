@@ -193,6 +193,7 @@ impl Agent {
     }
     pub fn with_project_memory(mut self, store: Arc<MemoryStore>, session: &Session) -> Self {
         let tool = MemoryTool {
+            skills: self.skills.clone(),
             store: store.clone(),
             scope: MemoryStore::scope(session),
         };

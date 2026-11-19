@@ -4,6 +4,7 @@ mod chat;
 mod configure;
 mod doctor;
 mod eval;
+mod learning;
 mod logs;
 mod run;
 mod serve;
@@ -56,6 +57,15 @@ pub async fn execute(args: Args) -> Result<()> {
             output.as_deref(),
         );
     }
+    if let Some(Command::Learning { command }) = args.command.as_ref() {
+        if args.server.is_some() {
+            return Err(CliError::new(
+                2,
+                "learning reviews local state; --server is not supported",
+            ));
+        }
+        return learning::execute(args.config.as_deref(), command, args.json).await;
+    }
     if let Some(Command::Logs { target }) = &args.command {
         if args.json {
             return Err(CliError::new(
@@ -103,7 +113,7 @@ pub async fn execute(args: Args) -> Result<()> {
     match args.command.unwrap_or(Command::Chat { session: None }) {
         Command::Skills { command } => skills::execute(&client, command, args.json).await,
         Command::Eval { suite, report } => eval::run(&client, &suite, &report).await,
-        Command::Tui { .. } | Command::Acp => unreachable!(),
+        Command::Tui { .. } | Command::Acp | Command::Learning { .. } => unreachable!(),
         Command::Chat { session } => chat::chat(&client, session, args.json).await,
         Command::Run {
             session,

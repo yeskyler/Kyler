@@ -14,6 +14,7 @@ use anyhow::Result;
 pub use archive::{MAX_SKILL_ARCHIVE_BYTES, package_directory};
 pub use manager::{SkillManager, SkillSnapshot};
 pub use package::Package;
+pub use storage::{SkillDraft, SkillDraftDetails};
 
 /// Host checks for arbitrary source imports and project writes. Skill code cannot
 /// construct or widen sandbox grants. Package path/symlink checks remain mandatory.

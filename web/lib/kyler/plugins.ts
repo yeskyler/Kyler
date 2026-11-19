@@ -39,3 +39,28 @@ export function filterConnectors(
         )),
   );
 }
+
+export type SkillDraft = {
+  name: string;
+  description: string;
+  fingerprint: string;
+  resources: string[];
+};
+export type DraftPage = {
+  scope: string;
+  drafts: SkillDraft[];
+  total: number;
+  next_cursor: number | null;
+};
+export type DraftDetails = {
+  scope: string;
+  draft: { info: SkillDraft; files: Record<string, string> };
+  installed_fingerprint: string | null;
+};
+export function draftFilesReviewed(
+  files: Record<string, string>,
+  visited: readonly string[],
+): boolean {
+  const names = Object.keys(files);
+  return names.length > 0 && names.every((name) => visited.includes(name));
+}

@@ -7,6 +7,7 @@ pub mod history;
 pub mod images;
 pub mod inspection;
 pub mod mcp;
+pub mod memory;
 pub mod models;
 pub mod permissions;
 pub mod preferences;
