@@ -32,12 +32,7 @@ An English conversation in the Kyler Web interface:
 
 ## Architecture
 
-Agent Runtime drives the execution loop: **Context → Model → Tools → Results → Context**.
-Memory, Skills, MCP tools, sandbox execution, and reviewed experience connect around this shared runtime.
-
 ![Kyler Agent runtime-centered architecture](docs/assets/agent-architecture.svg)
-
-[View the full-size diagram](docs/assets/agent-architecture.svg) · [Explore the architecture](docs/agent-architecture.md)
 
 ## Installation
 

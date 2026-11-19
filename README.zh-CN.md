@@ -31,12 +31,7 @@ Kyler 是一个面向编码、研究与文档工作的 AI 助手。通过对话�
 
 ## 架构
 
-Agent Runtime 驱动执行闭环：**上下文 → 模型 → 工具 → 结果 → 上下文**。
-Memory、Skills、MCP 工具、沙箱执行与经验沉淀围绕同一个运行时协作。
-
 ![Kyler Agent 以运行时为中心的架构图](docs/assets/agent-architecture.svg)
-
-[查看完整架构图](docs/assets/agent-architecture.svg) · [阅读架构说明（英文）](docs/agent-architecture.md)
 
 ## 安装
 
