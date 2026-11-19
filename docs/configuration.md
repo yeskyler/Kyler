@@ -223,3 +223,38 @@ Web access uses `[web].access_token` in both local and network modes. Setup gene
 it automatically; `kyler service token` displays it and `--reset` rotates it. The
 browser exchanges this token for a signed session cookie. Managed Web services read
 the token from the configuration so rotation invalidates old cookies without a restart.
+
+## MCP tool retrieval
+
+MCP metadata retrieval runs locally. Small catalogs within the active-tool and
+schema budgets are advertised directly. Larger catalogs are automatically searched
+using the current user task, with optional batched `search_tools` queries when the
+model needs more capabilities. English identifiers, camel-case components, Chinese
+character fragments and a small bilingual action/resource dictionary are supported.
+The model receives full schemas only for activated tools. Search results contain
+short summaries and required parameter names, not duplicate full schemas.
+
+```toml
+[mcp.search]
+enabled = true
+max_active_tools = 6
+schema_token_budget = 4000
+explicit_wait_ms = 3000
+```
+
+`max_active_tools` accepts 1–64; `schema_token_budget` accepts 128–65536 and is
+counted with the selected model tokenizer, including approval schema metadata.
+Oversized schemas are skipped rather than truncated. Increase the budget if a
+required tool reports that it cannot be activated. Task waits and built-in tools
+are outside this MCP-specific schema budget. Setting `enabled = false` restores
+full advertisement of currently connected MCP tools.
+
+Connecting servers no longer block unrelated model requests. Only explicit
+`@connector:id` mentions wait, for at most `explicit_wait_ms` (0–10000). An explicit
+mention does not enable a disconnected connector; existing configured connection
+and sandbox rules still apply. `search_tools` reports connection states when some
+servers are not ready. Newly activated tools become available on the next model
+request. Active tools are retained within the current task and recent calls take
+priority when later selection changes. A new task starts with a fresh selection.
+Catalog updates, disconnects and reconnects refresh availability and invalidate
+stale schemas; remote side-effecting calls are never automatically replayed.

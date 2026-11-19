@@ -2229,6 +2229,7 @@ dependencies = [
  "image",
  "kyler-config",
  "kyler-logging",
+ "kyler-mcp",
  "kyler-protocol",
  "libc",
  "mxc-sdk",
@@ -2237,7 +2238,6 @@ dependencies = [
  "pulldown-cmark",
  "quick-xml",
  "reqwest",
- "rmcp",
  "rusqlite",
  "schemars",
  "serde",
@@ -2285,6 +2285,22 @@ dependencies = [
  "serde",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "kyler-mcp"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kyler-protocol",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -36,21 +36,49 @@ impl Agent {
                 .with_api_base(&self.base_url)
                 .with_api_key(&self.api_key),
         );
+        let mut retrieval = super::mcp_tools::McpRetrieval::default();
         let mut explicit_loaded = false;
         let mut patch_retries = 0;
         let mut patch_recovery: Option<String> = None;
         loop {
             let preparing = crate::diagnostics::enabled().then(std::time::Instant::now);
-            let step_agent = self.tool_snapshot(&session.session_id).await?;
+            if !explicit_loaded && self.mcp_tools_allowed() {
+                let ids = crate::mcp::references(&super::mcp_tools::task_input(session));
+                if !ids.is_empty() {
+                    if let Some(manager) = &self.mcp {
+                        manager
+                            .wait_for_servers(
+                                self.mcp_scope.as_deref().unwrap_or(&session.session_id),
+                                self.environment.clone(),
+                                &ids,
+                                Duration::from_millis(manager.search_settings().explicit_wait_ms),
+                            )
+                            .await?;
+                    }
+                }
+            }
+            // Capture before discovery so a concurrent directory change is observed next step.
+            let mcp_revision = if let Some(manager) = &self.mcp {
+                manager
+                    .scope_revision(self.mcp_scope.as_deref().unwrap_or(&session.session_id))
+                    .await
+            } else {
+                String::new()
+            };
+            let mut step_agent = self.tool_snapshot(&session.session_id).await?;
             if !explicit_loaded {
                 step_agent
                     .load_requested_skills(session, scope, stream)
                     .await?;
                 explicit_loaded = true;
             }
-            let mut tools = step_agent
-                .toolbox
-                .values()
+            step_agent
+                .select_mcp_tools(session, &mut retrieval, &mcp_revision)
+                .await?;
+            let mut ordered_tools = step_agent.toolbox.values().collect::<Vec<_>>();
+            ordered_tools.sort_by(|a, b| a.name().cmp(b.name()));
+            let mut tools = ordered_tools
+                .into_iter()
                 .filter(|tool| scope.is_some() || !is_subagent_management(tool.as_ref()))
                 .filter(|tool| {
                     step_agent.environment.is_none()
@@ -237,6 +265,7 @@ impl Agent {
                 step_agent
                     .execute_tool_calls(session, &calls, scope, stream)
                     .await?;
+                retrieval.note_calls(&calls);
             } else {
                 let output = content.context("No content in final response")?;
                 if stream.is_none() {

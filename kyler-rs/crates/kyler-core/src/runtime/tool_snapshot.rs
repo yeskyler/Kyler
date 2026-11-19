@@ -44,20 +44,7 @@ impl Agent {
                 .environment
                 .as_ref()
                 .is_some_and(|e| e.policy().mode == SandboxMode::ReadOnly);
-        let (_, effective_environment) = agent.permission_environment();
-        // Existing MCP connections keep their host-configured boundary, even when
-        // local tools select the separately authorized full-access capability.
-        let mcp_allowed = !read_only
-            && (agent.environment.as_ref().map(|e| e.policy().mode)
-                == effective_environment.as_ref().map(|e| e.policy().mode)
-                || (agent
-                    .approval
-                    .as_ref()
-                    .is_some_and(|c| c.policy.mode == PermissionMode::FullAccess)
-                    && agent
-                        .environment
-                        .as_ref()
-                        .is_some_and(|e| e.allows_full_access())));
+        let mcp_allowed = agent.mcp_tools_allowed();
         if !mcp_allowed {
             Arc::make_mut(&mut agent.toolbox)
                 .retain(|_, tool| tool.execution_mode() != ToolExecutionMode::Mcp);
@@ -67,7 +54,7 @@ impl Agent {
         {
             let started = std::time::Instant::now();
             let tools = manager
-                .snapshot(
+                .snapshot_ready(
                     self.mcp_scope.as_deref().unwrap_or(session),
                     self.environment.clone(),
                 )

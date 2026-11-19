@@ -44,7 +44,7 @@ async fn wait(
     env: Option<Arc<ExecutionEnvironment>>,
     target: McpStatus,
 ) {
-    tokio::time::timeout(Duration::from_secs(15), async {
+    let result = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             if manager.list(session, env.clone()).await.unwrap()[0].status == target {
                 break;
@@ -52,11 +52,15 @@ async fn wait(
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
-    .await
-    .unwrap();
+    .await;
+    assert!(
+        result.is_ok(),
+        "MCP status timeout waiting for {target:?}: {:?}",
+        manager.list(session, env).await.unwrap()
+    );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn http_hot_connect_error_results_disconnect_reconnect_and_typed_output() {
     use axum::{
         Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post,
@@ -97,6 +101,7 @@ async fn http_hot_connect_error_results_disconnect_reconnect_and_typed_output() 
         .into_future(),
     );
     let settings = McpSettings {
+        search: Default::default(),
         servers: BTreeMap::from([(
             "fixture".into(),
             McpServerSettings {
@@ -244,6 +249,7 @@ async fn native_stdio_uses_isolated_workspace_and_cleans_up_on_disconnect() {
         .unwrap(),
     );
     let settings = McpSettings {
+        search: Default::default(),
         servers: BTreeMap::from([(
             "local".into(),
             McpServerSettings {
@@ -326,6 +332,7 @@ async fn native_stdio_uses_isolated_workspace_and_cleans_up_on_disconnect() {
 #[test]
 fn mcp_credentials_must_be_resolved_by_configuration_not_ambient_environment() {
     let mut settings = McpSettings {
+        search: Default::default(),
         servers: BTreeMap::from([(
             "secured".into(),
             McpServerSettings {
@@ -411,6 +418,7 @@ async fn user_connectors_are_durable_private_and_do_not_connect_until_requested(
         .unwrap();
     assert_eq!(manager.list("first", None).await.unwrap().len(), 2);
     let protected = McpManager::new(McpSettings {
+        search: Default::default(),
         servers: BTreeMap::from([(
             "user_server".into(),
             McpServerSettings {
@@ -618,4 +626,106 @@ async fn installed_package_connects_without_a_project_and_runs_in_project_sandbo
             .is_err()
     );
     manager.shutdown().await;
+}
+
+#[tokio::test]
+async fn ready_snapshots_return_healthy_tools_without_waiting_for_slow_connectors() {
+    use axum::{
+        Json, Router,
+        extract::{Path, State},
+        http::StatusCode,
+        response::IntoResponse,
+        routing::post,
+    };
+    struct Slow {
+        started: tokio::sync::Notify,
+        release: tokio::sync::Semaphore,
+        calls: AtomicUsize,
+    }
+    async fn handler(
+        Path(kind): Path<String>,
+        State(slow): State<Arc<Slow>>,
+        Json(request): Json<Value>,
+    ) -> axum::response::Response {
+        let Some(id) = request.get("id") else {
+            return StatusCode::ACCEPTED.into_response();
+        };
+        let result = match request["method"].as_str().unwrap() {
+            "initialize" => {
+                if kind == "slow" {
+                    slow.calls.fetch_add(1, Ordering::SeqCst);
+                    slow.started.notify_one();
+                    slow.release.acquire().await.unwrap().forget();
+                }
+                json!({"protocolVersion":request["params"]["protocolVersion"],"capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}})
+            }
+            "tools/list" => json!({"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}),
+            _ => json!({}),
+        };
+        Json(json!({"jsonrpc":"2.0","id":id,"result":result})).into_response()
+    }
+    let slow = Arc::new(Slow {
+        started: tokio::sync::Notify::new(),
+        release: tokio::sync::Semaphore::new(0),
+        calls: AtomicUsize::new(0),
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route("/{kind}", post(handler))
+        .with_state(slow.clone());
+    let server = tokio::spawn(axum::serve(listener, app).into_future());
+    let settings = McpSettings {
+        servers: ["fast", "slow"]
+            .into_iter()
+            .map(|id| {
+                (
+                    id.into(),
+                    McpServerSettings {
+                        transport: McpTransport::StreamableHttp,
+                        url: format!("{base}/{id}"),
+                        auto_connect: false,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let manager = McpManager::new(settings).unwrap();
+    manager
+        .action("scope", None, "fast", McpAction::Connect)
+        .await
+        .unwrap();
+    wait(&manager, "scope", None, McpStatus::Connected).await;
+    manager
+        .action("scope", None, "slow", McpAction::Connect)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), slow.started.notified())
+        .await
+        .unwrap();
+    let tools = tokio::time::timeout(
+        Duration::from_secs(1),
+        manager.snapshot_ready("scope", None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(tools.contains_key("mcp__fast__echo"));
+    assert!(!tools.contains_key("mcp__slow__echo"));
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        manager.wait_for_servers("scope", None, &["fast".into()], Duration::from_secs(3)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    for _ in 0..3 {
+        manager.snapshot_ready("scope", None).await.unwrap();
+    }
+    assert_eq!(slow.calls.load(Ordering::SeqCst), 1);
+    slow.release.add_permits(1);
+    manager.shutdown().await;
+    server.abort();
 }

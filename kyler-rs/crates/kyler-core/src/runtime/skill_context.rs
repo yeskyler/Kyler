@@ -31,7 +31,7 @@ impl Agent {
             });
             anyhow::ensure!(
                 available,
-                "Requested connector {id} has no available tools under this session policy. Connect it before sending the request."
+                "Requested connector {id} has no tools available under this session policy yet. Check its connection status and permissions, then retry after discovery completes."
             );
         }
         let names = references(input);

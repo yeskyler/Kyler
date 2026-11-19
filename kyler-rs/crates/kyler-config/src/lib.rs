@@ -15,7 +15,7 @@ pub use app::{
     SecretString, ServerSettings, SessionSettings, SubagentSettings,
 };
 pub use loader::{load, load_from};
-pub use mcp::{McpServerSettings, McpSettings, McpTransport};
+pub use mcp::{McpSearchSettings, McpServerSettings, McpSettings, McpTransport};
 pub use models::{ModelProfile, ModelSettings, OutputTokenParameter, ProviderSettings};
 pub use sandbox::SandboxSettings;
 pub use skills::SkillSettings;

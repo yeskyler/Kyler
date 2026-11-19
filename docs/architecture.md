@@ -37,7 +37,8 @@ and artifacts through their respective views.
 | `kyler-scheduler` | SQLite-backed automation schedules, leases, run snapshots, and recovery |
 | `kyler-tui` | Terminal interaction and in-process core operation/event adaptation |
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
-| `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integrations |
+| `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integration policy |
+| `kyler-mcp` | MCP protocol sessions, connection lifecycle, immutable catalogs, calls and local metadata search |
 | `kyler-protocol` | Shared contracts, event metadata, prompts, and agent names |
 | `kyler-config` | Configuration loading, defaults, validation, credential resolution |
 | `kyler-logging` | Logging configuration and initialization |
@@ -214,6 +215,33 @@ Product instructions are maintained in `kyler-rs/crates/kyler-protocol/src/promp
 separate from the repository's [AGENTS.md](../AGENTS.md). See
 [configuration](configuration.md), [development](development.md), and [security
 guidance](../SECURITY.md).
+
+## MCP transport and retrieval boundary
+
+`kyler-core` depends on `kyler-mcp`; the MCP crate does not depend on core. The
+core `McpManager` remains the compatibility facade for session scopes, connector
+installation and persistence, system discovery, and host policy. It supplies a
+`TransportFactory` that creates authorized HTTP clients or sandboxed stdio streams.
+Full schemas are shared through immutable catalog entries instead of cloned on
+every model step. The MCP crate owns the resulting protocol session, discovery pagination, immutable
+catalog versions, list-change refresh, bounded calls, cancellation and disconnect.
+Host process leases implement `TransportGuard`; cancelled handshakes stop their
+processes as well as established connections.
+
+`kyler-mcp::search::ToolIndex` owns a bounded, field-weighted BM25 index and a
+catalog-local query cache. Search summaries contain no full schemas, credentials,
+or transport handles. The core runtime owns task-local activation, schema token
+budgets and the `search_tools` adapter. Finding a tool never grants authority.
+Only tools advertised in the current model request can execute; tools activated
+by search are advertised on the next request.
+
+Runtime discovery uses the nonblocking `snapshot_ready` path. Healthy connectors
+are usable while other handshakes continue. Explicit `@connector:id` references
+can wait for a configured bound; they do not authorize new connections. The
+legacy `snapshot` method retains its waiting behavior for explicit API consumers.
+Connection/scope binding and policy filtering are unchanged. Catalog changes and
+reconnections rebuild the task index and invalidate removed or changed entries.
+Indexes and activation are never shared across sessions or child executions.
 
 ## Project execution in Web and TUI
 

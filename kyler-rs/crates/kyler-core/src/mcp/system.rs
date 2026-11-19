@@ -111,7 +111,7 @@ impl McpManager {
             .into_iter()
             .flatten()
             .filter(|slot| {
-                enabled.contains(&slot.id) && slot.state.read().unwrap().0 == McpStatus::Connected
+                enabled.contains(&slot.id) && slot.client.status() == McpStatus::Connected
             })
             .map(|slot| slot.id.clone())
             .collect()

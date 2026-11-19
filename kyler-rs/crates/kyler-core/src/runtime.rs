@@ -5,6 +5,7 @@ mod delegation;
 pub mod events;
 mod execution;
 mod execution_loop;
+mod mcp_tools;
 mod model_binding;
 mod model_context;
 mod model_stream;

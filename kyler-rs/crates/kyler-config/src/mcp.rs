@@ -8,7 +8,27 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct McpSettings {
+    pub search: McpSearchSettings,
     pub servers: BTreeMap<String, McpServerSettings>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct McpSearchSettings {
+    pub enabled: bool,
+    pub max_active_tools: usize,
+    pub schema_token_budget: usize,
+    pub explicit_wait_ms: u64,
+}
+impl Default for McpSearchSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_active_tools: 6,
+            schema_token_budget: 4000,
+            explicit_wait_ms: 3000,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -58,6 +78,18 @@ impl Default for McpServerSettings {
 }
 impl McpSettings {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            (1..=64).contains(&self.search.max_active_tools),
+            "mcp.search.max_active_tools must be in 1..=64"
+        );
+        ensure!(
+            (128..=65536).contains(&self.search.schema_token_budget),
+            "mcp.search.schema_token_budget must be in 128..=65536"
+        );
+        ensure!(
+            self.search.explicit_wait_ms <= 10000,
+            "mcp.search.explicit_wait_ms must not exceed 10000"
+        );
         ensure!(
             self.servers.len() <= 32,
             "at most 32 MCP servers are supported"

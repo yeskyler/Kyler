@@ -201,3 +201,22 @@ runtime concurrency. Leave it unset for provider compatibility, set it to `true`
 for supporting endpoints, or `false` to ask the model for sequential tool use.
 It does not override runtime barriers or permissions. Tool execution begins after
 the model response completes, not while argument deltas are still arriving.
+
+## MCP development
+
+`kyler-mcp` is independently testable and contains no dependency on `kyler-core`.
+Run its protocol/catalog/retrieval tests with:
+
+```sh
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-mcp
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-core --lib runtime::tests::mcp_tools
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-core --test mcp
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-server --test mcp
+```
+
+The crate tests use in-process duplex transports. Core/server integration tests
+also bind local fixture ports and exercise authorized native processes. No live
+model account or embedding service is needed. Retrieval fixtures check Chinese and
+English intent matching, parameter-name matching, multiple queries, server filters,
+stable versions, hidden same-batch calls, schema budgets and task isolation.
+For architectural boundaries see [MCP transport and retrieval](architecture.md#mcp-transport-and-retrieval-boundary).

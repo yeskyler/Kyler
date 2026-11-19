@@ -6,10 +6,7 @@ use std::{
     fs,
     io::{ErrorKind, Write},
     path::PathBuf,
-    sync::{
-        Arc, RwLock,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, atomic::Ordering},
 };
 
 use anyhow::{Context, Result, ensure};
@@ -91,7 +88,7 @@ impl McpManager {
                 .remove(id);
             for slots in sessions.values_mut() {
                 for slot in slots.iter().filter(|slot| slot.id == id) {
-                    slot.retired.store(true, Ordering::SeqCst);
+                    slot.client.retire();
                     retired.push(slot.clone());
                 }
                 slots.retain(|slot| slot.id != id);
@@ -196,16 +193,15 @@ impl McpManager {
             .map_err(|_| anyhow::anyhow!("MCP settings unavailable"))? = configured;
         for slots in sessions.values_mut() {
             let environment = slots.first().and_then(|s| s.environment.clone());
-            slots.push(Arc::new(Slot {
-                changes: self.changes.clone(),
-                id: id.clone(),
-                settings: server.clone(),
-                package_root: self.installed_package_root(&server.command),
+            let mut settings = server.clone();
+            settings.auto_connect = false;
+            slots.push(Arc::new(Slot::new(
+                id.clone(),
+                settings,
                 environment,
-                state: RwLock::new((McpStatus::Disconnected, None, None)),
-                operation: Mutex::new(()),
-                retired: AtomicBool::new(false),
-            }));
+                self.installed_package_root(&server.command),
+                self.changes.clone(),
+            )));
         }
         *user = next;
         self.changes

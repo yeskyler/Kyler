@@ -1,6 +1,6 @@
 //! Session ownership and snapshots of configured MCP connections.
 
-use super::{connection::Connection, tool};
+use super::{connection::HostTransport, tool};
 use crate::{
     environment::ExecutionEnvironment,
     tools::{Tool, ToolBox},
@@ -20,17 +20,53 @@ use anyhow::{Result, ensure};
 use tokio::{sync::Mutex, time::Instant};
 
 use kyler_config::{McpServerSettings, McpSettings, McpTransport};
+use kyler_mcp::Client;
 use kyler_protocol::api::mcp::{McpAction, McpServerInfo, McpStatus};
 
 pub(super) struct Slot {
-    pub(super) changes: tokio::sync::watch::Sender<u64>,
     pub(super) id: String,
     pub(super) settings: McpServerSettings,
-    pub(super) package_root: Option<PathBuf>,
     pub(super) environment: Option<Arc<ExecutionEnvironment>>,
-    pub(super) state: RwLock<(McpStatus, Option<Arc<Connection>>, Option<String>)>,
-    pub(super) operation: Mutex<()>,
-    pub(super) retired: AtomicBool,
+    pub(super) client: Arc<Client>,
+}
+impl Slot {
+    pub(super) fn new(
+        id: String,
+        settings: McpServerSettings,
+        environment: Option<Arc<ExecutionEnvironment>>,
+        package_root: Option<PathBuf>,
+        changes: tokio::sync::watch::Sender<u64>,
+    ) -> Self {
+        let transport = match settings.transport {
+            kyler_config::McpTransport::Stdio => "stdio",
+            kyler_config::McpTransport::StreamableHttp => "streamable_http",
+        };
+        let factory = Arc::new(HostTransport {
+            settings: settings.clone(),
+            environment: environment.clone(),
+            package_root,
+        });
+        let client = Client::new(
+            id.clone(),
+            transport.into(),
+            factory,
+            Duration::from_secs(settings.connect_timeout_seconds),
+            settings.auto_connect,
+            changes,
+        );
+        Self {
+            id,
+            settings,
+            environment,
+            client,
+        }
+    }
+    pub(super) fn info(&self) -> McpServerInfo {
+        self.client.info()
+    }
+    pub(super) async fn change(&self, action: McpAction) {
+        self.client.change(action).await;
+    }
 }
 pub struct McpManager {
     pub(super) changes: tokio::sync::watch::Sender<u64>,
@@ -128,24 +164,13 @@ impl McpManager {
             .iter()
             .filter(|(_, s)| s.enabled)
             .map(|(id, settings)| {
-                Arc::new(Slot {
-                    changes: self.changes.clone(),
-                    id: id.clone(),
-                    settings: settings.clone(),
-                    package_root: self.installed_package_root(&settings.command),
-                    environment: environment.clone(),
-                    state: RwLock::new((
-                        if settings.auto_connect {
-                            McpStatus::Connecting
-                        } else {
-                            McpStatus::Disconnected
-                        },
-                        None,
-                        None,
-                    )),
-                    operation: Mutex::new(()),
-                    retired: AtomicBool::new(false),
-                })
+                Arc::new(Slot::new(
+                    id.clone(),
+                    settings.clone(),
+                    environment.clone(),
+                    self.installed_package_root(&settings.command),
+                    self.changes.clone(),
+                ))
             })
             .collect();
         drop(settings);
@@ -172,6 +197,35 @@ impl McpManager {
             .map(|s| s.info())
             .collect())
     }
+    /// Fingerprint only this scope's connection/catalog generations, never another account's.
+    pub(crate) async fn scope_revision(&self, session: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let sessions = self.sessions.lock().await;
+        let mut hash = Sha256::new();
+        for slot in sessions.get(session).into_iter().flatten() {
+            hash.update(slot.id.as_bytes());
+            hash.update([0]);
+            if let Some(connection) = slot.client.connection() {
+                hash.update(connection.approval_id().as_bytes());
+                hash.update(connection.catalog().version.as_bytes());
+            }
+            hash.update([0]);
+        }
+        format!("{hash:x}", hash = hash.finalize())
+    }
+    /// Lightweight availability for retrieval; does not clone tool schemas/descriptions.
+    pub(crate) async fn connection_states(
+        &self,
+        session: &str,
+        environment: Option<Arc<ExecutionEnvironment>>,
+    ) -> Result<Vec<(String, McpStatus)>> {
+        Ok(self
+            .open(session, environment)
+            .await?
+            .iter()
+            .map(|slot| (slot.id.clone(), slot.client.status()))
+            .collect())
+    }
     pub async fn action(
         &self,
         session: &str,
@@ -190,50 +244,85 @@ impl McpManager {
         });
         Ok(())
     }
+    async fn ready_slots(
+        &self,
+        session: &str,
+        environment: Option<Arc<ExecutionEnvironment>>,
+    ) -> Result<Vec<Arc<Slot>>> {
+        let slots = self.open(session, environment).await?;
+        if session != super::system::SYSTEM_SCOPE {
+            let connected = self.system_connected().await;
+            for slot in &slots {
+                if connected.contains(&slot.id) {
+                    slot.client.connect_if_disconnected();
+                }
+            }
+        }
+        Ok(slots)
+    }
+    /// Immediately returns only currently connected tools. Never waits for a handshake.
+    pub async fn snapshot_ready(
+        &self,
+        session: &str,
+        environment: Option<Arc<ExecutionEnvironment>>,
+    ) -> Result<ToolBox> {
+        Self::tools_from_slots(self.ready_slots(session, environment).await?)
+    }
+    /// Compatibility API for callers explicitly waiting for initial discovery.
     pub async fn snapshot(
         &self,
         session: &str,
         environment: Option<Arc<ExecutionEnvironment>>,
     ) -> Result<ToolBox> {
-        let slots = self.open(session, environment).await?;
-        if session != super::system::SYSTEM_SCOPE {
-            let connected = self.system_connected().await;
-            for slot in &slots {
-                if connected.contains(&slot.id)
-                    && slot.state.read().unwrap().0 == McpStatus::Disconnected
-                {
-                    slot.change(McpAction::Connect).await;
-                }
-            }
-        }
+        let slots = self.ready_slots(session, environment).await?;
         let deadline = Instant::now() + Duration::from_secs(61);
         while slots
             .iter()
-            .any(|s| s.state.read().unwrap().0 == McpStatus::Connecting)
+            .any(|slot| slot.client.status() == McpStatus::Connecting)
             && Instant::now() < deadline
         {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        Self::tools_from_slots(slots)
+    }
+    /// Only explicit connector mentions use this bounded wait; it grants no connection authority.
+    pub async fn wait_for_servers(
+        &self,
+        session: &str,
+        environment: Option<Arc<ExecutionEnvironment>>,
+        ids: &[String],
+        timeout: Duration,
+    ) -> Result<()> {
+        let slots = self.ready_slots(session, environment).await?;
+        let deadline = Instant::now() + timeout;
+        while slots
+            .iter()
+            .any(|slot| ids.contains(&slot.id) && slot.client.status() == McpStatus::Connecting)
+            && Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        Ok(())
+    }
+    pub fn search_settings(&self) -> kyler_config::McpSearchSettings {
+        self.settings.read().unwrap().search.clone()
+    }
+    fn tools_from_slots(slots: Vec<Arc<Slot>>) -> Result<ToolBox> {
         let mut tools = ToolBox::new();
         for slot in slots {
-            let state = slot.state.read().unwrap();
-            if state.0 != McpStatus::Connected {
-                continue;
-            }
-            if let Some(connection) = &state.1 {
-                if connection.service.is_closed() {
-                    continue;
-                }
-                for definition in connection.tools.read().unwrap().iter() {
+            if let Some(connection) = slot.client.connection() {
+                let catalog = connection.catalog();
+                for definition in &catalog.tools {
                     let tool = tool::McpTool::new(
                         &slot.id,
                         definition.clone(),
                         connection.clone(),
                         slot.settings.call_timeout_seconds,
                         &slot.settings.activity,
+                        &catalog.version,
                     )?;
                     ensure!(!tools.contains_key(tool.name()), "duplicate MCP tool name");
-                    tools.insert(tool.name().into(), Arc::new(tool));
+                    tools.insert(tool.name().into(), Arc::new(tool) as Arc<dyn Tool>);
                 }
             }
         }
@@ -247,7 +336,7 @@ impl McpManager {
             .remove(session)
             .unwrap_or_default();
         for slot in &slots {
-            slot.retired.store(true, Ordering::SeqCst);
+            slot.client.retire();
         }
         futures::future::join_all(slots.iter().map(|s| s.change(McpAction::Disconnect))).await;
     }
@@ -255,7 +344,7 @@ impl McpManager {
         self.stopping.store(true, Ordering::SeqCst);
         let sessions = std::mem::take(&mut *self.sessions.lock().await);
         for slot in sessions.values().flatten() {
-            slot.retired.store(true, Ordering::SeqCst);
+            slot.client.retire();
         }
         futures::future::join_all(
             sessions

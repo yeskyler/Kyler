@@ -1,4 +1,5 @@
 mod concurrency;
+mod mcp_tools;
 mod review;
 use super::Agent;
 use crate::{
@@ -907,6 +908,7 @@ async fn permission_changes_refresh_mcp_discovery_and_revoke_old_step_authorizat
     });
     let mcp = Arc::new(
         McpManager::new(McpSettings {
+            search: Default::default(),
             servers: BTreeMap::from([(
                 "fixture".into(),
                 McpServerSettings {

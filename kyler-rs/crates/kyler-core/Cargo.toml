@@ -11,6 +11,7 @@ percent-encoding.workspace = true
 # local crates
 kyler-protocol.workspace = true
 kyler-config.workspace = true
+kyler-mcp.workspace = true
 
 # external crates
 anyhow.workspace = true
@@ -35,7 +36,6 @@ base64.workspace = true
 tiktoken-rs.workspace = true
 csv.workspace = true
 zip.workspace = true
-rmcp.workspace = true
 
 mxc-sdk.workspace = true
 tempfile.workspace = true

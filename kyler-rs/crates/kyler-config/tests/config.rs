@@ -429,3 +429,26 @@ fn parallel_execution_limit_and_model_hint_are_independent() {
     assert_eq!(config.agent.max_parallel_calls, 1);
     assert_eq!(config.agent.parallel_tool_calls, Some(true));
 }
+
+#[test]
+fn mcp_search_defaults_and_bounds_are_validated() {
+    let default = loader::parse(VALID).unwrap();
+    assert!(default.mcp.search.enabled);
+    assert_eq!(default.mcp.search.max_active_tools, 6);
+    assert_eq!(default.mcp.search.schema_token_budget, 4000);
+    for field in [
+        "max_active_tools=0",
+        "max_active_tools=65",
+        "schema_token_budget=1",
+        "explicit_wait_ms=10001",
+    ] {
+        let config = loader::parse(&format!("{VALID}\n[mcp.search]\n{field}")).unwrap();
+        assert!(config.validate().is_err());
+    }
+    let config = loader::parse(&format!(
+        "{VALID}\n[mcp.search]\nenabled=false\nmax_active_tools=1\nexplicit_wait_ms=0"
+    ))
+    .unwrap();
+    config.validate().unwrap();
+    assert!(!config.mcp.search.enabled);
+}
