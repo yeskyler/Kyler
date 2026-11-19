@@ -26,8 +26,6 @@ complete tasks, and deliver results. Use it through Web, TUI, or CLI.
 
 ## Demo
 
-An English conversation in the Kyler Web interface:
-
 ![Kyler Web interface with an English conversation](demo/example.png)
 
 ## Architecture
