@@ -8,7 +8,7 @@ import {
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { Button } from "@/components/ui/button";
 import { api, attachments, chatAdapter } from "@/lib/kyler/client";
-import { readPreferences, patchPreferences, initialSession } from "@/lib/kyler/preferences";
+import { readPreferences, patchPreferences } from "@/lib/kyler/preferences";
 import { activeSessionRun } from "@/lib/kyler/session-recovery";
 import { sessionTitle } from "@/lib/kyler/sessions";
 import {
@@ -120,18 +120,13 @@ export function Assistant() {
       navigationInitialized.current = true;
     }
     async function load() {
-      let saved = requestedSession.current;
+      const saved = requestedSession.current;
       const info = await api<Info>("info");
       if (initialPreferences.current) {
         const preferences = await readPreferences();
         if (disposed || sequence !== loading.current) return;
         initialPreferences.current = false;
         setSidebarCollapsed(preferences.sidebar_collapsed);
-        saved = initialSession(saved, preferences);
-        if (saved && !requestedSession.current) {
-          requestedSession.current = saved;
-          navigateSession(saved, "replace");
-        }
       }
       infoRef.current = info;
       if (!saved) {

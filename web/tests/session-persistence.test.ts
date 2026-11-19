@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initialSession, patchPreferences, readPreferences } from "../lib/kyler/preferences.ts";
+import { patchPreferences, readPreferences } from "../lib/kyler/preferences.ts";
 import { activeSessionRun } from "../lib/kyler/session-recovery.ts";
 import { permittedPath } from "../lib/kyler/server.ts";
 
-test("explicit navigation wins over the server's recent session", () => {
-  const preferences = { last_session_id: "recent", sidebar_collapsed: true, revision: 2 };
-  assert.equal(initialSession("explicit", preferences), "explicit");
-  assert.equal(initialSession(null, preferences), "recent");
-});
 test("a fresh browser loads preferences and discovers the existing run without local storage", async () => {
   const original = globalThis.fetch;
   const paths: string[] = [];

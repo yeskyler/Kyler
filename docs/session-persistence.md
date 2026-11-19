@@ -64,10 +64,11 @@ until publication. A draft cannot become the shared recent session.
 
 ## Navigation and active runs
 
-1. An explicit `/chat/<session-id>` URL takes priority.
-2. The home page restores the backend's recent session, if one is saved.
-3. With no recent session, the home page opens a new draft. **New chat** explicitly
-   starts a draft and clears the shared recent-session selection.
+1. An explicit `/chat/<session-id>` URL opens that conversation.
+2. The home page always opens a new draft and keeps the `/` URL, even when the
+   backend has a recent-session preference.
+3. **New chat** explicitly starts a draft and clears the shared recent-session
+   selection.
 4. Opening an existing conversation queries its active run from the backend, then
    loads history and reconnects to that run's SSE stream. It never resubmits the user
    prompt to recover an existing run.

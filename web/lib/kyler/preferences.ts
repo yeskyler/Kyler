@@ -15,6 +15,3 @@ export function patchPreferences(patch: PreferencePatch): Promise<UiPreferences>
   writes = result;
   return result;
 }
-export function initialSession(explicit: string | null, preferences: UiPreferences) {
-  return explicit ?? preferences.last_session_id;
-}
