@@ -21,6 +21,8 @@ pub struct Args {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Serve Agent Client Protocol v1 over stdin/stdout for an editor.
+    Acp,
     /// Show the last 100 lines and follow managed service logs; Ctrl+C exits.
     Logs {
         #[arg(value_enum, default_value = "backend")]

@@ -43,7 +43,7 @@ async fn run() -> ExitCode {
         };
     }
     let args = Args::parse();
-    let json = args.json;
+    let json = args.json && !matches!(&args.command, Some(kyler_cli::args::Command::Acp));
     match execute(args).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

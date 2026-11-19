@@ -1,4 +1,5 @@
 mod access;
+mod acp;
 mod chat;
 mod configure;
 mod doctor;
@@ -73,6 +74,15 @@ pub async fn execute(args: Args) -> Result<()> {
     if let Some(Command::Serve(settings)) = &args.command {
         return serve::serve(args.config.as_deref(), settings).await;
     }
+    if matches!(&args.command, Some(Command::Acp)) {
+        if args.json || args.server.is_some() {
+            return Err(CliError::new(
+                2,
+                "acp uses local stdio; --json and --server are not supported",
+            ));
+        }
+        return acp::run(args.config.clone()).await;
+    }
     if let Some(Command::Tui { session }) = &args.command {
         if args.server.is_some() {
             return Err(CliError::new(
@@ -93,7 +103,7 @@ pub async fn execute(args: Args) -> Result<()> {
     match args.command.unwrap_or(Command::Chat { session: None }) {
         Command::Skills { command } => skills::execute(&client, command, args.json).await,
         Command::Eval { suite, report } => eval::run(&client, &suite, &report).await,
-        Command::Tui { .. } => unreachable!(),
+        Command::Tui { .. } | Command::Acp => unreachable!(),
         Command::Chat { session } => chat::chat(&client, session, args.json).await,
         Command::Run {
             session,

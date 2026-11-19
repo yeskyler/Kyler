@@ -157,6 +157,17 @@ impl ThreadHandle {
             .take()
             .context("thread already has an event consumer")
     }
+    /// Read the latest committed plan without exposing journal internals to adapters.
+    pub async fn execution_plan(&self) -> Result<Option<crate::context::ExecutionPlan>> {
+        let id = self.session().await.session_id;
+        Ok(self
+            .inner
+            .store
+            .load(&id)
+            .await?
+            .execution
+            .and_then(|execution| execution.plan))
+    }
     pub async fn session(&self) -> Session {
         self.inner.session.read().await.clone()
     }

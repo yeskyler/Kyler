@@ -37,6 +37,7 @@ and artifacts through their respective views.
 | `kyler-scheduler` | SQLite-backed automation schedules, leases, run snapshots, and recovery |
 | `kyler-tui` | Terminal interaction and in-process core operation/event adaptation |
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
+| `kyler-acp` | Official Agent Client Protocol v1 SDK transport, session routing, updates and permission requests |
 | `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integration policy |
 | `kyler-store` | Shared SQLite infrastructure, scoped session/run indexes and UI preference persistence |
 | `kyler-skills` | Skill discovery, package validation, reviewed versions, caches, resources and package storage |
@@ -463,3 +464,22 @@ with `timeout_secs=0`, and waits for any/all selected tasks with a positive time
 parent execution. Review pagination requires exactly one ID, `timeout_secs=0` and
 `review_section=overview/findings/files/limitations`; continue with
 `review_offset=next_offset`. The separate `get_task` entry is no longer advertised.
+
+## ACP editor integration
+
+`kyler acp` serves one local stdio connection using the official
+`agent-client-protocol` Rust SDK (5.4.0), with stable protocol v1. `kyler-acp`
+depends on internal protocol contracts and a host trait, not on core or server.
+The CLI host bridges that trait to `ThreadManager`, uses the existing sandbox and
+approval machinery, and stores sessions under `acp/sessions` beside the configured
+session directory. It never opens Web or TUI sessions by client-provided ID.
+
+Protocol handlers spawn connection-owned work so a pending prompt or permission
+request cannot block cancellation and other sessions. Each session permits one
+active prompt. Application event queues are bounded; cleanup drops consumers,
+cancels execution and drains thread events before joining workers. Standard output
+contains only protocol messages. Client approval offers only allow-once and deny;
+responses retain the internal approval digest and cannot widen sandbox authority.
+
+See [ACP usage and supported capabilities](acp.md) for launch configuration and
+first-version limits.

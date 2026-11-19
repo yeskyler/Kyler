@@ -267,3 +267,11 @@ Integration fixtures bind local ports but do not call live models. Cover source
 precedence, workspace-scoped review, fingerprint invalidation, symlink/traversal
 rejection, protected destination descendants, archive limits, binary resources,
 real tokenizer budgets, lossless page cursors and exact selected-version loading.
+
+## ACP development
+
+`kyler-acp` uses the official SDK's stable v1 builder and schema paths. Keep
+execution behind its `Host` trait and perform core composition in the CLI. A
+prompt handler must spawn connection-owned work so permission responses and
+`session/cancel` remain receivable. Never log raw protocol frames or model keys.
+See [ACP integration](acp.md) for capabilities, storage and test commands.

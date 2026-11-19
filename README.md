@@ -69,6 +69,7 @@ for build, startup, and validation instructions.
 | [Installation](docs/installation.md) | Setup, service management, and upgrades |
 | [Session persistence](docs/session-persistence.md) | Storage and cross-browser recovery |
 | [Automations](docs/automations.md) | Scheduled tasks and run history |
+| [ACP integration](docs/acp.md) | Editor integration over local stdio |
 | [Configuration](docs/configuration.md) | Models, paths, and application settings |
 | [Architecture](docs/architecture.md) | Runtime, storage, and execution boundaries |
 | [Development](docs/development.md) | Build requirements and validation |

@@ -27,10 +27,22 @@ pub struct ThreadManager {
 }
 impl ThreadManager {
     /// Local sessions have their own storage namespace, independent of Web service sessions.
-    pub async fn new(
+    pub async fn new(config: AppConfig, source: Option<PathBuf>, worker: PathBuf) -> Result<Self> {
+        Self::new_local(config, source, worker, "tui").await
+    }
+    /// ACP has a distinct session namespace and never opens TUI/service history.
+    pub async fn new_acp(
+        config: AppConfig,
+        source: Option<PathBuf>,
+        worker: PathBuf,
+    ) -> Result<Self> {
+        Self::new_local(config, source, worker, "acp").await
+    }
+    async fn new_local(
         mut config: AppConfig,
         source: Option<PathBuf>,
         worker: PathBuf,
+        namespace: &str,
     ) -> Result<Self> {
         // Transport configuration is irrelevant to the local runtime.
         config.client = Default::default();
@@ -42,7 +54,8 @@ impl ThreadManager {
             .directory
             .parent()
             .context("session directory has no parent")?
-            .join("tui/sessions");
+            .join(namespace)
+            .join("sessions");
         config.validate()?;
         let store = Arc::new(SessionStore::new(&config.session.directory).await?);
         let factory = WorkspaceFactory::configured(worker, Vec::new(), config.sandbox.clone())?;
