@@ -1,4 +1,3 @@
-BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS sessions (
  scope TEXT NOT NULL, session_id TEXT NOT NULL, title TEXT, cwd TEXT, project TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
  revision INTEGER NOT NULL, signature TEXT NOT NULL, summary_json TEXT NOT NULL,
@@ -18,4 +17,3 @@ CREATE TABLE IF NOT EXISTS ui_preferences (
  revision INTEGER NOT NULL DEFAULT 0
 );
 PRAGMA user_version=3;
-COMMIT;

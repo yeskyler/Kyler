@@ -1,14 +1,12 @@
 //! Transactional persistence. Agent admission always happens after committing intent.
 use crate::{Error, conflict, schedule};
 
-use std::{
-    fs,
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+
+use kyler_store::Database;
 
 use kyler_protocol::api::automations::{
     ScheduledRun, ScheduledRunPage, ScheduledRunStatus as Status, ScheduledTask, TaskConfig,
@@ -17,7 +15,7 @@ use kyler_protocol::api::automations::{
 const ACTIVE: &str = "'queued','starting','running','waiting_for_approval','waiting_for_input'";
 #[derive(Clone)]
 pub struct Store {
-    connection: Arc<Mutex<Connection>>,
+    database: Database,
 }
 #[derive(Clone)]
 pub(crate) struct Lease {
@@ -143,69 +141,38 @@ impl Store {
     pub async fn open(path: &Path, binding: &str) -> Result<Self> {
         let path = path.to_owned();
         let binding = binding.to_owned();
-        let connection = tokio::task::spawn_blocking(move || -> Result<Connection> {
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut options = fs::OpenOptions::new();
-            options.create(true).read(true).write(true).truncate(false);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            options.open(&path)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-            }
-            let mut connection = Connection::open(path)?;
-            connection.busy_timeout(std::time::Duration::from_secs(5))?;
-            connection.execute_batch(
-                "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;",
-            )?;
-            let version: u32 =
-                connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            ensure!(version <= 1, "Scheduler database uses a newer schema");
-            if version == 0 {
-                let transaction =
-                    connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let database = tokio::task::spawn_blocking(move || -> Result<Database> {
+            let database = Database::open(&path)?;
+            database.migrate(1, |transaction, _| {
                 transaction.execute_batch(include_str!("migrations/001_init.sql"))?;
-                transaction.commit()?;
-            }
-            connection.execute(
-                "INSERT OR IGNORE INTO scheduler_meta(key,value) VALUES('session_store',?)",
-                [&binding],
-            )?;
-            let saved: String = connection.query_row(
-                "SELECT value FROM scheduler_meta WHERE key='session_store'",
-                [],
-                |row| row.get(0),
-            )?;
-            ensure!(
-                saved == binding,
-                "Scheduler database belongs to a different session store"
-            );
-            Ok(connection)
+                Ok(())
+            })?;
+            database.with(|connection| {
+                connection.execute(
+                    "INSERT OR IGNORE INTO scheduler_meta(key,value) VALUES('session_store',?)",
+                    [&binding],
+                )?;
+                let saved: String = connection.query_row(
+                    "SELECT value FROM scheduler_meta WHERE key='session_store'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                ensure!(
+                    saved == binding,
+                    "Scheduler database belongs to a different session store"
+                );
+                Ok(())
+            })?;
+            Ok(database)
         })
         .await??;
-        Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-        })
+        Ok(Self { database })
     }
     async fn with<T: Send + 'static>(
         &self,
         operation: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        let connection = self.connection.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut connection = connection
-                .lock()
-                .map_err(|_| anyhow::anyhow!("Scheduler storage unavailable"))?;
-            operation(&mut connection)
-        })
-        .await?
+        self.database.with_async(operation).await
     }
     pub async fn tasks(&self) -> Result<Vec<ScheduledTask>> {
         self.with(|connection| {

@@ -38,6 +38,7 @@ and artifacts through their respective views.
 | `kyler-tui` | Terminal interaction and in-process core operation/event adaptation |
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
 | `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integration policy |
+| `kyler-store` | Shared SQLite infrastructure, scoped session/run indexes and UI preference persistence |
 | `kyler-skills` | Skill discovery, package validation, reviewed versions, caches, resources and package storage |
 | `kyler-mcp` | MCP protocol sessions, connection lifecycle, immutable catalogs, calls and local metadata search |
 | `kyler-protocol` | Shared contracts, event metadata, prompts, and agent names |
@@ -49,6 +50,21 @@ Rust crates are located in `kyler-rs/crates/`. Web source is located in `web/` a
 mirrors the public contracts in its frontend types and event adapters.
 
 ## Runs, sessions, and history
+
+`kyler-store` depends on shared protocol contracts, not on core or scheduler.
+It owns SQLite opening, private file permissions, connection serialization,
+blocking-task execution and transactional schema migration. Its application
+catalog accepts typed index records; it never reads session journals or interprets
+agent events. Core retains summary/preview generation, journal signatures, draft
+markers and index-repair orchestration. The existing core catalog facade preserves
+call sites while delegating SQL and preference persistence to `kyler-store`.
+
+Scheduler reuses the SQLite infrastructure while retaining its schema SQL, lease
+validation, admission intent and state transitions. `app.sqlite3` (schema v3) and
+`scheduler.sqlite3` (schema v1) remain separate. Migration versions are rechecked
+inside an immediate transaction; failed migrations roll back and newer schemas
+are rejected. Database code does not grant workspace authority. Rollout, memory
+files and skill review records keep their existing persistence paths.
 
 A session associates conversation state with a project identity and a private execution
 workspace. A run executes one admitted request, with its own execution state and

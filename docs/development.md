@@ -202,6 +202,24 @@ for supporting endpoints, or `false` to ask the model for sequential tool use.
 It does not override runtime barriers or permissions. Tool execution begins after
 the model response completes, not while argument deltas are still arriving.
 
+## Persistence development
+
+`kyler-store` owns shared SQLite policy and application catalog persistence without
+depending on core or scheduler. Synchronous operations run in an existing blocking
+context; asynchronous operations retain connection ownership inside `spawn_blocking`,
+including when the waiting caller is cancelled. Keep journal parsing in core and
+scheduler lease/admission transactions in scheduler.
+
+```sh
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-store -p kyler-scheduler
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-core --lib session::store
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-server --test session_catalog --test automations
+```
+
+Tests use temporary directories and cover migration rollback/concurrent openers,
+older schemas, future-version rejection, scoped preferences, journal-driven repair
+and scheduler recovery. Existing database paths and schema versions are preserved.
+
 ## MCP development
 
 `kyler-mcp` is independently testable and contains no dependency on `kyler-core`.

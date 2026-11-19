@@ -2232,6 +2232,7 @@ dependencies = [
  "kyler-mcp",
  "kyler-protocol",
  "kyler-skills",
+ "kyler-store",
  "libc",
  "mxc-sdk",
  "pdf-extract",
@@ -2323,6 +2324,7 @@ dependencies = [
  "chrono-tz",
  "croner",
  "kyler-protocol",
+ "kyler-store",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2377,6 +2379,19 @@ dependencies = [
  "tempfile",
  "tokio",
  "zip 8.6.0",
+]
+
+[[package]]
+name = "kyler-store"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "kyler-protocol",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

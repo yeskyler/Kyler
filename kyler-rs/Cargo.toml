@@ -5,6 +5,7 @@ members = [
     "crates/kyler-core",
     "crates/kyler-mcp",
     "crates/kyler-skills",
+    "crates/kyler-store",
     "crates/kyler-cli",
     "crates/kyler-client",
     "crates/kyler-config",
@@ -28,6 +29,7 @@ kyler-protocol = { path = "crates/kyler-protocol" }
 kyler-core = { path = "crates/kyler-core" }
 kyler-mcp = { path = "crates/kyler-mcp" }
 kyler-skills = { path = "crates/kyler-skills" }
+kyler-store = { path = "crates/kyler-store" }
 kyler-cli = { path = "crates/kyler-cli" }
 kyler-client = { path = "crates/kyler-client" }
 kyler-config = { path = "crates/kyler-config" }

@@ -35,6 +35,11 @@ conversation history.
 
 ## Responsibilities and consistency
 
+`kyler-store` owns the SQLite connection policy and session/run/preference queries.
+Core constructs index records and repairs indexes from authoritative journals;
+database repositories do not load conversation history. Scheduler shares the
+connection infrastructure but retains its separate database and domain transactions.
+
 - `sessions` indexes ID, title, cwd, project/layout, timestamps, revision, message
   counts, a bounded ordinary-message preview, and draft visibility. Session-list
   pagination queries SQLite rather than replaying each conversation.

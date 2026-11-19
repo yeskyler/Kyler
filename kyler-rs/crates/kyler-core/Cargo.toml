@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-rusqlite.workspace = true
+kyler-store.workspace = true
 pulldown-cmark.workspace = true
 percent-encoding.workspace = true
 # local crates
@@ -50,5 +50,6 @@ name = "kyler-tool-worker"
 path = "src/bin/tool_worker.rs"
 
 [dev-dependencies]
+rusqlite.workspace = true
 kyler-logging.workspace = true
 axum.workspace = true
