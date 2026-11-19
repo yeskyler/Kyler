@@ -20,9 +20,8 @@
   <p><a href="#installation">Install</a> · <a href="#demo">Demo</a> · <a href="#architecture">Architecture</a> · <a href="#documentation">Documentation</a></p>
 </div>
 
-Kyler is an AI assistant for coding, research, and document work. It combines
-conversation, tool execution, and project workspaces to help you understand problems,
-complete tasks, and deliver results. Use it through Web, TUI, or CLI.
+Kyler is an AI assistant for coding, research, and document work.
+Use it through Web, TUI, or CLI.
 
 ## Demo
 
