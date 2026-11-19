@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0 — 2026-11-19
+
+### Added
+
+- Dedicated MCP, Skills, SQLite storage and ACP integration crates.
+- Explicit BM25 tool retrieval and progressive skill loading.
+- Reviewed memory candidates, source-bound skill drafts and Memory/Skills review interfaces.
+- English runtime-centered architecture diagrams and bilingual Web screenshots.
+
+### Fixed
+
+- The Web home page starts a new conversation instead of reopening the recent session.
+
 ## 0.2.0 — 2026-11-18
 
 ### Added
