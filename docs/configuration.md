@@ -226,13 +226,14 @@ the token from the configuration so rotation invalidates old cookies without a r
 
 ## MCP tool retrieval
 
-MCP metadata retrieval runs locally. Small catalogs within the active-tool and
-schema budgets are advertised directly. Larger catalogs are automatically searched
-using the current user task, with optional batched `search_tools` queries when the
-model needs more capabilities. English identifiers, camel-case components, Chinese
-character fragments and a small bilingual action/resource dictionary are supported.
-The model receives full schemas only for activated tools. Search results contain
-short summaries and required parameter names, not duplicate full schemas.
+MCP metadata retrieval uses local field-weighted BM25, without embeddings or a
+vector database. Each new task initially advertises only `search_tool_bm25` for
+MCP discovery, regardless of catalog size. The model searches with up to four
+queries and optional `server_ids`; matching tools that fit the activation budgets
+are loaded with full schemas in the next model request. There is no separate load
+call. Search results contain summaries and required parameter names, not full
+schemas. English identifiers, camel-case components, Chinese character fragments
+and a small bilingual action/resource dictionary are supported.
 
 ```toml
 [mcp.search]
@@ -252,9 +253,11 @@ full advertisement of currently connected MCP tools.
 Connecting servers no longer block unrelated model requests. Only explicit
 `@connector:id` mentions wait, for at most `explicit_wait_ms` (0–10000). An explicit
 mention does not enable a disconnected connector; existing configured connection
-and sandbox rules still apply. `search_tools` reports connection states when some
+and sandbox rules still apply. `search_tool_bm25` reports connection states when some
 servers are not ready. Newly activated tools become available on the next model
-request. Active tools are retained within the current task and recent calls take
+request. Configured but disconnected servers also keep the search entry visible;
+search returns their status without connecting them. Active tools are retained
+within the current task and recent calls take
 priority when later selection changes. A new task starts with a fresh selection.
 Catalog updates, disconnects and reconnects refresh availability and invalidate
 stale schemas; remote side-effecting calls are never automatically replayed.

@@ -287,9 +287,11 @@ processes as well as established connections.
 `kyler-mcp::search::ToolIndex` owns a bounded, field-weighted BM25 index and a
 catalog-local query cache. Search summaries contain no full schemas, credentials,
 or transport handles. The core runtime owns task-local activation, schema token
-budgets and the `search_tools` adapter. Finding a tool never grants authority.
+budgets and the `search_tool_bm25` adapter. Finding a tool never grants authority.
 Only tools advertised in the current model request can execute; tools activated
-by search are advertised on the next request.
+by search are advertised on the next request. New tasks advertise no concrete MCP
+tools until explicit search, including small catalogs; automatic task-query
+selection is disabled. The adapter lives in `kyler-core/src/tools/search_tool_bm25.rs`.
 
 Runtime discovery uses the nonblocking `snapshot_ready` path. Healthy connectors
 are usable while other handshakes continue. Explicit `@connector:id` references

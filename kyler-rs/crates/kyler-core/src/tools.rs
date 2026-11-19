@@ -18,6 +18,7 @@ pub mod plan;
 pub mod read_file;
 pub mod register_artifacts;
 pub mod save_skill;
+pub(crate) mod search_tool_bm25;
 pub mod shell;
 pub mod skills_resource;
 pub mod wait_tasks;

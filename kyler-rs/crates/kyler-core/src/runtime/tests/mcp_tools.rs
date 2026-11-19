@@ -80,8 +80,8 @@ fn advertised(request: &Value) -> Vec<&str> {
 }
 
 #[tokio::test]
-async fn auto_retrieval_exposes_relevant_tools_before_first_request_without_search_round_trip() {
-    let (url,requests,server)=server(vec![json!({"role":"assistant","tool_calls":[call("mail","mcp__fixture__searchEmails",json!({}))]}),json!({"role":"assistant","content":"done"})]).await;
+async fn explicit_search_loads_tools_on_next_request_and_retains_them() {
+    let (url,requests,server)=server(vec![json!({"role":"assistant","tool_calls":[call("discover","search_tool_bm25",json!({"queries":["查找邮件"]}))]}),json!({"role":"assistant","tool_calls":[call("mail","mcp__fixture__searchEmails",json!({}))]}),json!({"role":"assistant","content":"done"})]).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let agent = Agent::new(
         url,
@@ -96,16 +96,17 @@ async fn auto_retrieval_exposes_relevant_tools_before_first_request_without_sear
         .unwrap();
     server.await.unwrap();
     let requests = requests.lock().await;
-    assert_eq!(requests.len(), 2);
-    assert!(advertised(&requests[0]).contains(&"mcp__fixture__searchEmails"));
+    assert_eq!(requests.len(), 3);
+    assert_eq!(advertised(&requests[0]), vec!["search_tool_bm25"]);
+    assert!(advertised(&requests[1]).contains(&"mcp__fixture__searchEmails"));
     assert!(!advertised(&requests[0]).contains(&"mcp__fixture__unrelated0"));
-    assert_eq!(advertised(&requests[0]), advertised(&requests[1]));
+    assert_eq!(advertised(&requests[1]), advertised(&requests[2]));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 #[tokio::test]
 async fn searched_tools_are_only_callable_in_next_request_and_results_omit_full_schemas() {
     let (url,requests,server)=server(vec![
-        json!({"role":"assistant","tool_calls":[call("search","search_tools",json!({"queries":["createIssue"]})),call("too_early","mcp__fixture__createIssue",json!({}))]}),
+        json!({"role":"assistant","tool_calls":[call("search","search_tool_bm25",json!({"queries":["createIssue"]})),call("too_early","mcp__fixture__createIssue",json!({}))]}),
         json!({"role":"assistant","tool_calls":[call("issue","mcp__fixture__createIssue",json!({}))]}),
         json!({"role":"assistant","content":"done"}),
     ]).await;
@@ -143,7 +144,7 @@ async fn searched_tools_are_only_callable_in_next_request_and_results_omit_full_
     assert!(session.events.iter().flat_map(|event|&event.content).any(|item|matches!(item,ContentItem::ToolResult {tool_call_id,status:ToolResultStatus::Error,..} if tool_call_id=="too_early")));
 }
 #[tokio::test]
-async fn small_catalog_is_direct_and_large_schema_is_not_silently_truncated() {
+async fn small_catalog_also_requires_search_and_large_schema_is_not_truncated() {
     let calls = Arc::new(AtomicUsize::new(0));
     let small = remote("echo", "Echo", &calls);
     let huge: Arc<dyn Tool> = Arc::new(Remote {
@@ -169,9 +170,12 @@ async fn small_catalog_is_direct_and_large_schema_is_not_silently_truncated() {
         .await
         .unwrap();
     assert!(!agent.toolbox.contains_key("mcp__fixture__huge"));
-    let call: ChatCompletionMessageToolCalls =
-        serde_json::from_value(call("search", "search_tools", json!({"queries":["huge"]})))
-            .unwrap();
+    let call: ChatCompletionMessageToolCalls = serde_json::from_value(call(
+        "search",
+        "search_tool_bm25",
+        json!({"queries":["huge"]}),
+    ))
+    .unwrap();
     agent
         .record_tool_calls(&mut session, &[call.clone()])
         .unwrap();
@@ -210,7 +214,8 @@ async fn small_catalog_is_direct_and_large_schema_is_not_silently_truncated() {
         .select_mcp_tools(&session, &mut McpRetrieval::default(), "0")
         .await
         .unwrap();
-    assert!(agent.toolbox.contains_key("mcp__fixture__echo"));
+    assert!(!agent.toolbox.contains_key("mcp__fixture__echo"));
+    assert!(agent.toolbox.contains_key("search_tool_bm25"));
 }
 #[tokio::test]
 async fn task_activation_is_isolated_and_catalog_removal_revokes_tools() {
@@ -233,13 +238,32 @@ async fn task_activation_is_isolated_and_catalog_removal_revokes_tools() {
         .select_mcp_tools(&mail, &mut state, "0")
         .await
         .unwrap();
-    assert!(first.toolbox.contains_key("mcp__fixture__searchEmails"));
+    assert!(!first.toolbox.contains_key("mcp__fixture__searchEmails"));
+    let search: ChatCompletionMessageToolCalls = serde_json::from_value(call(
+        "activate",
+        "search_tool_bm25",
+        json!({"queries":["searchEmails"]}),
+    ))
+    .unwrap();
+    first
+        .record_tool_calls(&mut mail, &[search.clone()])
+        .unwrap();
+    first
+        .execute_tool_calls(&mut mail, &[search], None, None)
+        .await
+        .unwrap();
+    let mut activated = base.clone();
+    activated
+        .select_mcp_tools(&mail, &mut state, "0")
+        .await
+        .unwrap();
+    assert!(activated.toolbox.contains_key("mcp__fixture__searchEmails"));
     let mut second = base.clone();
     second
         .select_mcp_tools(&issue, &mut McpRetrieval::default(), "0")
         .await
         .unwrap();
-    assert!(second.toolbox.contains_key("mcp__fixture__createIssue"));
+    assert!(!second.toolbox.contains_key("mcp__fixture__createIssue"));
     assert!(!second.toolbox.contains_key("mcp__fixture__searchEmails"));
     let mut removed = base.clone();
     let mut remaining = all.as_ref().clone();
@@ -353,7 +377,7 @@ async fn a_connecting_server_does_not_delay_the_first_model_request() {
     let result = result.unwrap().unwrap();
     assert_eq!(result.output, "local work completed");
     model.await.unwrap();
-    assert!(advertised(&requests.lock().await[0]).contains(&"search_tools"));
+    assert!(advertised(&requests.lock().await[0]).contains(&"search_tool_bm25"));
     assert_eq!(
         manager
             .list(&result.session.session_id, None)
@@ -394,11 +418,79 @@ async fn readonly_policy_hides_discovery_and_remote_tools() {
         .select_mcp_tools(&session, &mut McpRetrieval::default(), "one")
         .await
         .unwrap();
-    assert!(!agent.toolbox.contains_key("search_tools"));
+    assert!(!agent.toolbox.contains_key("search_tool_bm25"));
     assert!(
         !agent
             .toolbox
             .values()
             .any(|tool| matches!(tool.source(), ToolSource::Mcp { .. }))
     );
+}
+
+#[tokio::test]
+async fn disconnected_catalog_exposes_search_without_connecting_or_loading_tools() {
+    use kyler_config::{McpServerSettings, McpSettings, McpTransport};
+    let manager = Arc::new(
+        McpManager::new(McpSettings {
+            servers: [(
+                "offline".into(),
+                McpServerSettings {
+                    transport: McpTransport::StreamableHttp,
+                    url: "http://127.0.0.1:1/mcp".into(),
+                    auto_connect: false,
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let mut agent = agent("http://127.0.0.1:1/v1".into()).with_mcp_manager(manager.clone());
+    let mut session = Session::new();
+    session.begin_execution("search mail").unwrap();
+    agent
+        .select_mcp_tools(&session, &mut McpRetrieval::default(), "0")
+        .await
+        .unwrap();
+    assert!(agent.toolbox.contains_key("search_tool_bm25"));
+    assert!(!agent.toolbox.contains_key("search_tools"));
+    let search: ChatCompletionMessageToolCalls = serde_json::from_value(call(
+        "offline-search",
+        "search_tool_bm25",
+        json!({"queries":["mail"]}),
+    ))
+    .unwrap();
+    agent
+        .record_tool_calls(&mut session, &[search.clone()])
+        .unwrap();
+    agent
+        .execute_tool_calls(&mut session, &[search], None, None)
+        .await
+        .unwrap();
+    let output = session
+        .events
+        .iter()
+        .flat_map(|event| &event.content)
+        .find_map(|item| {
+            if let ContentItem::ToolResult {
+                tool_call_id,
+                content,
+                ..
+            } = item
+            {
+                (tool_call_id == "offline-search").then_some(content)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let output: Value = serde_json::from_str(output).unwrap();
+    assert!(output["matches"].as_array().unwrap().is_empty());
+    assert_eq!(output["servers"][0]["status"], "disconnected");
+    assert_eq!(
+        manager.list(&session.session_id, None).await.unwrap()[0].status,
+        kyler_protocol::api::mcp::McpStatus::Disconnected
+    );
+    manager.shutdown().await;
 }

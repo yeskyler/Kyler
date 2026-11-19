@@ -58,14 +58,25 @@ async fn model(
         .unwrap()
         .iter()
         .any(|t| t["function"]["name"] == "mcp__remote__echo");
-    let has_result = request["messages"]
-        .as_array()
-        .unwrap()
+    let messages = request["messages"].as_array().unwrap();
+    let current = &messages[messages
         .iter()
-        .any(|m| m["role"] == "tool");
+        .rposition(|message| message["role"] == "user")
+        .unwrap_or(0)..];
+    let has_result = current
+        .iter()
+        .any(|message| message["tool_call_id"] == "mcp-call");
+    let searched = current
+        .iter()
+        .any(|message| message["tool_call_id"] == "discover");
     let text = if has_tool && !has_result {
         chunk(
             json!({"tool_calls":[{"index":0,"id":"mcp-call","type":"function","function":{"name":"mcp__remote__echo","arguments":"{}"}}]}),
+            json!("tool_calls"),
+        )
+    } else if !has_tool && !searched {
+        chunk(
+            json!({"tool_calls":[{"index":0,"id":"discover","type":"function","function":{"name":"search_tool_bm25","arguments":json!({"queries":["echo"],"server_ids":["remote"]}).to_string()}}]}),
             json!("tool_calls"),
         )
     } else {
@@ -204,6 +215,21 @@ async fn mcp_management_and_dynamic_agent_tools_work_end_to_end_per_session() {
     let (result, events) = run(&http, &base, &first.session_id).await;
     assert_eq!(result.status, RunStatus::Completed);
     assert_eq!(result.output.as_deref(), Some("MCP completed"));
+    {
+        let requests = requests.lock().unwrap();
+        let first_tools = requests[0]["tools"].as_array().unwrap();
+        assert!(
+            first_tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "search_tool_bm25")
+        );
+        assert!(
+            !first_tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "mcp__remote__echo")
+        );
+    }
+
     assert!(events.iter().any(|e|matches!(&e.payload,EventPayload::ToolStarted{source:kyler_protocol::activity::ToolSource::Mcp{server_id,..},activity:kyler_protocol::activity::ActivityKind::Search,..} if server_id=="remote")));
     assert!(
         requests.lock().unwrap().iter().any(|r| r["messages"]
