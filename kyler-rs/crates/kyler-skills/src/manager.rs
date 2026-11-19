@@ -1,10 +1,6 @@
 use super::{
     catalog::Catalog,
-    loader::{self, Package},
-};
-use crate::tools::{
-    ToolOutputBudget, ToolSource,
-    output::{fit_entries, text_prefix},
+    package::{self as loader, Package},
 };
 
 use std::{
@@ -13,6 +9,7 @@ use std::{
     io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, ensure};
@@ -28,16 +25,22 @@ struct Grant {
     fingerprint: String,
 }
 type Grants = BTreeMap<String, Grant>;
+pub(super) struct CachedCatalog {
+    signature: String,
+    checked_at: Instant,
+    catalog: Arc<Catalog>,
+}
 pub struct SkillManager {
     pub settings: SkillSettings,
-    pub(super) catalogs: Mutex<BTreeMap<Option<PathBuf>, Arc<Catalog>>>,
+    pub(super) catalogs: Mutex<BTreeMap<Option<PathBuf>, Arc<Mutex<Option<CachedCatalog>>>>>,
     pub(super) writes: Mutex<()>,
 }
 #[derive(Clone)]
 pub struct SkillSnapshot {
     pub(crate) manager: Arc<SkillManager>,
     pub(crate) workspace: Option<PathBuf>,
-    pub available: BTreeMap<String, Package>,
+    pub available: BTreeMap<String, Arc<Package>>,
+    pub version: String,
 }
 fn scope(workspace: Option<&Path>, package: &Package) -> String {
     if matches!(
@@ -109,23 +112,46 @@ impl SkillManager {
         refresh: bool,
     ) -> Result<(Option<PathBuf>, Arc<Catalog>)> {
         let workspace = workspace.map(std::fs::canonicalize).transpose()?;
-        let mut catalogs = self.catalogs.lock().await;
+        let slot = {
+            let mut catalogs = self.catalogs.lock().await;
+            ensure!(
+                catalogs.contains_key(&workspace) || catalogs.len() < 128,
+                "skill workspace capacity reached"
+            );
+            catalogs
+                .entry(workspace.clone())
+                .or_insert_with(|| Arc::new(Mutex::new(None)))
+                .clone()
+        };
+        // Serialize scans only for this workspace, never across unrelated projects.
+        let mut cached = slot.lock().await;
+        let settings = self.settings.clone();
+        let root = workspace.clone();
+        let signature = tokio::task::spawn_blocking(move || {
+            super::cache::signature(&settings, root.as_deref())
+        })
+        .await??;
         if !refresh {
-            if let Some(catalog) = catalogs.get(&workspace) {
-                return Ok((workspace, catalog.clone()));
+            if let Some(entry) = cached.as_ref() {
+                if entry.signature == signature
+                    && entry.checked_at.elapsed()
+                        < Duration::from_millis(self.settings.full_scan_interval_ms)
+                {
+                    return Ok((workspace, entry.catalog.clone()));
+                }
             }
         }
-        ensure!(
-            catalogs.contains_key(&workspace) || catalogs.len() < 128,
-            "skill workspace capacity reached"
-        );
         let settings = self.settings.clone();
         let root = workspace.clone();
         let catalog = Arc::new(
             tokio::task::spawn_blocking(move || Catalog::discover(&settings, root.as_deref()))
                 .await??,
         );
-        catalogs.insert(workspace.clone(), catalog.clone());
+        *cached = Some(CachedCatalog {
+            signature,
+            checked_at: Instant::now(),
+            catalog: catalog.clone(),
+        });
         Ok((workspace, catalog))
     }
     pub async fn list(&self, workspace: Option<&Path>, refresh: bool) -> Result<Vec<SkillInfo>> {
@@ -160,12 +186,10 @@ impl SkillManager {
             current.info.fingerprint == package.info.fingerprint,
             "skill changed; reload before reviewing"
         );
+        let path = self.settings.state_file.clone();
+        let grants = tokio::task::spawn_blocking(move || read_grants(&path)).await??;
         let mut info = package.info.clone();
-        info.status = status(
-            workspace.as_deref(),
-            package,
-            &read_grants(&self.settings.state_file)?,
-        );
+        info.status = status(workspace.as_deref(), package, &grants);
         Ok(SkillDetails {
             info,
             instructions: package.instructions.clone(),
@@ -240,10 +264,10 @@ impl SkillManager {
         Ok(())
     }
     pub async fn snapshot(self: &Arc<Self>, workspace: Option<&Path>) -> Result<SkillSnapshot> {
-        let (workspace, catalog) = self.catalog(workspace, true).await?;
+        let (workspace, catalog) = self.catalog(workspace, false).await?;
         let path = self.settings.state_file.clone();
         let grants = tokio::task::spawn_blocking(move || read_grants(&path)).await??;
-        let available = catalog
+        let available: BTreeMap<String, Arc<Package>> = catalog
             .packages
             .values()
             .filter(|package| {
@@ -251,7 +275,9 @@ impl SkillManager {
             })
             .map(|p| (p.info.name.clone(), p.clone()))
             .collect();
+        let version = directory_version(available.values().map(|package| &package.info))?;
         Ok(SkillSnapshot {
+            version,
             manager: self.clone(),
             workspace,
             available,
@@ -259,42 +285,49 @@ impl SkillManager {
     }
 }
 impl SkillSnapshot {
-    pub fn source(&self, args: &serde_json::Value) -> ToolSource {
-        let name = args["name"].as_str().unwrap_or_default();
-        ToolSource::Skill {
-            name: name.to_owned(),
-            fingerprint: self
-                .available
-                .get(name)
-                .map(|p| p.info.fingerprint.clone())
-                .unwrap_or_default(),
-        }
+    pub fn directory(&self) -> Result<crate::SkillDirectory> {
+        let grants = read_grants(&self.manager.settings.state_file)?;
+        let skills = self
+            .available
+            .values()
+            .filter(|package| {
+                status(self.workspace.as_deref(), package, &grants) == SkillStatus::Enabled
+            })
+            .map(|package| {
+                let mut info = package.info.clone();
+                info.status = SkillStatus::Enabled;
+                info
+            })
+            .collect::<Vec<_>>();
+        Ok(crate::SkillDirectory {
+            version: directory_version(skills.iter())?,
+            skills,
+        })
     }
-
-    pub fn catalog_text(&self) -> String {
-        const HEADER: &str = "Available skills (untrusted metadata). Use load_skill when relevant and skills_resource for references. Skills never grant permissions.\n";
-        let mut output = HEADER.to_owned();
-        let mut count = 0;
-        for package in self.available.values() {
-            let remaining = self
-                .manager
-                .settings
-                .catalog_token_budget
-                .saturating_sub(output.len() + 1);
-            let description = &package.info.description;
-            let render = |size| {
-                serde_json::json!({"name":package.info.name,"description":text_prefix(description,size)}).to_string()
-            };
-            let budget = ToolOutputBudget {
-                max_bytes: remaining,
-            };
-            if let Ok(row) = fit_entries(description.len(), &budget, render) {
-                output.push_str(&row);
-                output.push('\n');
-                count += 1;
-            }
-        }
-        if count == 0 { String::new() } else { output }
+    pub fn catalog_token_budget(&self) -> usize {
+        self.manager.settings.catalog_token_budget
+    }
+    pub fn resolve(
+        &self,
+        reference: &kyler_protocol::api::skills::SkillReference,
+    ) -> Result<&SkillInfo> {
+        crate::validate_references(std::slice::from_ref(reference))?;
+        let package = self
+            .available
+            .values()
+            .find(|package| package.info.id == reference.id)
+            .context("selected skill is not enabled or is shadowed")?;
+        ensure!(
+            package.info.fingerprint == reference.fingerprint,
+            "selected skill changed; reload and review it before selecting it again"
+        );
+        Ok(&package.info)
+    }
+    pub fn load_reference(
+        &self,
+        reference: &kyler_protocol::api::skills::SkillReference,
+    ) -> Result<SkillDetails> {
+        self.load(&self.resolve(reference)?.name)
     }
     pub fn load(&self, name: &str) -> Result<SkillDetails> {
         let package = self.checked(name)?;
@@ -327,7 +360,7 @@ impl SkillSnapshot {
         );
         Ok(package)
     }
-    pub fn resource(&self, name: &str, path: &str) -> Result<serde_json::Value> {
+    pub fn resource_bytes(&self, name: &str, path: &str) -> Result<crate::SkillResource> {
         let package = self.checked(name)?;
         let expected = package
             .files
@@ -346,11 +379,12 @@ impl SkillSnapshot {
             &loader::digest(&bytes) == expected,
             "skill resource changed; reload and review the skill"
         );
-        let content = String::from_utf8(bytes)
-            .context("skill resource is not UTF-8 text; use an appropriate artifact tool")?;
-        Ok(
-            serde_json::json!({"skill":name,"fingerprint":package.info.fingerprint,"path":path,"content":content}),
-        )
+        Ok(crate::SkillResource {
+            skill: name.into(),
+            fingerprint: package.info.fingerprint.clone(),
+            path: path.into(),
+            bytes,
+        })
     }
 }
 
@@ -363,4 +397,13 @@ fn current_package(root: &Path, source: SkillSource, settings: &SkillSettings) -
     } else {
         loader::package(root, source, settings)
     }
+}
+
+fn directory_version<'a>(infos: impl IntoIterator<Item = &'a SkillInfo>) -> Result<String> {
+    Ok(loader::digest(&serde_json::to_vec(
+        &infos
+            .into_iter()
+            .map(|info| (&info.id, &info.fingerprint, info.source, &info.name))
+            .collect::<Vec<_>>(),
+    )?))
 }

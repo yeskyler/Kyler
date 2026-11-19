@@ -122,11 +122,22 @@ impl Agent {
             .as_ref()
             .map(|environment| environment.session_environment())
     }
+    #[cfg(test)]
     fn system_prompt(&self) -> String {
+        self.system_prompt_with_skills(&[])
+    }
+    fn system_prompt_with_skills(&self, preferred: &[String]) -> String {
         let mut prompt =
             prompts::agent_prompt(self.additional_instructions.as_deref(), self.prompt_role);
         if let Some(snapshot) = &self.skill_snapshot {
-            let catalog = snapshot.catalog_text();
+            let catalog = snapshot
+                .catalog_view(
+                    self.model_info()
+                        .map(|model| model.capabilities.tokenizer)
+                        .unwrap_or_default(),
+                    preferred,
+                )
+                .text;
             if !catalog.is_empty() {
                 prompt.push_str("\n\n");
                 prompt.push_str(&catalog);

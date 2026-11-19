@@ -1,5 +1,5 @@
 //! Bounded transport packages shared by CLI directory uploads and server ZIP installs.
-use super::loader;
+use super::package as loader;
 
 use std::{
     collections::BTreeMap,

@@ -710,3 +710,119 @@ async fn uploaded_packages_preserve_binary_resources_reject_conflicts_and_remove
     assert_eq!(restored.status, SkillStatus::Enabled);
     assert!(!Path::new(&info.path).exists());
 }
+
+#[tokio::test]
+async fn structured_selection_loads_the_exact_version_before_the_first_model_request() {
+    use axum::{
+        Json, Router,
+        extract::State,
+        response::sse::{Event, Sse},
+        routing::post,
+    };
+    use kyler_core::{Session, runtime::UserTurn};
+    use kyler_protocol::api::skills::SkillReference;
+    use serde_json::{Value, json};
+    use std::{
+        future::IntoFuture,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+    async fn model(
+        State(requests): State<Arc<AtomicUsize>>,
+        Json(request): Json<Value>,
+    ) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
+        requests.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|message| message["role"] == "tool"
+                    && message["content"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("STRUCTURED_SKILL_INSTRUCTIONS")))
+        );
+        let chunk=json!({"id":"fixture","object":"chat.completion.chunk","created":0,"model":"fixture","choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}).to_string();
+        Sse::new(futures::stream::iter(vec![
+            Ok(Event::default().data(chunk)),
+            Ok(Event::default().data("[DONE]")),
+        ]))
+    }
+    let root = tempfile::tempdir().unwrap();
+    let settings = settings(root.path());
+    package(
+        &settings.user_directory,
+        "selected",
+        "STRUCTURED_SKILL_INSTRUCTIONS",
+    );
+    let manager = Arc::new(SkillManager::new(settings.clone()).unwrap());
+    let snapshot = manager.snapshot(None).await.unwrap();
+    let info = &snapshot.available["selected"].info;
+    let reference = SkillReference {
+        id: info.id.clone(),
+        fingerprint: info.fingerprint.clone(),
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let requests = Arc::new(AtomicUsize::new(0));
+    let server = tokio::spawn(
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/chat/completions", post(model))
+                .with_state(requests.clone()),
+        )
+        .into_future(),
+    );
+    let agent = Agent::new(
+        base,
+        "fixture".into(),
+        "fixture",
+        None::<String>,
+        Arc::new(Default::default()),
+    )
+    .with_skill_manager(manager.clone());
+    let result = agent
+        .run_turn_in_session(
+            Session::new(),
+            UserTurn {
+                text: "Follow the selected skill".into(),
+                skills: vec![reference.clone()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .finish()
+        .await
+        .unwrap();
+    assert_eq!(result.output, "done");
+    assert_eq!(result.context.selected_skills, vec![reference.clone()]);
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    std::fs::write(
+        settings.user_directory.join("selected/SKILL.md"),
+        "---\nname: selected\ndescription: Changed\n---\nChanged instructions",
+    )
+    .unwrap();
+    let failed = agent
+        .run_turn_in_session(
+            Session::new(),
+            UserTurn {
+                text: "Use the old selection".into(),
+                skills: vec![reference],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .finish_with_session()
+        .await
+        .unwrap();
+    assert!(failed.result.is_err());
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        1,
+        "stale selections must fail before any model request"
+    );
+    agent.shutdown().await;
+    server.abort();
+}

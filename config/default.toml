@@ -105,6 +105,8 @@ state_file = "~/.kyler/skills-state.json"
 max_instruction_bytes = 32768
 max_resource_bytes = 131072
 catalog_token_budget = 4096
+# Metadata checks detect changes between full content rescans; 0 forces every snapshot.
+full_scan_interval_ms = 30000
 
 # Optional named profiles for /model. When profiles are present, they replace [llm].
 # /model: Enter selects for the next task, r reloads this file, d follows the default.

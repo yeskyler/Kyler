@@ -6,6 +6,7 @@ use kyler_protocol::api::attachments::AttachmentInfo;
 #[derive(Default)]
 pub struct UserTurn {
     pub text: String,
+    pub skills: Vec<kyler_protocol::api::skills::SkillReference>,
     /// Compatibility input; new clients use attachment references.
     pub images: Vec<UserImage>,
     pub attachments: Vec<AttachmentInfo>,

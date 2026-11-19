@@ -3,8 +3,8 @@ use super::Agent;
 use crate::{
     sandbox::SandboxMode,
     tools::{
-        ToolBox, ToolExecutionMode, install_skill::InstallSkillTool, load_skill::LoadSkillTool,
-        save_skill::SaveSkillTool, skills_resource::SkillsResourceTool,
+        ToolBox, ToolExecutionMode, install_skill::InstallSkillTool, list_skills::ListSkillsTool,
+        load_skill::LoadSkillTool, save_skill::SaveSkillTool, skills_resource::SkillsResourceTool,
     },
 };
 
@@ -98,6 +98,14 @@ impl Agent {
                 );
             }
             if !snapshot.available.is_empty() {
+                anyhow::ensure!(
+                    !tools.contains_key("list_skills"),
+                    "reserved skill tool name conflicts with a configured tool"
+                );
+                tools.insert(
+                    "list_skills".into(),
+                    Arc::new(ListSkillsTool(snapshot.clone())),
+                );
                 anyhow::ensure!(
                     !tools.contains_key("load_skill") && !tools.contains_key("skills_resource"),
                     "reserved skill tool name conflicts with a configured tool"

@@ -149,6 +149,7 @@ async fn run(client: &Client, input: &str, workspace: &Path) -> (String, PathBuf
         .start_run(
             &session.session_id,
             &CreateRunRequest {
+                skills: Vec::new(),
                 attachment_ids: Vec::new(),
                 resume: false,
                 images: Vec::new(),

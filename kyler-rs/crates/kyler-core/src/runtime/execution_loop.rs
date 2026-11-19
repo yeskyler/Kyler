@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_openai::{
-    Client,
     config::OpenAIConfig,
     types::chat::{
         ChatCompletionRequestSystemMessageArgs, CreateChatCompletionRequestArgs,
@@ -31,11 +30,13 @@ impl Agent {
         scope: Option<&SubagentScope>,
         stream: Option<&StreamControl>,
     ) -> Result<String> {
-        let client = Client::with_config(
-            OpenAIConfig::new()
-                .with_api_base(&self.base_url)
-                .with_api_key(&self.api_key),
-        );
+        let config = OpenAIConfig::new()
+            .with_api_base(&self.base_url)
+            .with_api_key(&self.api_key);
+        #[cfg(not(test))]
+        let client = async_openai::Client::with_config(config);
+        #[cfg(test)]
+        let client = super::tests::local_fixture_client(config, &self.base_url)?;
         let mut retrieval = super::mcp_tools::McpRetrieval::default();
         let mut explicit_loaded = false;
         let mut patch_retries = 0;

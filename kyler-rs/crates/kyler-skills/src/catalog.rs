@@ -1,8 +1,9 @@
-use super::loader::{self, Package};
+use super::package::{self as loader, Package};
 
 use std::{
     collections::{BTreeMap, HashSet},
     path::Path,
+    sync::Arc,
 };
 
 use kyler_config::SkillSettings;
@@ -10,7 +11,7 @@ use kyler_protocol::api::skills::{SkillInfo, SkillSource, SkillStatus};
 
 #[derive(Clone, Default)]
 pub struct Catalog {
-    pub packages: BTreeMap<String, Package>,
+    pub packages: BTreeMap<String, Arc<Package>>,
     pub invalid: Vec<SkillInfo>,
 }
 impl Catalog {
@@ -20,7 +21,9 @@ impl Catalog {
             return Ok(catalog);
         }
         for package in super::builtin::packages(settings)? {
-            catalog.packages.insert(package.info.id.clone(), package);
+            catalog
+                .packages
+                .insert(package.info.id.clone(), Arc::new(package));
         }
         catalog.scan(&settings.user_directory, SkillSource::User, settings)?;
         if let Some(workspace) = workspace {
@@ -57,7 +60,7 @@ impl Catalog {
         // Invalid higher-priority packages shadow lower-priority copies as well.
         for package in catalog.packages.values_mut() {
             if priority(package.info.source) < winners[&package.info.name] {
-                package.info.status = SkillStatus::Shadowed;
+                Arc::make_mut(package).info.status = SkillStatus::Shadowed;
             }
         }
         Ok(catalog)
@@ -94,10 +97,10 @@ impl Catalog {
             match loader::package(&path, source, settings) {
                 Ok(package) => {
                     if names.insert(package.info.name.clone()) {
-                        self.packages.insert(package.info.id.clone(), package);
+                        self.packages.insert(package.info.id.clone(), Arc::new(package));
                     } else {
                         let duplicates=self.packages.iter().filter(|(_,p)|p.info.source==source&&p.info.name==package.info.name).map(|(id,_)|id.clone()).collect::<Vec<_>>();
-                        for id in duplicates { let mut info=self.packages.remove(&id).unwrap().info;info.status=SkillStatus::Invalid;info.error=Some("Duplicate skill name in the same directory.".into());self.invalid.push(info); }
+                        for id in duplicates { let mut info=self.packages.remove(&id).unwrap().info.clone();info.status=SkillStatus::Invalid;info.error=Some("Duplicate skill name in the same directory.".into());self.invalid.push(info); }
                         let mut info=package.info;info.status=SkillStatus::Invalid;info.error=Some("Duplicate skill name in the same directory.".into());self.invalid.push(info);
                     }
                 }

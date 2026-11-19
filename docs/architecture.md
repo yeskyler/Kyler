@@ -38,6 +38,7 @@ and artifacts through their respective views.
 | `kyler-tui` | Terminal interaction and in-process core operation/event adaptation |
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
 | `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integration policy |
+| `kyler-skills` | Skill discovery, package validation, reviewed versions, caches, resources and package storage |
 | `kyler-mcp` | MCP protocol sessions, connection lifecycle, immutable catalogs, calls and local metadata search |
 | `kyler-protocol` | Shared contracts, event metadata, prompts, and agent names |
 | `kyler-config` | Configuration loading, defaults, validation, credential resolution |
@@ -215,6 +216,45 @@ Product instructions are maintained in `kyler-rs/crates/kyler-protocol/src/promp
 separate from the repository's [AGENTS.md](../AGENTS.md). See
 [configuration](configuration.md), [development](development.md), and [security
 guidance](../SECURITY.md).
+
+## Skills boundary and progressive loading
+
+`kyler-core` depends on `kyler-skills`; the skill crate never depends on core or
+runs scripts, model requests, commands or connectors. The compatibility facade at
+`kyler_core::skills` preserves `SkillManager`, `SkillSnapshot`, archive helpers and
+catalog imports. Built-in packages are embedded in the new crate; their virtual
+paths and fingerprints remain stable.
+
+The standalone manager treats configured user/project source directories as
+host-authorized skill control-plane roots. Arbitrary local imports and project
+writes use the `SkillFileAccess` interface; core adapts its `FilesystemPolicy`,
+including restrictions on protected descendants during package replacement. Skill
+package checks still reject traversal and symlinks, securely open resource files,
+and bound package size, depth and entry counts. Skill activation is permission to
+load guidance, not permission to execute its contents.
+
+Directory caches are keyed by canonical workspace and use per-workspace scan locks.
+Metadata signatures trigger content rescans; a configurable periodic full scan
+also detects changes. Cached packages are shared through immutable references.
+Timestamps only help invalidation: loading instructions/resources still validates
+the entire package content fingerprint and current enable/review records. Project
+skills override user and built-in copies, require exact-fingerprint review, and do
+not silently fall back to a lower-priority copy when disabled or invalid.
+
+Core renders directory metadata using the bound model tokenizer, with explicit
+selections prioritized. Omitted entries remain discoverable via versioned
+`list_skills` pages; full instructions are loaded through `load_skill`, resources
+through `skills_resource`. Full instructions are never truncated by the directory
+budget. Binary resource bytes can be read by the package API; model text tools
+reject non-UTF-8 resources and leave parsing/preview/execution to existing tools.
+
+`CreateRunRequest.skills` and `UserTurn.skills` accept bounded ID/fingerprint
+references. Core validates them, loads the selected version before the first model
+request, records canonical skill tool events and persists selections for resume.
+Legacy `@skill-name` and `$skill-name` inputs follow the same loading path.
+Existing Web/TUI skill markers remain supported; the typed request field is
+available to API and in-process clients. Request/operation deduplication includes
+nonempty selections while preserving historical hashes for legacy empty selections.
 
 ## MCP transport and retrieval boundary
 

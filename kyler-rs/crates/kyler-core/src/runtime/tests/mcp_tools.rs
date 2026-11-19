@@ -333,10 +333,16 @@ async fn a_connecting_server_does_not_delay_the_first_model_request() {
     )
     .with_mcp_manager(manager.clone())
     .with_observer(observations.clone());
-    let result = tokio::time::timeout(
-        Duration::from_secs(10),
-        agent.run_in_session(&mut Session::new(), "answer a local question"),
-    )
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut session = Session::new();
+        // Both requests must reach their fixtures while the MCP initialize
+        // response remains gated.
+        let (result, ()) = tokio::join!(
+            agent.run_in_session(&mut session, "answer a local question"),
+            gate.started.notified(),
+        );
+        result
+    })
     .await;
     assert!(
         result.is_ok(),

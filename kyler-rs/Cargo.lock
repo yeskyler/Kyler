@@ -2231,6 +2231,7 @@ dependencies = [
  "kyler-logging",
  "kyler-mcp",
  "kyler-protocol",
+ "kyler-skills",
  "libc",
  "mxc-sdk",
  "pdf-extract",
@@ -2241,7 +2242,6 @@ dependencies = [
  "rusqlite",
  "schemars",
  "serde",
- "serde-saphyr",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
@@ -2359,6 +2359,23 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
+ "zip 8.6.0",
+]
+
+[[package]]
+name = "kyler-skills"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "kyler-config",
+ "kyler-protocol",
+ "libc",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
  "zip 8.6.0",
 ]
 

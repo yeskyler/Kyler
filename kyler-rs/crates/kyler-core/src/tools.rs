@@ -10,6 +10,7 @@ pub mod get_task;
 pub mod grep_files;
 pub mod install_skill;
 pub mod list_dir;
+pub mod list_skills;
 pub mod load_skill;
 pub mod memory;
 pub mod output;

@@ -31,6 +31,31 @@ use uuid::Uuid;
 use kyler_config::OutputTokenParameter;
 use kyler_protocol::prompts::SUBAGENT;
 
+// Plain HTTP fixtures need neither host proxies nor native TLS roots. Construct
+// directly, rather than replacing an already-initialized default TLS client.
+pub(super) fn local_fixture_client(
+    config: async_openai::config::OpenAIConfig,
+    base_url: &str,
+) -> Result<async_openai::Client<async_openai::config::OpenAIConfig>> {
+    let url = reqwest::Url::parse(base_url)?;
+    let loopback = url.scheme() == "http"
+        && url
+            .host_str()
+            .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+            .is_some_and(|address| address.is_loopback());
+    if loopback {
+        Ok(async_openai::Client::build(
+            reqwest::Client::builder()
+                .no_proxy()
+                .tls_certs_only([])
+                .build()?,
+            config,
+        ))
+    } else {
+        Ok(async_openai::Client::with_config(config))
+    }
+}
+
 // Real HTTP requests against a local fixture; no model keys or external network.
 async fn server(messages: Vec<Value>) -> (String, Arc<Mutex<Vec<Value>>>, JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

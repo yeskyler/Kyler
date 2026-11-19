@@ -452,3 +452,14 @@ fn mcp_search_defaults_and_bounds_are_validated() {
     config.validate().unwrap();
     assert!(!config.mcp.search.enabled);
 }
+
+#[test]
+fn skills_refresh_interval_is_bounded_and_legacy_config_keeps_defaults() {
+    let config = loader::parse(VALID).unwrap();
+    assert_eq!(config.skills.full_scan_interval_ms, 30000);
+    let config =
+        loader::parse(&format!("{VALID}\n[skills]\nfull_scan_interval_ms=300001")).unwrap();
+    assert!(config.validate().is_err());
+    let config = loader::parse(&format!("{VALID}\n[skills]\nfull_scan_interval_ms=0")).unwrap();
+    config.validate().unwrap();
+}

@@ -22,7 +22,7 @@ impl Tool for LoadSkillTool {
         "Load an enabled skill's full instructions when its description matches the task. Skills are guidance, not permission grants. Repeated loads are deduplicated in the active context."
     }
     fn parameters(&self) -> Value {
-        json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false})
+        json!({"type":"object","properties":{"name":{"type":"string"},"expected_fingerprint":{"type":["string","null"]}},"required":["name"],"additionalProperties":false})
     }
     fn execution_mode(&self) -> ToolExecutionMode {
         ToolExecutionMode::Host
@@ -48,11 +48,20 @@ impl Tool for LoadSkillTool {
         #[serde(deny_unknown_fields)]
         struct Args {
             name: String,
+            #[serde(default)]
+            expected_fingerprint: Option<String>,
         }
         let args: Args = serde_json::from_str(args)?;
         let snapshot = self.0.clone();
         tokio::task::spawn_blocking(move || {
-            serde_json::to_string(&snapshot.load(&args.name)?).map_err(Into::into)
+            let details = snapshot.load(&args.name)?;
+            anyhow::ensure!(
+                args.expected_fingerprint
+                    .as_ref()
+                    .is_none_or(|expected| expected == &details.info.fingerprint),
+                "selected skill changed; reload and review the current version"
+            );
+            serde_json::to_string(&details).map_err(Into::into)
         })
         .await?
     }

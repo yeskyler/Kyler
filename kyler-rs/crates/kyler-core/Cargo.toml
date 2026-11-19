@@ -12,10 +12,10 @@ percent-encoding.workspace = true
 kyler-protocol.workspace = true
 kyler-config.workspace = true
 kyler-mcp.workspace = true
+kyler-skills.workspace = true
 
 # external crates
 anyhow.workspace = true
-serde-saphyr.workspace = true
 sha2.workspace = true
 libc.workspace = true
 async-openai.workspace = true

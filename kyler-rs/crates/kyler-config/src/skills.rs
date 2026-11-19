@@ -13,6 +13,7 @@ pub struct SkillSettings {
     pub max_instruction_bytes: usize,
     pub max_resource_bytes: usize,
     pub catalog_token_budget: usize,
+    pub full_scan_interval_ms: u64,
 }
 impl Default for SkillSettings {
     fn default() -> Self {
@@ -24,6 +25,7 @@ impl Default for SkillSettings {
             max_instruction_bytes: 32768,
             max_resource_bytes: 131072,
             catalog_token_budget: 4096,
+            full_scan_interval_ms: 30000,
         }
     }
 }
@@ -49,6 +51,10 @@ impl SkillSettings {
         ensure!(
             (256..=16384).contains(&self.catalog_token_budget),
             "skills.catalog_token_budget must be in 256..=16384"
+        );
+        ensure!(
+            self.full_scan_interval_ms <= 300000,
+            "skills.full_scan_interval_ms must not exceed 300000"
         );
         Ok(())
     }

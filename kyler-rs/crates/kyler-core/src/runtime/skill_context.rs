@@ -35,33 +35,65 @@ impl Agent {
             );
         }
         let names = references(input);
-        if names.is_empty() {
+        let mut selected = session.current_execution()?.selected_skills.clone();
+        if names.is_empty() && selected.is_empty() {
             return Ok(());
         }
         let snapshot = self
             .skill_snapshot
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Skills are disabled or unavailable."))?;
-        for name in &names {
-            let snapshot = snapshot.clone();
-            let name = name.clone();
-            tokio::task::spawn_blocking(move || snapshot.load(&name)).await??;
+        for name in names {
+            let package = snapshot.available.get(&name).ok_or_else(|| {
+                anyhow::anyhow!("Requested skill {name} is not enabled or is shadowed.")
+            })?;
+            if !selected
+                .iter()
+                .any(|reference| reference.id == package.info.id)
+            {
+                selected.push(kyler_protocol::api::skills::SkillReference {
+                    id: package.info.id.clone(),
+                    fingerprint: package.info.fingerprint.clone(),
+                });
+            }
         }
-        let calls = names
-            .into_iter()
-            .map(|name| {
-                ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
-                    id: format!("skill-{}", uuid::Uuid::new_v4()),
-                    function: FunctionCall {
-                        name: "load_skill".into(),
-                        arguments: serde_json::json!({"name":name}).to_string(),
-                    },
-                })
-            })
-            .collect::<Vec<_>>();
+        crate::skills::validate_references(&selected)?;
+        let mut calls = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for reference in &selected {
+            if !seen.insert(reference.id.clone()) {
+                continue;
+            }
+            let snapshot = snapshot.clone();
+            let reference = reference.clone();
+            let details =
+                tokio::task::spawn_blocking(move || snapshot.load_reference(&reference)).await??;
+            calls.push(ChatCompletionMessageToolCalls::Function(ChatCompletionMessageToolCall {
+                id:format!("skill-{}",uuid::Uuid::new_v4()),
+                function:FunctionCall {name:"load_skill".into(),arguments:serde_json::json!({"name":details.info.name,"expected_fingerprint":details.info.fingerprint}).to_string()},
+            }));
+        }
+        session.current_execution_mut()?.selected_skills = selected;
         self.record_tool_calls(session, &calls)?;
         self.checkpoint(session).await?;
         self.execute_tool_calls(session, &calls, scope, stream)
             .await
+    }
+}
+
+impl Agent {
+    pub(super) fn preferred_skill_names(&self, session: &Session) -> Vec<String> {
+        let mut names = references(&super::mcp_tools::task_input(session));
+        if let (Some(snapshot), Ok(execution)) = (&self.skill_snapshot, session.current_execution())
+        {
+            for reference in &execution.selected_skills {
+                if let Ok(info) = snapshot.resolve(reference) {
+                    if !names.contains(&info.name) {
+                        names.push(info.name.clone());
+                    }
+                }
+            }
+        }
+        names
     }
 }

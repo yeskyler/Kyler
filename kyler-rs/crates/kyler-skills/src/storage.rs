@@ -1,5 +1,5 @@
 //! Validated package writes with conflict detection and rollback on replacement failure.
-use super::{loader, manager::SkillManager};
+use super::{manager::SkillManager, package as loader};
 
 use std::{
     collections::BTreeMap,
@@ -92,15 +92,15 @@ impl SkillManager {
         })
     }
 
-    pub(crate) fn check_destination_policy(
+    pub fn check_destination_access(
         &self,
         workspace: Option<&Path>,
         scope: SkillScope,
         name: &str,
-        policy: &crate::sandbox::FilesystemPolicy,
+        policy: &dyn crate::SkillFileAccess,
     ) -> Result<()> {
         if scope == SkillScope::Project {
-            check_write_policy(policy, &self.destination(workspace, scope)?.join(name))?;
+            policy.check_replace(&self.destination(workspace, scope)?.join(name))?;
         }
         Ok(())
     }
@@ -143,14 +143,14 @@ impl SkillManager {
         workspace: Option<&Path>,
         request: InstallSkillRequest,
     ) -> Result<SkillInfo> {
-        self.install_checked(workspace, request, None).await
+        self.install_with_access(workspace, request, None).await
     }
 
-    pub(crate) async fn install_checked(
+    pub async fn install_with_access(
         &self,
         workspace: Option<&Path>,
         request: InstallSkillRequest,
-        policy: Option<crate::sandbox::FilesystemPolicy>,
+        policy: Option<std::sync::Arc<dyn crate::SkillFileAccess>>,
     ) -> Result<SkillInfo> {
         ensure!(
             request.path.is_absolute(),
@@ -165,14 +165,14 @@ impl SkillManager {
                 SkillScope::Project => SkillSource::Project,
             };
             let package =
-                loader::package_with_policy(&request.path, source, &settings, policy.as_ref())?;
+                loader::package_with_policy(&request.path, source, &settings, policy.as_deref())?;
             if let Some(policy) = &policy {
                 policy.check_read(&package.root, &package.root)?;
                 for resource in package.files.keys() {
                     policy.check_read(&package.root, &package.root.join(resource))?;
                 }
                 if request.scope == SkillScope::Project {
-                    check_write_policy(policy, &root.join(&package.info.name))?;
+                    policy.check_replace(&root.join(&package.info.name))?;
                     for resource in package.files.keys() {
                         policy.check_write(&root, &root.join(&package.info.name).join(resource))?;
                     }
@@ -187,6 +187,9 @@ impl SkillManager {
                     } else {
                         settings.max_resource_bytes
                     };
+                    if let Some(policy) = &policy {
+                        policy.check_read(&package.root, &package.root.join(path))?;
+                    }
                     let bytes = loader::read_file(&package.root, Path::new(path), limit)?;
                     ensure!(
                         &loader::digest(&bytes) == digest,
@@ -383,127 +386,4 @@ fn publish(
         return Err(error.into());
     }
     Ok(loader::package(&destination, source, settings)?.info)
-}
-
-fn check_write_policy(policy: &crate::sandbox::FilesystemPolicy, destination: &Path) -> Result<()> {
-    let destination = policy.check_write(destination, destination)?;
-    ensure!(
-        !policy
-            .readonly_paths
-            .iter()
-            .chain(&policy.denied_paths)
-            .any(|path| path.starts_with(&destination)),
-        "skill replacement would modify a protected descendant"
-    );
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::SkillManager;
-    use crate::sandbox::FilesystemPolicy;
-
-    use std::{collections::BTreeMap, fs};
-
-    use kyler_protocol::api::skills::{InstallSkillRequest, SaveSkillRequest, SkillScope};
-
-    #[tokio::test]
-    async fn installation_obeys_source_and_destination_descendant_restrictions() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
-        let workspace = root.join("workspace");
-        let source = workspace.join("source");
-        fs::create_dir_all(source.join("references")).unwrap();
-        fs::write(
-            source.join("SKILL.md"),
-            "---\nname: imported\ndescription: Test imported package\n---\nInstructions",
-        )
-        .unwrap();
-        fs::write(source.join("references/private.txt"), "Private reference").unwrap();
-        let settings = kyler_config::SkillSettings {
-            user_directory: root.join("user"),
-            state_file: root.join("state.json"),
-            ..Default::default()
-        };
-        let manager = SkillManager::new(settings).unwrap();
-        let mut policy = FilesystemPolicy {
-            readwrite_paths: vec![workspace.clone()],
-            denied_paths: vec![source.join("references/private.txt")],
-            ..Default::default()
-        };
-        let request = InstallSkillRequest {
-            path: source.clone(),
-            scope: SkillScope::Project,
-            expected_fingerprint: None,
-        };
-        assert!(
-            manager
-                .install_checked(Some(&workspace), request.clone(), Some(policy.clone()))
-                .await
-                .is_err()
-        );
-        let destination = workspace.join(".kyler/skills/imported");
-        assert!(!destination.exists());
-        policy.denied_paths.clear();
-        policy
-            .readonly_paths
-            .push(destination.join("protected.txt"));
-        assert!(
-            manager
-                .install_checked(Some(&workspace), request.clone(), Some(policy.clone()))
-                .await
-                .is_err()
-        );
-        assert!(
-            manager
-                .check_destination_policy(
-                    Some(&workspace),
-                    SkillScope::Project,
-                    "imported",
-                    &policy
-                )
-                .is_err()
-        );
-        assert!(!destination.exists());
-        policy.readonly_paths.clear();
-        assert!(
-            manager
-                .install_checked(Some(&workspace), request, Some(policy))
-                .await
-                .is_ok()
-        );
-        assert!(destination.join("SKILL.md").is_file());
-    }
-
-    #[tokio::test]
-    async fn rejected_updates_leave_existing_package_and_resources_intact() {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
-        let settings = kyler_config::SkillSettings {
-            user_directory: root.join("user"),
-            state_file: root.join("state.json"),
-            ..Default::default()
-        };
-        let manager = SkillManager::new(settings.clone()).unwrap();
-        let mut request = SaveSkillRequest {
-            name: "existing".into(), scope: SkillScope::User, expected_fingerprint: None,
-            files: BTreeMap::from([("SKILL.md".into(), "---\nname: existing\ndescription: Existing package\n---\nPreserved instructions".into()), ("references/guide.md".into(), "Preserved resource".into())]),
-        };
-        let info = manager.save(None, request.clone()).await.unwrap();
-        request.expected_fingerprint = Some(info.fingerprint);
-        request
-            .files
-            .insert("SKILL.md".into(), "invalid metadata".into());
-        assert!(manager.save(None, request).await.is_err());
-        assert!(
-            fs::read_to_string(settings.user_directory.join("existing/SKILL.md"))
-                .unwrap()
-                .contains("Preserved instructions")
-        );
-        assert_eq!(
-            fs::read_to_string(settings.user_directory.join("existing/references/guide.md"))
-                .unwrap(),
-            "Preserved resource"
-        );
-    }
 }

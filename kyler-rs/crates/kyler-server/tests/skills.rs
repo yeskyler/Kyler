@@ -379,3 +379,206 @@ async fn skill_api_requires_current_reviewed_fingerprint_and_preserves_workspace
     stop.send(()).unwrap();
     task.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn structured_skill_selection_is_versioned_and_part_of_admission_identity() {
+    use axum::{
+        Json, Router,
+        extract::State,
+        response::sse::{Event, Sse},
+        routing::post,
+    };
+    use kyler_protocol::api::run::{RunAccepted, RunInfo, RunStatus};
+    use std::{
+        convert::Infallible,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
+    async fn model(
+        State(calls): State<Arc<AtomicUsize>>,
+        Json(request): Json<serde_json::Value>,
+    ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+        calls.fetch_add(1, Ordering::SeqCst);
+        assert!(
+            request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|message| message["role"] == "tool"
+                    && message["content"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("HTTP_SELECTED_SKILL_BODY")))
+        );
+        let chunk=json!({"id":"fixture","object":"chat.completion.chunk","created":0,"model":"fixture","choices":[{"index":0,"delta":{"role":"assistant","content":"loaded"},"finish_reason":"stop"}]}).to_string();
+        Sse::new(futures::stream::iter(vec![
+            Ok(Event::default().data(chunk)),
+            Ok(Event::default().data("[DONE]")),
+        ]))
+    }
+    async fn terminal(http: &reqwest::Client, base: &str, id: &str) -> RunInfo {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                let run: RunInfo = http
+                    .get(format!("{base}/v1/runs/{id}"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .error_for_status()
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                if run.status.is_terminal() {
+                    return run;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("project");
+    let skill = root.path().join("user/selected");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: selected\ndescription: User-selected guidance\n---\nHTTP_SELECTED_SKILL_BODY",
+    )
+    .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model_base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let model_calls = calls.clone();
+    let upstream = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/chat/completions", post(model))
+                .with_state(model_calls),
+        )
+        .await
+        .unwrap()
+    });
+    let mut config = AppConfig::default();
+    config.llm.base_url = model_base;
+    config.llm.model = "fixture".into();
+    config.llm.api_key = SecretString::new("fixture");
+    config.skills = SkillSettings {
+        user_directory: root.path().join("user"),
+        state_file: root.path().join("state.json"),
+        ..Default::default()
+    };
+    config.session.enabled = true;
+    config.session.directory = root.path().join("sessions");
+    let mut policy = SandboxPolicy::read_only("skill-selection", &workspace);
+    policy.process.allow_commands = false;
+    let environment = Arc::new(
+        ExecutionEnvironment::new(
+            &workspace,
+            &workspace,
+            policy,
+            std::env::current_exe().unwrap(),
+            Arc::new(UnusedSandbox),
+        )
+        .unwrap(),
+    );
+    let server = Server::from_config_with_environment(&config, environment)
+        .await
+        .unwrap();
+    let store = server.state.runs.store.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(server.serve(listener, async {
+        let _ = stopped.await;
+    }));
+    let http = reqwest::Client::new();
+    let session: SessionSummary = http
+        .post(format!("{base}/v1/sessions"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let list: Vec<SkillInfo> = http
+        .get(format!("{base}/v1/sessions/{}/skills", session.session_id))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let info = list.iter().find(|info| info.name == "selected").unwrap();
+    let reference = json!({"id":info.id,"fingerprint":info.fingerprint});
+    let url = format!("{base}/v1/sessions/{}/runs", session.session_id);
+    assert_eq!(http.post(&url).json(&json!({"input":"invalid","skills":[{"id":"/tmp/untrusted/SKILL.md","fingerprint":"0".repeat(64)}]})).send().await.unwrap().status(),400);
+    let request = json!({"input":"Follow the selected skill","skills":[reference.clone()],"client_request_id":"selected-op"});
+    let accepted: RunAccepted = http
+        .post(&url)
+        .json(&request)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let replay: RunAccepted = http
+        .post(&url)
+        .json(&request)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(accepted.run_id, replay.run_id);
+    let mut conflict = request.clone();
+    conflict["skills"][0]["fingerprint"] = json!("0".repeat(64));
+    assert_eq!(
+        http.post(&url)
+            .json(&conflict)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+    let finished = terminal(&http, &base, &accepted.run_id).await;
+    assert_eq!(
+        finished.status,
+        RunStatus::Completed,
+        "{:?}",
+        finished.error
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let saved = store.load(&session.session_id).await.unwrap();
+    assert_eq!(
+        saved.current_execution().unwrap().selected_skills[0].fingerprint,
+        info.fingerprint
+    );
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: selected\ndescription: Changed\n---\nNew version",
+    )
+    .unwrap();
+    let stale:RunAccepted=http.post(&url).json(&json!({"input":"Use the old reference","skills":[reference],"client_request_id":"stale-op"})).send().await.unwrap().error_for_status().unwrap().json().await.unwrap();
+    assert_eq!(
+        terminal(&http, &base, &stale.run_id).await.status,
+        RunStatus::Failed
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    stop.send(()).unwrap();
+    task.await.unwrap().unwrap();
+    upstream.abort();
+}

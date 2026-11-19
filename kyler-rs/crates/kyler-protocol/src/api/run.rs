@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub struct CreateRunRequest {
     pub input: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<super::skills::SkillReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachment_ids: Vec<String>,
     #[serde(default)]
     pub resume: bool,

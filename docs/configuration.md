@@ -258,3 +258,44 @@ request. Active tools are retained within the current task and recent calls take
 priority when later selection changes. A new task starts with a fresh selection.
 Catalog updates, disconnects and reconnects refresh availability and invalidate
 stale schemas; remote side-effecting calls are never automatically replayed.
+
+## Skills and directory budgets
+
+Skills use progressive loading, not BM25 tool selection. The model sees metadata
+for enabled packages and chooses relevant guidance by description. Explicit
+`@skill-name` / `$skill-name` inputs are loaded by core before the first model
+request. API clients may instead send an exact reviewed reference:
+
+```json
+{
+  "input": "Use the selected skill for this task",
+  "skills": [{"id": "<64-character skill ID>", "fingerprint": "<64-character package fingerprint>"}]
+}
+```
+
+Obtain IDs and fingerprints from the authenticated skill directory; arbitrary
+paths are not accepted. At most 16 explicit references are allowed. Conflicting
+versions, disabled/shadowed packages and changed fingerprints fail before loading
+instructions into the model. Resuming a task retains its explicit selections and
+revalidates their versions and current review status.
+
+```toml
+[skills]
+catalog_token_budget = 4096
+full_scan_interval_ms = 30000
+```
+
+`catalog_token_budget` is measured with the selected model tokenizer, including
+the directory header, metadata and omission notice. It does not truncate skill
+instructions. Use `list_skills` when the context directory reports omitted skills;
+follow `next_offset` and `expected_version` to avoid mixing catalog generations.
+`load_skill` loads the full instructions; `skills_resource` reads references and
+scripts as text without executing them.
+
+`full_scan_interval_ms` accepts 0–300000. Metadata checks run between full content
+scans, so ordinary edits invalidate the cache promptly. Zero forces a complete
+rescan for every snapshot. Reads of instructions and resources always validate
+content fingerprints regardless of this interval. Package writes clear directory
+caches immediately; enable/disable review records are checked afresh. User and
+built-in guidance is enabled by default unless disabled; project packages require
+review of the exact fingerprint. Script execution uses ordinary tool permissions.

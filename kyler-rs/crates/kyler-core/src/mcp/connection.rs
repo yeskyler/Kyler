@@ -57,6 +57,20 @@ impl TransportFactory for HostTransport {
                 let mut http = reqwest::Client::builder()
                     .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(Duration::from_secs(10));
+                // Plain HTTP unit fixtures need neither host proxies nor native
+                // TLS roots. Explicit sandbox proxies below still take precedence.
+                #[cfg(test)]
+                if reqwest::Url::parse(&self.settings.url)
+                    .ok()
+                    .filter(|url| url.scheme() == "http")
+                    .and_then(|url| {
+                        url.host_str()
+                            .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+                    })
+                    .is_some_and(|address| address.is_loopback())
+                {
+                    http = http.no_proxy().tls_certs_only([]);
+                }
                 if let Some(environment) = &self.environment {
                     match &environment.policy().network {
                         NetworkAccess::Deny => {

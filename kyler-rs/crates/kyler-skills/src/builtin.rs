@@ -1,5 +1,5 @@
 //! Bundled guidance is embedded in the binary and never materialized in HOME.
-use super::loader::{self, Package};
+use super::package::{self as loader, Package};
 
 use std::collections::BTreeMap;
 

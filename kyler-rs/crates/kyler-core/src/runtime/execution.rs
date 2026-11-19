@@ -61,6 +61,7 @@ impl Agent {
         stream: Option<&StreamControl>,
     ) -> Result<String> {
         self.tool_output_budget.validate()?;
+        crate::skills::validate_references(&turn.skills)?;
         let _lease = acquire_session(&session.session_id)?;
         session.validate()?;
         match (&session.environment, &self.environment) {
@@ -131,11 +132,23 @@ impl Agent {
                 ),
                 "Only failed or cancelled tasks can be resumed"
             );
-            Some((previous.execution_id.clone(), previous.plan.clone()))
+            Some((
+                previous.execution_id.clone(),
+                previous.plan.clone(),
+                previous.selected_skills.clone(),
+            ))
         } else {
             None
         };
         let resume_prompt = "Continue the previous interrupted task using its existing plan and completed tool results. Do not restart the original task or repeat completed side effects. An interrupted tool may have an unknown outcome: inspect current state before deciding what remains. Unknown side effects require a new explicit user instruction before repetition.";
+        let selected_skills = if turn.skills.is_empty() {
+            continuation
+                .as_ref()
+                .map(|(_, _, skills)| skills.clone())
+                .unwrap_or_default()
+        } else {
+            turn.skills
+        };
         session.begin_turn(
             if turn.resume {
                 resume_prompt
@@ -145,12 +158,13 @@ impl Agent {
             turn.images,
             turn.attachments,
         )?;
-        if let Some((id, plan)) = continuation {
+        if let Some((id, plan, _)) = continuation {
             let execution = session.current_execution_mut()?;
             execution.resumed_from = Some(id);
             execution.plan = plan;
         }
 
+        session.current_execution_mut()?.selected_skills = selected_skills;
         session.current_execution_mut()?.model = Some(self.model.clone());
         session.current_execution_mut()?.model_snapshot = self.model_info();
         session.current_execution_mut()?.permissions =

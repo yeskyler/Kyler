@@ -1,4 +1,4 @@
-use crate::sandbox::FilesystemPolicy;
+use crate::SkillFileAccess;
 
 use std::{
     collections::BTreeMap,
@@ -80,7 +80,7 @@ pub fn package_with_policy(
     root: &Path,
     source: SkillSource,
     settings: &SkillSettings,
-    policy: Option<&FilesystemPolicy>,
+    policy: Option<&dyn SkillFileAccess>,
 ) -> Result<Package> {
     ensure!(
         !fs::symlink_metadata(root)?.file_type().is_symlink(),
@@ -139,7 +139,7 @@ fn collect(
     files: &mut BTreeMap<String, String>,
     total: &mut usize,
     settings: &SkillSettings,
-    policy: Option<&FilesystemPolicy>,
+    policy: Option<&dyn SkillFileAccess>,
 ) -> Result<()> {
     ensure!(depth <= 8, "skill directory nesting exceeds limit");
     if let Some(policy) = policy {

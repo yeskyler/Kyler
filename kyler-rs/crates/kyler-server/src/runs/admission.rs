@@ -36,12 +36,15 @@ impl RunManager {
     ) -> ApiResult<RunAccepted> {
         valid_id(&session_id)?;
         if request.input.trim().is_empty()
+            && request.skills.is_empty()
             && request.images.is_empty()
             && request.attachment_ids.is_empty()
             && !request.resume
         {
             return Err(ApiError::bad("Input cannot be empty."));
         }
+        kyler_core::skills::validate_references(&request.skills)
+            .map_err(|error| ApiError::bad(&error.to_string()))?;
         if request.input.len() > self.settings.max_request_bytes {
             return Err(ApiError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
@@ -63,18 +66,24 @@ impl RunManager {
                 "At most four images are allowed per message.",
             ));
         }
-        let fingerprint = format!(
-            "{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&(
-                    &request.input,
-                    &request.images,
-                    &request.attachment_ids,
-                    request.resume
-                ))
-                .map_err(|_| ApiError::internal())?
-            )
-        );
+        let bytes = if request.skills.is_empty() {
+            serde_json::to_vec(&(
+                &request.input,
+                &request.images,
+                &request.attachment_ids,
+                request.resume,
+            ))
+        } else {
+            serde_json::to_vec(&(
+                &request.input,
+                &request.images,
+                &request.attachment_ids,
+                request.resume,
+                &request.skills,
+            ))
+        }
+        .map_err(|_| ApiError::internal())?;
+        let fingerprint = format!("{:x}", Sha256::digest(bytes));
         let raw_images = request.images;
         let images = tokio::task::spawn_blocking(move || {
             kyler_core::attachments::image::prepare_images(&raw_images)
@@ -256,6 +265,7 @@ impl RunManager {
                     entry.clone(),
                     session,
                     UserTurn {
+                        skills: request.skills,
                         text: request.input,
                         images,
                         attachments: attached,

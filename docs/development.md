@@ -219,4 +219,32 @@ also bind local fixture ports and exercise authorized native processes. No live
 model account or embedding service is needed. Retrieval fixtures check Chinese and
 English intent matching, parameter-name matching, multiple queries, server filters,
 stable versions, hidden same-batch calls, schema budgets and task isolation.
+Core unit-test model clients and MCP HTTP clients bypass inherited proxies and
+native TLS root loading for plain HTTP literal loopback fixtures; explicit sandbox
+proxies still apply. Clients are built directly to avoid initializing an unused
+default TLS client first. This test-only configuration does not change production
+proxy or certificate behavior or process-wide
+environment variables. The connecting-server regression keeps the initialize
+response gated until the model task completes and also requires the MCP handshake
+to reach its fixture within the original deadline.
 For architectural boundaries see [MCP transport and retrieval](architecture.md#mcp-transport-and-retrieval-boundary).
+
+## Skills development
+
+`kyler-skills` contains package discovery, frontmatter parsing, immutable package
+caches, versioned enable records, resources and atomic package writes. It has no
+core dependency. Core owns model token counting/rendering, tool adapters, explicit
+selection injection and sandbox/approval checks.
+
+```sh
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-skills
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-core --lib skills::tests
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-core --test skills
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-server --test skills
+```
+
+Package tests use temporary directories and do not create installed user data.
+Integration fixtures bind local ports but do not call live models. Cover source
+precedence, workspace-scoped review, fingerprint invalidation, symlink/traversal
+rejection, protected destination descendants, archive limits, binary resources,
+real tokenizer budgets, lossless page cursors and exact selected-version loading.

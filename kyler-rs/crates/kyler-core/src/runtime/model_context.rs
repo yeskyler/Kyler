@@ -49,7 +49,7 @@ impl Agent {
         let count = session.memory.compression_count;
         let system_prompt = format!(
             "{}\n\nYour agent name is {}. This is a display identity, not a permission grant.",
-            self.system_prompt(),
+            self.system_prompt_with_skills(&self.preferred_skill_names(session)),
             session.author.name
         );
         let facts = if let Some(memory) = &self.memory_store {

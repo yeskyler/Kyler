@@ -26,6 +26,8 @@ pub struct ExecutionContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumed_from: Option<String>,
     pub execution_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_skills: Vec<kyler_protocol::api::skills::SkillReference>,
     #[serde(default)]
     pub approvals: Vec<ApprovalRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -55,6 +57,7 @@ impl ExecutionContext {
         Self {
             resumed_from: None,
             execution_id: Uuid::new_v4().to_string(),
+            selected_skills: Vec::new(),
             approvals: Vec::new(),
             permissions: None,
             model: None,

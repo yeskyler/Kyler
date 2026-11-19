@@ -31,6 +31,7 @@ pub async fn start(
         .start_run(
             session,
             &CreateRunRequest {
+                skills: Vec::new(),
                 attachment_ids: Vec::new(),
                 resume: false,
                 images: Vec::new(),

@@ -375,6 +375,7 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
             .start_run(
                 &session.session_id,
                 &CreateRunRequest {
+                    skills: Vec::new(),
                     input: "write file".into(),
                     client_request_id: None,
                     images: Vec::new(),
@@ -438,6 +439,7 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
             .start_run(
                 &session.session_id,
                 &CreateRunRequest {
+                    skills: Vec::new(),
                     input: input.into(),
                     client_request_id: None,
                     images: Vec::new(),

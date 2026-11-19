@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_SKILL_ARCHIVE_BYTES: usize = 20 * 1024 * 1024;
 
+/// Exact reviewed package identity; clients cannot select an arbitrary filesystem path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillReference {
+    pub id: String,
+    pub fingerprint: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillSource {
