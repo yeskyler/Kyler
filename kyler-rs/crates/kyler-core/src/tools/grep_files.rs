@@ -2,7 +2,7 @@ use crate::{
     approval::ToolOperation,
     tools::{
         ActivityKind, CompressedToolOutput, Tool, ToolContext, ToolExecutionMode, ToolOutputBudget,
-        output::fit_entries,
+        fit_entries,
     },
 };
 
@@ -145,6 +145,22 @@ fn parse_results(stdout: &[u8], limit: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_policy_preserves_entries_and_action_results() {
+        use crate::tools::{Tool, ToolOutputBudget, grep_files::GrepFilesTool};
+        let budget = ToolOutputBudget { max_bytes: 512 };
+        let paths = (0..100)
+            .map(|n| format!("/project/\u{6587}\u{4ef6}_{n}.rs"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let grep = GrepFilesTool.compress_output(&paths, &budget).unwrap();
+        assert!(grep.content.len() <= budget.max_bytes);
+        for line in grep.content.lines().filter(|s| !s.starts_with('[')) {
+            assert!(paths.lines().any(|original| original == line));
+        }
+        assert!(grep.content.contains("returned paths"));
+    }
+
     use super::{GrepFilesArgs, grep_files, parse_results};
 
     use std::path::PathBuf;

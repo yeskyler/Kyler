@@ -3,8 +3,7 @@ use crate::{
     skills::SkillSnapshot,
     tools::{
         ActivityKind, CompressedToolOutput, Tool, ToolContext, ToolExecutionMode, ToolOutputBudget,
-        ToolSource,
-        output::{fit_entries, text_prefix},
+        ToolSource, fit_entries, text_prefix,
     },
 };
 

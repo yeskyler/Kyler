@@ -628,6 +628,52 @@ mod tests {
         let ids = vec![first.task_id.clone(), second.task_id.clone()];
         let pending = scope.wait(&ids, WaitMode::All, 0).await.unwrap();
         assert!(pending.timed_out);
+        {
+            use crate::tools::{ParallelToolContext, Tool, wait_tasks::WaitTasksTool};
+            let context = ParallelToolContext {
+                processes: None,
+                session_id: "parent",
+                tool_call_id: "inspect",
+                subagents: Some(&scope),
+                environment: None,
+            };
+            let inspected = WaitTasksTool
+                .execute_parallel(
+                    &serde_json::json!({"task_ids":ids,"timeout_secs":0}).to_string(),
+                    &context,
+                )
+                .await
+                .unwrap();
+            let inspected: serde_json::Value = serde_json::from_str(&inspected).unwrap();
+            assert_eq!(inspected["timed_out"], false);
+            assert_eq!(inspected["tasks"].as_array().unwrap().len(), 2);
+            let listing = WaitTasksTool
+                .execute_parallel("{}", &context)
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&listing).unwrap()["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+            let outsider = manager.open_scope(owner(), gate.clone()).unwrap();
+            let context = ParallelToolContext {
+                subagents: Some(&outsider),
+                ..context
+            };
+            assert!(
+                WaitTasksTool
+                    .execute_parallel(
+                        &serde_json::json!({"task_ids":ids,"timeout_secs":0}).to_string(),
+                        &context
+                    )
+                    .await
+                    .is_err()
+            );
+        }
+
         assert!(
             pending
                 .tasks

@@ -195,6 +195,14 @@ and compacts history according to the configured window and summary policy. Larg
 outputs can have a compressed model view while retaining their original output in
 history.
 
+Each tool owns its model-facing output policy through `Tool::compress_output`.
+Runtime supplies the byte budget and retains the original result; it does not
+choose which domain fields to omit. Budget/result types live beside the tool
+trait in `tools.rs`, alongside text-boundary and entry-fitting primitives. The
+existing `subagent.rs` owns the structured result policy shared by subagent tools.
+Other tools keep their own
+compression methods, including pagination and omission notices.
+
 Text estimates use `tiktoken-rs`, with `o200k_base` as the default encoding. Model
 profiles can explicitly select `cl100k_base`. The legacy `conservative` setting is
 accepted as an alias for `o200k_base`; there is no byte-counting fallback. These
@@ -444,3 +452,14 @@ Web uses green additions, red deletions, blue modifications, neutral renames and
 amber partial-application notices, with symbols and labels in both themes. TUI
 shows matching colored totals and file details; text and symbols remain useful
 without color. No tool arguments are parsed to estimate completed changes.
+
+## Subagent task tools
+
+The model-facing subagent tools are `delegate_task`, `wait_tasks` and `cancel_task`.
+`wait_tasks` lists tasks when IDs are omitted, inspects selected tasks immediately
+with `timeout_secs=0`, and waits for any/all selected tasks with a positive timeout
+(default 20 seconds, capped by host policy). `task_id` is a singular alternative to
+`task_ids`; supplying both is rejected. All selected tasks remain scoped to the
+parent execution. Review pagination requires exactly one ID, `timeout_secs=0` and
+`review_section=overview/findings/files/limitations`; continue with
+`review_offset=next_offset`. The separate `get_task` entry is no longer advertised.

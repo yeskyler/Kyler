@@ -176,7 +176,8 @@ a paid provider or read an installed user's configuration.
 The core runtime executes adjacent explicitly parallel tools concurrently, with
 `agent.max_parallel_calls = 8` by default (valid range: 1–64). File reads, searches,
 directory listings, commands (`shell`, `run_command`, `exec_command`), attachment
-reads and skill reads opt in. `get_task` is parallel; `wait_tasks` uses a separate
+reads and skill reads opt in. `wait_tasks` combines immediate inspection (`timeout_secs=0`), task listing and
+waiting, and uses a separate
 lane with the same limit so waiting cannot exhaust command slots. Process input,
 patches, skill writes, session mutations, questions, task creation/cancellation,
 MCP calls and undeclared extension tools remain exclusive barriers. Tools before

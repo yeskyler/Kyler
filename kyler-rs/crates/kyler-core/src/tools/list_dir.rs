@@ -2,7 +2,7 @@ use crate::{
     approval::ToolOperation,
     tools::{
         ActivityKind, CompressedToolOutput, Tool, ToolContext, ToolExecutionMode, ToolOutputBudget,
-        output::fit_entries,
+        fit_entries,
     },
 };
 
@@ -227,6 +227,30 @@ impl From<&FileType> for DirEntryKind {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_policy_preserves_entries_and_action_results() {
+        use crate::tools::{Tool, ToolOutputBudget, list_dir::ListDirTool};
+        let budget = ToolOutputBudget { max_bytes: 512 };
+        let paths = (0..100)
+            .map(|n| format!("/project/文件_{n}.rs"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let listing = format!("Absolute path: /project\n{paths}\nMore than 100 entries found");
+        let listing = ListDirTool.compress_output(&listing, &budget).unwrap();
+        assert!(listing.content.len() <= budget.max_bytes);
+        assert!(listing.content.starts_with("Absolute path: /project"));
+        assert!(listing.content.ends_with("More than 100 entries found"));
+        assert!(listing.content.contains("offset/limit"));
+        assert!(
+            ListDirTool
+                .compress_output(
+                    &format!("Absolute path: {}", "x".repeat(100)),
+                    &ToolOutputBudget { max_bytes: 1 }
+                )
+                .is_err()
+        );
+    }
+
     use super::{ListDirArgs, list_dir};
 
     use std::path::PathBuf;

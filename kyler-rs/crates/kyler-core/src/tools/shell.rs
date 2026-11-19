@@ -4,7 +4,7 @@ use crate::{
     sandbox::ProcessInput,
     tools::{
         ActivityKind, CompressedToolOutput, Tool, ToolContext, ToolExecutionMode, ToolOutputBudget,
-        output::text_prefix,
+        text_prefix,
     },
 };
 

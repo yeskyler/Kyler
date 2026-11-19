@@ -2,7 +2,7 @@ use crate::{
     approval::ToolOperation,
     tools::{
         ActivityKind, CompressedToolOutput, Tool, ToolContext, ToolExecutionMode, ToolOutputBudget,
-        output::fit_entries,
+        fit_entries,
     },
 };
 
@@ -374,6 +374,37 @@ fn trim_empty_lines(lines: &mut VecDeque<&LineRecord>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_policy_preserves_entries_and_action_results() {
+        use crate::tools::{Tool, ToolOutputBudget, read_file::ReadFileTool};
+        let budget = ToolOutputBudget { max_bytes: 512 };
+        let file = format!(
+            "Absolute path: /tmp/\u{4e2d}\u{6587}.rs\n{}",
+            (1..=100)
+                .map(|n| format!("L{n}: \u{4e2d}\u{6587} code line {n}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let result = ReadFileTool.compress_output(&file, &budget).unwrap();
+        assert!(result.compressed && result.content.len() <= budget.max_bytes);
+        assert!(
+            result
+                .content
+                .starts_with("Absolute path: /tmp/\u{4e2d}\u{6587}.rs\nL1:")
+        );
+        assert!(
+            result
+                .content
+                .ends_with("L100: \u{4e2d}\u{6587} code line 100")
+        );
+        assert!(result.content.contains("omitted"));
+        let result = ReadFileTool
+            .compress_output("L1: small", &ToolOutputBudget { max_bytes: 256 })
+            .unwrap();
+        assert!(!result.compressed);
+        assert_eq!(result.content, "L1: small");
+    }
+
     use super::{IndentationArgs, ReadFileArgs, ReadMode, read_file};
 
     use std::path::PathBuf;

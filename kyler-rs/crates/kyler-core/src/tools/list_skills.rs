@@ -62,7 +62,7 @@ impl Tool for ListSkillsTool {
         let entries = page["skills"].as_array().cloned().unwrap_or_default();
         let offset = page["offset"].as_u64().unwrap_or(0) as usize;
         let total = page["total"].as_u64().unwrap_or(0) as usize;
-        let content = crate::tools::output::fit_entries(entries.len(), budget, |keep| {
+        let content = crate::tools::fit_entries(entries.len(), budget, |keep| {
             let keep = if entries.is_empty() {
                 0
             } else {

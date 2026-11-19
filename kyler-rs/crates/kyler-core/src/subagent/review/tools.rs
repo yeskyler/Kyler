@@ -2,7 +2,7 @@
 use super::{repository::Repository, validate_path};
 use crate::{
     approval::ToolOperation,
-    tools::{ActivityKind, Tool, ToolBox, ToolContext, ToolExecutionMode, output::text_prefix},
+    tools::{ActivityKind, Tool, ToolBox, ToolContext, ToolExecutionMode, text_prefix},
 };
 
 use std::sync::Arc;

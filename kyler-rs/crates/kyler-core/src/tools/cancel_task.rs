@@ -1,9 +1,7 @@
 use crate::{
     approval::ToolOperation,
-    tools::{
-        CompressedToolOutput, Tool, ToolContext, ToolKind, ToolOutputBudget,
-        output::compress_task_json,
-    },
+    subagent::compress_task_json,
+    tools::{CompressedToolOutput, Tool, ToolContext, ToolKind, ToolOutputBudget},
 };
 
 use anyhow::Context;

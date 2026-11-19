@@ -655,6 +655,16 @@ enum HunkLine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_policy_preserves_entries_and_action_results() {
+        use crate::tools::{Tool, ToolOutputBudget, apply_patch::ApplyPatchTool};
+        let budget = ToolOutputBudget { max_bytes: 512 };
+        let action = "Updated /a.rs\n".repeat(100);
+        let result = ApplyPatchTool.compress_output(&action, &budget).unwrap();
+        assert!(!result.compressed);
+        assert_eq!(result.content, action);
+    }
+
     use super::apply_patch_in;
     use crate::tools::Tool;
 

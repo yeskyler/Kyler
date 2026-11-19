@@ -5,8 +5,7 @@ use crate::{
     sandbox::ProcessInput,
     tools::{
         ActivityKind, CompressedToolOutput, Tool, ToolContext, ToolExecutionMode, ToolOutputBudget,
-        output::{fit_entries, text_prefix},
-        shell::RunCommandArgs,
+        fit_entries, shell::RunCommandArgs, text_prefix,
     },
 };
 

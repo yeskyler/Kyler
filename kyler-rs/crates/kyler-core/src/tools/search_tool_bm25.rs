@@ -93,7 +93,7 @@ impl Tool for SearchToolBm25 {
         }
         let value: Value = serde_json::from_str(output)?;
         let matches = value["matches"].as_array().cloned().unwrap_or_default();
-        let content = crate::tools::output::fit_entries(matches.len(), budget, |keep| {
+        let content = crate::tools::fit_entries(matches.len(), budget, |keep| {
             let mut projected = value.clone();
             projected["matches"] = json!(&matches[..keep]);
             projected["omitted_matches"] = json!(matches.len() - keep);

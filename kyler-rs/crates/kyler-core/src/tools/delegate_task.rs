@@ -1,10 +1,7 @@
 use crate::{
     approval::ToolOperation,
-    subagent::DelegateTaskArgs,
-    tools::{
-        CompressedToolOutput, Tool, ToolContext, ToolKind, ToolOutputBudget,
-        output::compress_task_json,
-    },
+    subagent::{DelegateTaskArgs, compress_task_json},
+    tools::{CompressedToolOutput, Tool, ToolContext, ToolKind, ToolOutputBudget},
 };
 
 use anyhow::Context;
@@ -25,7 +22,7 @@ impl Tool for DelegateTaskTool {
         "delegate_task"
     }
     fn description(&self) -> &str {
-        "Set agent=review with review.target for a read-only code review of uncommitted, base_branch, or commit changes; review reports are structured and never apply fixes. Otherwise agent defaults to general. Start an independent child agent in the background and immediately return its task ID. Give a self-contained task and necessary context. It inherits ordinary tools but cannot manage subagents. Use get_task/wait_tasks to collect results before answering; unfinished tasks are cancelled when this parent execution ends."
+        "Set agent=review with review.target for a read-only code review of uncommitted, base_branch, or commit changes; review reports are structured and never apply fixes. Otherwise agent defaults to general. Start an independent child agent in the background and immediately return its task ID. Give a self-contained task and necessary context. It inherits ordinary tools but cannot manage subagents. Use wait_tasks to collect results before answering; unfinished tasks are cancelled when this parent execution ends."
     }
     fn validate_arguments(&self, arguments: &Value) -> anyhow::Result<()> {
         serde_json::from_value::<DelegateTaskArgs>(arguments.clone())?.validate()

@@ -241,7 +241,7 @@ impl Agent {
             tool: name.into(),
             operation: operation.label().into(),
             requires_user: status == ApprovalStatus::Pending,
-            preview: crate::tools::output::text_prefix(&preview, 32768).to_owned(),
+            preview: crate::tools::text_prefix(&preview, 32768).to_owned(),
             working_directory: self
                 .environment
                 .as_ref()

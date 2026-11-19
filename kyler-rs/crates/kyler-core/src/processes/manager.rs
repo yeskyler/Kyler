@@ -481,7 +481,7 @@ fn bounded_result(result: &str) -> String {
             .filter(|text| text.len() > 6000)
             .map(str::to_owned)
         {
-            value[field] = Value::String(crate::tools::output::text_prefix(&text, 6000).into());
+            value[field] = Value::String(crate::tools::text_prefix(&text, 6000).into());
             value[format!("{field}_truncated")] = Value::Bool(true);
         }
     }

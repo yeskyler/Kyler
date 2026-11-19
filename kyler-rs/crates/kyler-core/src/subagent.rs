@@ -2,7 +2,12 @@
 pub mod manager;
 pub(crate) mod review;
 
-use crate::{context::TokenUsage, environment::SessionEnvironment, session::Session};
+use crate::{
+    context::TokenUsage,
+    environment::SessionEnvironment,
+    session::Session,
+    tools::{CompressedToolOutput, ToolOutputBudget, text_prefix},
+};
 
 use anyhow::{Result, ensure};
 use schemars::JsonSchema;
@@ -225,5 +230,109 @@ mod limit_tests {
         config.max_concurrent_tasks = 32;
         config.max_tasks_per_execution = 65;
         assert!(config.validate().is_err());
+    }
+}
+
+/// Preserve task identity/status/error/usage while bounding result text in valid JSON.
+pub(crate) fn compress_task_json(
+    output: &str,
+    budget: &ToolOutputBudget,
+) -> Result<CompressedToolOutput> {
+    if output.len() <= budget.max_bytes {
+        return Ok(CompressedToolOutput::unchanged(output));
+    }
+    let original: serde_json::Value = serde_json::from_str(output)?;
+    fn trim_task(value: &mut serde_json::Value, cap: usize) {
+        if let Some(review) = value.get_mut("review").filter(|value| value.is_object()) {
+            if let Some(findings) = review
+                .pointer_mut("/report/findings")
+                .and_then(|value| value.as_array_mut())
+            {
+                let count = findings.len();
+                let keep = findings
+                    .iter()
+                    .take_while(|finding| {
+                        serde_json::to_string(finding)
+                            .is_ok_and(|text| text.len() <= cap / count.max(1))
+                    })
+                    .count();
+                findings.truncate(keep);
+                if keep < count {
+                    review["findings_omitted"] = (count - keep).into();
+                    review["retrieval"] =
+                        "Use wait_tasks with task_ids=[this task ID], timeout_secs=0 and review_section=overview/findings/files/limitations; continue pages with review_offset=next_offset"
+                            .into();
+                }
+            }
+            if let Some(files) = review
+                .pointer_mut("/snapshot/files")
+                .and_then(|value| value.as_array_mut())
+            {
+                let count = files.len();
+                files.truncate(if cap == 0 { 0 } else { count });
+                if files.len() < count {
+                    review["files_omitted"] = count.into();
+                }
+            }
+        }
+        if let Some(text) = value
+            .get("output")
+            .and_then(|v| v.as_str())
+            .filter(|s| s.len() > cap)
+            .map(str::to_string)
+        {
+            value["output"] = serde_json::Value::String(format!(
+                "{}[... output omitted; full result is retained by task ID]",
+                text_prefix(&text, cap)
+            ));
+            value["output_truncated"] = serde_json::Value::Bool(true);
+        }
+    }
+    let render = |cap| -> Result<String> {
+        let mut value = original.clone();
+        if let Some(tasks) = value.get_mut("tasks").and_then(|v| v.as_array_mut()) {
+            for task in tasks {
+                trim_task(task, cap);
+            }
+        } else {
+            trim_task(&mut value, cap);
+        }
+        Ok(serde_json::to_string(&value)?)
+    };
+    let mut content = render(0)?;
+    ensure!(
+        content.len() <= budget.max_bytes,
+        "task metadata and errors exceed compression budget"
+    );
+    let (mut low, mut high) = (0, output.len());
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        let candidate = render(mid)?;
+        if candidate.len() <= budget.max_bytes {
+            low = mid;
+            content = candidate;
+        } else {
+            high = mid - 1;
+        }
+    }
+    CompressedToolOutput::compressed(output, content, budget)
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::{ToolOutputBudget, compress_task_json};
+
+    #[test]
+    fn task_results_stay_json_and_keep_status_ids_and_errors() {
+        let raw=serde_json::json!({"tasks":[{"task_id":"first","status":"completed","output":"\u{4e2d}\u{6587}\u{5185}\u{5bb9}".repeat(1000),"error":null},
+            {"task_id":"second","status":"failed","output":null,"error":"exact failure"}],"timed_out":false}).to_string();
+        let compressed = compress_task_json(&raw, &ToolOutputBudget { max_bytes: 512 }).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&compressed.content).unwrap();
+        assert!(compressed.content.len() <= 512);
+        assert_eq!(parsed["tasks"][0]["task_id"], "first");
+        assert_eq!(parsed["tasks"][0]["status"], "completed");
+        assert_eq!(parsed["tasks"][0]["output_truncated"], true);
+        assert_eq!(parsed["tasks"][1]["error"], "exact failure");
+        assert_eq!(parsed["timed_out"], false);
     }
 }

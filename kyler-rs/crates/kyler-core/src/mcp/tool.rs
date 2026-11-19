@@ -101,9 +101,9 @@ impl Tool for McpTool {
             return Ok(CompressedToolOutput::unchanged(output));
         }
         let render = |size| {
-            serde_json::json!({"truncated":true,"original_bytes":output.len(),"preview":crate::tools::output::text_prefix(output,size)}).to_string()
+            serde_json::json!({"truncated":true,"original_bytes":output.len(),"preview":crate::tools::text_prefix(output,size)}).to_string()
         };
-        let content = crate::tools::output::fit_entries(output.len(), budget, render)?;
+        let content = crate::tools::fit_entries(output.len(), budget, render)?;
         CompressedToolOutput::compressed(output, content, budget)
     }
 }
