@@ -155,7 +155,8 @@ async fn start_turn(
     } else {
         state.preferences.with_extension("thinking")
     };
-    let thinking_path = super::preferences::migrate_thinking_path(&thinking_path, &agent)?;
+    let thinking_path =
+        super::preferences::migrate_thinking_path(&thinking_path, &agent.model_preference_key())?;
     let agent = if agent.thinking_supported() {
         match super::preferences::read_thinking(&thinking_path)? {
             Some(level) => {

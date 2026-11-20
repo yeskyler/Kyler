@@ -661,7 +661,9 @@ function NewChatWelcome() {
       <h2 className="text-2xl font-medium tracking-tight sm:text-[28px] sm:leading-tight">
         What can <span className="font-semibold">kyler</span> help you with?
       </h2>
-      <p className="mt-2.5 text-sm text-muted-foreground">Research, build, or explore an idea.</p>
+      <p className="mt-2.5 text-sm text-muted-foreground">
+        Your assistant for coding, research, and everyday work.
+      </p>
     </div>
   );
 }

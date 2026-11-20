@@ -221,37 +221,56 @@ export function ComposerMenu() {
                       </Menu.SubmenuTrigger>
                       {pluginPopup(
                         <>
-                          {loading ? (
-                            <p role="status" className="p-3 text-xs text-muted-foreground">
-                              Loading skills…
-                            </p>
-                          ) : !skills.length ? (
-                            <p className="p-3 text-xs text-muted-foreground">
-                              No skills available.
-                            </p>
-                          ) : (
-                            skills.map((skill) => (
-                              <Menu.Item
-                                key={skill.id}
-                                className={itemClass}
-                                label={skill.name}
-                                disabled={skill.status !== "enabled" || !!selecting}
-                                title={skill.description}
-                                onClick={() => insert({ kind: "skill", name: skill.name })}
-                              >
-                                <span className="min-w-0">
-                                  <span className="block break-all">@{skill.name}</span>
-                                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                    {skill.status === "enabled"
-                                      ? skill.source === "builtin"
-                                        ? "System"
-                                        : "User added"
-                                      : skill.status.replaceAll("_", " ")}
-                                  </span>
-                                </span>
-                              </Menu.Item>
-                            ))
-                          )}
+                          {[
+                            {
+                              label: "System",
+                              items: skills.filter((skill) => skill.source === "builtin"),
+                            },
+                            {
+                              label: "User",
+                              items: skills.filter((skill) => skill.source !== "builtin"),
+                            },
+                          ].map((group) => (
+                            <Menu.SubmenuRoot key={group.label}>
+                              <Menu.SubmenuTrigger className={itemClass}>
+                                {group.label}
+                                <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground" />
+                              </Menu.SubmenuTrigger>
+                              {pluginPopup(
+                                <>
+                                  {loading ? (
+                                    <p role="status" className="p-3 text-xs text-muted-foreground">
+                                      Loading skills…
+                                    </p>
+                                  ) : !group.items.length ? (
+                                    <p className="p-3 text-xs text-muted-foreground">
+                                      No {group.label.toLowerCase()} skills available.
+                                    </p>
+                                  ) : (
+                                    group.items.map((skill) => (
+                                      <Menu.Item
+                                        key={skill.id}
+                                        className={itemClass}
+                                        label={skill.name}
+                                        disabled={skill.status !== "enabled" || !!selecting}
+                                        title={skill.description}
+                                        onClick={() => insert({ kind: "skill", name: skill.name })}
+                                      >
+                                        <span className="min-w-0">
+                                          <span className="block break-all">@{skill.name}</span>
+                                          {skill.status !== "enabled" && (
+                                            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                                              {skill.status.replaceAll("_", " ")}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </Menu.Item>
+                                    ))
+                                  )}
+                                </>,
+                              )}
+                            </Menu.SubmenuRoot>
+                          ))}
                         </>,
                       )}
                     </Menu.SubmenuRoot>
@@ -263,38 +282,59 @@ export function ComposerMenu() {
                       </Menu.SubmenuTrigger>
                       {pluginPopup(
                         <>
-                          {loading ? (
-                            <p role="status" className="p-3 text-xs text-muted-foreground">
-                              Loading connectors…
-                            </p>
-                          ) : !connectors.length ? (
-                            <p className="p-3 text-xs text-muted-foreground">
-                              No connectors configured.
-                            </p>
-                          ) : (
-                            connectors.map((connector) => (
-                              <Menu.Item
-                                key={connector.id}
-                                className={itemClass}
-                                label={connector.id}
-                                closeOnClick={false}
-                                disabled={!!selecting}
-                                onClick={() => void selectConnector(connector)}
-                              >
-                                {selecting === connector.id ? (
-                                  <LoaderCircleIcon className="size-4 animate-spin" />
-                                ) : (
-                                  <PlugIcon className="size-4 text-muted-foreground" />
-                                )}
-                                <span className="min-w-0">
-                                  <span className="block break-all">{connector.id}</span>
-                                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                    {connector.status}
-                                  </span>
-                                </span>
-                              </Menu.Item>
-                            ))
-                          )}
+                          {[
+                            {
+                              label: "System",
+                              items: connectors.filter((connector) => !connector.removable),
+                            },
+                            {
+                              label: "User",
+                              items: connectors.filter((connector) => connector.removable),
+                            },
+                          ].map((group) => (
+                            <Menu.SubmenuRoot key={group.label}>
+                              <Menu.SubmenuTrigger className={itemClass}>
+                                {group.label}
+                                <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground" />
+                              </Menu.SubmenuTrigger>
+                              {pluginPopup(
+                                <>
+                                  {loading ? (
+                                    <p role="status" className="p-3 text-xs text-muted-foreground">
+                                      Loading connectors…
+                                    </p>
+                                  ) : !group.items.length ? (
+                                    <p className="p-3 text-xs text-muted-foreground">
+                                      No {group.label.toLowerCase()} connectors configured.
+                                    </p>
+                                  ) : (
+                                    group.items.map((connector) => (
+                                      <Menu.Item
+                                        key={connector.id}
+                                        className={itemClass}
+                                        label={connector.id}
+                                        closeOnClick={false}
+                                        disabled={!!selecting}
+                                        onClick={() => void selectConnector(connector)}
+                                      >
+                                        {selecting === connector.id ? (
+                                          <LoaderCircleIcon className="size-4 animate-spin" />
+                                        ) : (
+                                          <PlugIcon className="size-4 text-muted-foreground" />
+                                        )}
+                                        <span className="min-w-0">
+                                          <span className="block break-all">{connector.id}</span>
+                                          <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                                            {connector.status}
+                                          </span>
+                                        </span>
+                                      </Menu.Item>
+                                    ))
+                                  )}
+                                </>,
+                              )}
+                            </Menu.SubmenuRoot>
+                          ))}
                         </>,
                       )}
                     </Menu.SubmenuRoot>

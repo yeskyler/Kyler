@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { CheckIcon, ChevronRightIcon, ShieldIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   type PermissionMode,
   type ModelCatalog,
   type SessionModel,
+  type ThinkingLevel,
 } from "@/lib/kyler/types";
 
 import { useChatSettings } from "./chat-settings-context";
@@ -21,30 +22,7 @@ import { SessionFilesMenu } from "./artifact-browser";
 import { SessionInspectorControls } from "./session-inspector";
 export { ChatSettingsProvider } from "./chat-settings-context";
 
-const thinkingLevels = ["off", "low", "medium", "high", "xhigh", "max"] as const;
-type ThinkingLevel = (typeof thinkingLevels)[number];
-type ThinkingState = {
-  follows_default?: boolean;
-  enabled: boolean;
-  supported: boolean;
-  level: ThinkingLevel;
-  levels: ThinkingLevel[];
-};
-function normalizeThinking(value: ThinkingState): ThinkingState {
-  return {
-    ...value,
-    level: thinkingLevels.includes(value.level) ? value.level : "high",
-    levels: value.levels?.filter((level) => thinkingLevels.includes(level)) ?? [],
-  };
-}
-const thinkingLabels: Record<ThinkingLevel, string> = {
-  off: "Off",
-  low: "Low",
-  medium: "Medium",
-  xhigh: "XHigh",
-  high: "High",
-  max: "Max",
-};
+import { thinkingLabels, thinkingOptions, validateModelSettings } from "@/lib/kyler/model-settings";
 
 function SettingsSubmenu({
   label,
@@ -81,41 +59,50 @@ export function ModelThinkingControl() {
   const running = useAuiState((state) => state.thread.isRunning);
   const [catalog, setCatalog] = useState<ModelCatalog>();
   const [model, setModel] = useState<SessionModel>();
-  const [thinking, setThinking] = useState<ThinkingState>();
+  const thinking = model?.thinking;
+  const request = useRef<AbortController | null>(null);
+  const [reload, setReload] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
+    request.current = controller;
     setCatalog(undefined);
     setModel(undefined);
-    setThinking(undefined);
     setError("");
     setOpen(false);
+    setBusy(true);
     ensureSession()
       .then(async (bound) => {
         const options = { signal: controller.signal };
         return Promise.all([
           api<ModelCatalog>("models", options),
           api<SessionModel>(`sessions/${bound.session_id}/model`, options),
-          api<ThinkingState>(`sessions/${bound.session_id}/thinking`, options),
         ]);
       })
-      .then(([models, selected, reasoning]) => {
-        if (controller.signal.aborted) return;
+      .then(([models, selected]) => {
+        if (controller.signal.aborted || request.current !== controller) return;
+        setModel(validateModelSettings(selected));
         setCatalog(models);
-        setModel(selected);
-        setThinking(normalizeThinking(reasoning));
-        setError(selected.error ?? "");
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setError("Unable to load model and thinking settings.");
+      .catch((error: Error) => {
+        if (!controller.signal.aborted && request.current === controller) setError(error.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted && request.current === controller) setBusy(false);
       });
-    return () => controller.abort();
-  }, [session.session_id, ensureSession]);
+    return () => {
+      request.current?.abort();
+      request.current = null;
+    };
+  }, [session.session_id, ensureSession, reload]);
 
   async function selectModel(profile: string) {
     if (busy || running || !catalog?.models.some((entry) => entry.profile === profile)) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     setOpen(false);
     setBusy(true);
     setError("");
@@ -124,45 +111,62 @@ export function ModelThinkingControl() {
       const selected = await api<SessionModel>(`sessions/${bound.session_id}/model`, {
         method: "PUT",
         body: JSON.stringify({ profile }),
+        signal: controller.signal,
       });
-      setModel(selected);
-      setThinking(undefined);
-      setError(selected.error ?? "");
-      setThinking(
-        normalizeThinking(await api<ThinkingState>(`sessions/${bound.session_id}/thinking`)),
-      );
+      if (!controller.signal.aborted && request.current === controller)
+        setModel(validateModelSettings(selected));
     } catch (error) {
-      setError((error as Error).message);
+      if (!controller.signal.aborted && request.current === controller)
+        setError((error as Error).message);
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted && request.current === controller) setBusy(false);
     }
   }
   async function selectThinking(level: ThinkingLevel) {
-    if (!thinking?.levels.includes(level) || busy || running) return;
+    if (
+      !thinking ||
+      thinking.status === "unknown" ||
+      !thinking.levels.includes(level) ||
+      thinking.level === level ||
+      busy ||
+      running
+    )
+      return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     setOpen(false);
     setBusy(true);
     setError("");
     try {
       const bound = await ensureSession();
-      setThinking(
-        normalizeThinking(
-          await api<ThinkingState>(`sessions/${bound.session_id}/thinking`, {
-            method: "PUT",
-            body: JSON.stringify({ level }),
-          }),
-        ),
-      );
+      await api(`sessions/${bound.session_id}/thinking`, {
+        method: "PUT",
+        body: JSON.stringify({ level }),
+        signal: controller.signal,
+      });
+      // Read one coherent snapshot, including any capability generation change.
+      const selected = await api<SessionModel>(`sessions/${bound.session_id}/model`, {
+        signal: controller.signal,
+      });
+      if (!controller.signal.aborted && request.current === controller)
+        setModel(validateModelSettings(selected));
     } catch (error) {
-      setError((error as Error).message);
+      if (!controller.signal.aborted && request.current === controller)
+        setError((error as Error).message);
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted && request.current === controller) setBusy(false);
     }
   }
   const modelName = model?.selected?.model ?? initialModel;
-  const supportsThinking = thinking?.supported && thinking.levels.length > 0;
-  const displayedLevel: ThinkingLevel = supportsThinking ? thinking.level : "off";
-  const displayedLevels: ThinkingLevel[] = supportsThinking ? thinking.levels : ["off"];
-  const label = thinkingLabels[displayedLevel];
+  const displayedLevel = thinking?.status === "unknown" ? "" : (thinking?.level ?? "");
+  const label = busy
+    ? "Loading…"
+    : !thinking
+      ? "Unavailable"
+      : thinking.status === "unknown"
+        ? "Unconfirmed"
+        : thinkingLabels[thinking.level];
   return (
     <span className="min-w-0 shrink">
       <Menu.Root open={open} onOpenChange={setOpen}>
@@ -210,20 +214,23 @@ export function ModelThinkingControl() {
               </SettingsSubmenu>
               <SettingsSubmenu label="Thinking level" value={label}>
                 <Menu.RadioGroup aria-label="Thinking level" value={displayedLevel}>
-                  {displayedLevels.map((level) => (
-                    <Menu.RadioItem
-                      key={level}
-                      value={level}
-                      onClick={() => void selectThinking(level)}
-                      disabled={busy || running || !supportsThinking}
-                      className="flex min-h-9 cursor-default items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-40"
-                    >
-                      {thinkingLabels[level]}
-                      <Menu.RadioItemIndicator>
-                        <CheckIcon className="size-3.5" aria-hidden />
-                      </Menu.RadioItemIndicator>
-                    </Menu.RadioItem>
-                  ))}
+                  {thinkingOptions(thinking ?? undefined).map(
+                    ({ level, label, available, reason }) => (
+                      <Menu.RadioItem
+                        key={level}
+                        value={level}
+                        onClick={() => void selectThinking(level)}
+                        disabled={busy || running || !available}
+                        title={reason}
+                        className="flex min-h-9 cursor-default items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-40"
+                      >
+                        {label}
+                        <Menu.RadioItemIndicator>
+                          <CheckIcon className="size-3.5" aria-hidden />
+                        </Menu.RadioItemIndicator>
+                      </Menu.RadioItem>
+                    ),
+                  )}
                 </Menu.RadioGroup>
               </SettingsSubmenu>
             </Menu.Popup>
@@ -231,8 +238,17 @@ export function ModelThinkingControl() {
         </Menu.Portal>
       </Menu.Root>
       {error && (
-        <span role="alert" className="sr-only">
+        <span role="alert" className="mt-1 block max-w-72 text-xs text-destructive">
           {error}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={busy || running}
+            onClick={() => setReload((value) => value + 1)}
+          >
+            Retry
+          </Button>
         </span>
       )}
     </span>

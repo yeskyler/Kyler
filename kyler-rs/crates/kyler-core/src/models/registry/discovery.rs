@@ -57,6 +57,19 @@ fn write_cache(config: &AppConfig, cache: &Cache) -> Result<()> {
     file.persist(path)?;
     Ok(())
 }
+pub(super) fn capabilities<'a>(
+    cache: &'a Cache,
+    name: &str,
+    provider: &ProviderSettings,
+    model: &str,
+) -> Option<&'a kyler_protocol::api::models::ModelCapabilities> {
+    cache
+        .0
+        .get(&identity(name, provider))?
+        .iter()
+        .find(|entry| entry.id == model)
+        .map(|entry| &entry.capabilities)
+}
 pub(super) fn extend_profiles(settings: &mut ModelSettings, config: &AppConfig, cache: &Cache) {
     for (name, provider) in &settings.providers {
         if !provider.discover_models {
@@ -353,5 +366,64 @@ mod tests {
         assert_eq!(registry.resolve(None).unwrap().info.model, "replacement");
         assert!(!cache_path(&config).exists());
         server.abort();
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+    use kyler_protocol::api::models::{ModelCapabilities, ReasoningCapabilities, ThinkingLevel};
+    #[test]
+    fn discovered_capabilities_survive_restart_and_apply_to_existing_profiles() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::default();
+        config.session.enabled = true;
+        config.session.directory = root.path().join("sessions");
+        config.llm.base_url = "https://custom.example/v1".into();
+        config.llm.model = "custom-reasoning".into();
+        config.llm.api_key = kyler_config::SecretString::new("PRIVATE_FIXTURE_KEY");
+        let settings = config.effective_models();
+        let (name, provider) = settings.providers.iter().next().unwrap();
+        ModelRegistry::cache_model_ids(
+            &config,
+            name,
+            provider,
+            vec![DiscoveredModel {
+                id: config.llm.model.clone(),
+                capabilities: ModelCapabilities {
+                    reasoning: Some(ReasoningCapabilities {
+                        levels: vec![ThinkingLevel::High, ThinkingLevel::Ultra],
+                        default: ThinkingLevel::High,
+                        source: "provider".into(),
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .unwrap();
+        let registry = ModelRegistry::new(&config).unwrap();
+        let bound = registry.resolve(None).unwrap();
+        assert_eq!(
+            bound.info.capabilities.reasoning.as_ref().unwrap().levels,
+            vec![ThinkingLevel::High, ThinkingLevel::Ultra]
+        );
+        assert_eq!(bound.reasoning_effort, Some(ThinkingLevel::High));
+        let key = bound.preference_key();
+        config.llm.base_url = "https://other.example/v1".into();
+        let replacement = ModelRegistry::new(&config).unwrap().resolve(None).unwrap();
+        assert!(replacement.info.capabilities.reasoning.is_none());
+        assert_ne!(key, replacement.preference_key());
+        config.llm.base_url = "https://custom.example/v1".into();
+        config.llm.api_key = kyler_config::SecretString::new("ROTATED_FIXTURE_KEY");
+        assert_eq!(
+            key,
+            ModelRegistry::new(&config)
+                .unwrap()
+                .resolve(None)
+                .unwrap()
+                .preference_key()
+        );
+        let cache = std::fs::read_to_string(cache_path(&config)).unwrap();
+        assert!(!cache.contains("PRIVATE_FIXTURE_KEY"));
     }
 }

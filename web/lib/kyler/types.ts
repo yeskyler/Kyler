@@ -7,8 +7,20 @@ export type Session = {
   updated_at?: number;
   status?: string | null;
 };
-export type ThinkingLevel = "off" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ThinkingLevel = "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+export type ThinkingState = {
+  status: "supported" | "unsupported" | "unknown";
+  source: string | null;
+  profile: string;
+  revision: number;
+  follows_default: boolean;
+  supported: boolean;
+  enabled: boolean;
+  level: ThinkingLevel;
+  levels: ThinkingLevel[];
+};
 export type ModelInfo = {
+  revision?: number;
   protocol?: "auto" | "responses" | "chat_completions";
   profile: string;
   model: string;
@@ -23,6 +35,7 @@ export type ModelCatalog = {
   providers?: { provider: string; status: string; error?: string | null }[];
 };
 export type SessionModel = {
+  thinking: ThinkingState | null;
   profile: string | null;
   selected: ModelInfo | null;
   active: ModelInfo | null;

@@ -202,6 +202,7 @@ pub async fn configure(
                         } else {
                             "This machine only"
                         }),
+                        &discovered,
                     )?;
                     let mut choices = vec![
                         if can_start {

@@ -223,15 +223,21 @@ replace that default or an explicit selection. If a selected model disappears,
 select another model. Before first discovery, a provider-only setup has no usable
 model; a configured profile is available immediately.
 
-The host atomically saves credential-free IDs in
+The host atomically saves credential-free model IDs and validated capability declarations in
 `session.directory/_model-catalog.json` when session storage is enabled. A cache
 entry is scoped to the provider, endpoint, adapter and credential fingerprint.
 Failures preserve previously discovered models and expose a safe per-provider
 status through `/v1/models`. Credentials and provider response bodies are never
 stored in this cache. Set `discover_models = false` to use manual profiles only.
 
-Model lists usually omit capability details. Explicit capability overrides take
-precedence over documented adapter rules; unknown capabilities remain unknown.
+Model lists may omit capability details. Reasoning capability precedence is explicit
+per-model configuration, validated provider metadata, then adapter rules. Unknown
+capabilities remain unknown; the installation model never defines other models'
+levels. A model-list entry may provide `capabilities.reasoning` (or `reasoning`)
+with explicit `levels` and an optional supported `default`. Boolean `false` means
+unsupported; `true` without levels does not establish valid effort values. Invalid
+or duplicate level declarations are ignored, and provider-controlled source text
+is discarded. Metadata applies to configured profiles as well as discovered ones.
 The adapter knows GPT-5.6 Sol's context/output limits; other discovered models use
 the configured context/output budgets unless their limits are known. These fallback
 budgets are not a claim about the provider's actual limits. Named profiles can set
@@ -260,15 +266,41 @@ own `enable_thinking` field.
   opts in that one level. For additional verified levels, configure
   `capabilities.reasoning` with `levels`, `default`, and `source`.
 
-Web renders only the selected model's supported levels and offers **Model default**.
-Default means following configured/provider behavior, rather than explicitly
-turning thinking off. `PUT /v1/sessions/{id}/thinking` accepts either a `level`,
-the legacy `enabled` boolean, or `use_default: true`. Responses include
-`follows_default`. User preferences are stored per session and provider/model
-identity, restored on switching back, and reset to the new model default if the
-saved level becomes unsupported. Legacy session-wide preferences migrate once to
-the currently selected model. Changes apply to the next run; active executions
-retain their immutable model snapshot.
+Web always displays **Off, Low, Medium, High, Extra high, Max, Ultra** in the
+thinking menu. Unsupported values are disabled, including Off for models that
+cannot disable reasoning. Known non-reasoning models permit only Off and omit
+reasoning parameters. Unknown capabilities disable the menu choices and display
+**Unconfirmed**; loading and failed requests have separate states with retry.
+There is no Model default menu item. Ultra is independent of Max: it is sent as
+`ultra` only when explicit configuration or metadata declares support. Existing
+adapter rules do not automatically gain Ultra.
+A verified custom model may declare a restricted set without enabling every grade:
+
+```toml
+[llm.capabilities.reasoning]
+levels = ["high", "ultra"]
+default = "high"
+source = "configuration"
+```
+
+For named profiles, use `[models.profiles.<profile>.capabilities.reasoning]`.
+
+`GET`/`PUT /v1/sessions/{id}/model` return the model and its `thinking` state from
+one immutable catalog snapshot. Thinking state includes `status`
+(`supported`, `unsupported`, `unknown`), `source`, `profile`, `revision`, and the
+effective level and supported values. Frontend requests are cancelled or ignored
+after session changes, and mixed model/capability generations are rejected.
+`PUT /v1/sessions/{id}/thinking` accepts a `level`, the legacy `enabled` boolean,
+or `use_default: true`. Responses include `follows_default`.
+
+Preferences are scoped to the session, provider connection, endpoint, model and
+wire protocol; credentials are excluded so rotation does not reset user choices.
+Switching back restores a still-supported grade. Otherwise the model's valid
+default is used. Ambiguous older provider/model-only preference files are retained
+but are not applied to a newly scoped connection. Legacy session-wide preferences
+still migrate once to the currently selected model. Active executions keep their
+immutable snapshot. Unsupported requests are rejected rather than silently mapped
+to another grade or retried as generation requests.
 
 Provider-returned reasoning remains separate from answer text. SiliconFlow retains
 matching current-turn tool reasoning; generic endpoints can opt in using

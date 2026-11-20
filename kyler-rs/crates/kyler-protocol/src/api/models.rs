@@ -79,6 +79,9 @@ pub struct SessionModel {
     pub selected: Option<ModelInfo>,
     pub active: Option<ModelInfo>,
     pub error: Option<String>,
+    /// Resolved from the same catalog snapshot as selected.
+    #[serde(default)]
+    pub thinking: Option<ThinkingState>,
 }
 
 /// Editable connection metadata. The key is deliberately never returned.
@@ -110,8 +113,18 @@ pub enum ThinkingLevel {
     High,
     Xhigh,
     Max,
+    Ultra,
 }
 impl ThinkingLevel {
+    pub const ALL: [Self; 7] = [
+        Self::Off,
+        Self::Low,
+        Self::Medium,
+        Self::High,
+        Self::Xhigh,
+        Self::Max,
+        Self::Ultra,
+    ];
     /// Provider spelling differs from the UI's historical "off" preference.
     pub fn reasoning_effort(self) -> &'static str {
         match self {
@@ -121,6 +134,7 @@ impl ThinkingLevel {
             Self::High => "high",
             Self::Xhigh => "xhigh",
             Self::Max => "max",
+            Self::Ultra => "ultra",
         }
     }
 
@@ -131,8 +145,24 @@ impl ThinkingLevel {
         self != Self::Off
     }
 }
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingSupport {
+    Supported,
+    Unsupported,
+    #[default]
+    Unknown,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThinkingState {
+    #[serde(default)]
+    pub status: ThinkingSupport,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub profile: String,
+    #[serde(default)]
+    pub revision: u64,
     #[serde(default)]
     pub follows_default: bool,
     pub enabled: bool,

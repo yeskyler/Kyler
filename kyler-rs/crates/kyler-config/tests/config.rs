@@ -397,6 +397,7 @@ fn reasoning_effort_parses_for_legacy_and_named_models() {
         ("high", ThinkingLevel::High),
         ("xhigh", ThinkingLevel::Xhigh),
         ("max", ThinkingLevel::Max),
+        ("ultra", ThinkingLevel::Ultra),
     ] {
         let config = loader::parse(&format!("{VALID}\nreasoning_effort=\"{effort}\"\n")).unwrap();
         assert_eq!(

@@ -67,36 +67,19 @@ impl ModelRegistry {
         for (name, profile) in settings.profiles {
             let provider = &settings.providers[&profile.provider];
             let adapter = kyler_provider::Adapter::resolve(provider.adapter, &provider.base_url);
-            let mut capabilities = profile.capabilities.clone();
-            let inferred = adapter.capabilities(&profile.model, profile.reasoning_effort);
-            capabilities.reasoning = capabilities.reasoning.or(inferred.reasoning);
-            capabilities.images = capabilities.images.or(inferred.images);
-            capabilities.tools = capabilities.tools.or(inferred.tools);
-            capabilities.structured_output = capabilities
-                .structured_output
-                .or(inferred.structured_output);
-            capabilities.max_context_tokens = capabilities
-                .max_context_tokens
-                .or(inferred.max_context_tokens);
-            capabilities.max_output_tokens = capabilities
-                .max_output_tokens
-                .or(inferred.max_output_tokens);
-            if let Some(reasoning) = &mut capabilities.reasoning {
-                ensure!(
-                    reasoning.levels.is_empty() || reasoning.levels.contains(&reasoning.default),
-                    "Default thinking level must be supported"
-                );
-                ensure!(
-                    profile
-                        .reasoning_effort
-                        .is_none_or(|e| reasoning.levels.contains(&e)),
-                    "Configured thinking level is unsupported"
-                );
-                if let Some(effort) = profile.reasoning_effort {
-                    reasoning.default = effort;
-                    reasoning.source = "configuration".into();
-                }
-            }
+            let capabilities = adapter.resolve_capabilities(
+                &profile.model,
+                &profile.capabilities,
+                discovery::capabilities(&discovered, &profile.provider, provider, &profile.model),
+                profile.reasoning_effort,
+            )?;
+            let reasoning_effort = profile.reasoning_effort.or_else(|| {
+                capabilities
+                    .reasoning
+                    .as_ref()
+                    .filter(|caps| !caps.levels.is_empty())
+                    .map(|caps| caps.default)
+            });
             let mut policy = ContextPolicy::from(&config.context);
             policy.context_tokens = if profile.auto_context_window {
                 capabilities
@@ -128,11 +111,7 @@ impl ModelRegistry {
                     policy,
                     output_token_parameter: adapter
                         .output_parameter(&profile.model, profile.output_token_parameter),
-                    reasoning_effort: profile.reasoning_effort.or_else(|| {
-                        (adapter.0 == kyler_provider::AdapterKind::Siliconflow)
-                            .then(|| adapter.reasoning(&profile.model, None).map(|r| r.default))
-                            .flatten()
-                    }),
+                    reasoning_effort,
                     base_url: provider.base_url.clone(),
                     api_key: provider.api_key.clone(),
                 }),

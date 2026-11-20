@@ -296,6 +296,7 @@ async fn model_menu_is_local_and_running_model_is_distinct_from_next_selection()
                 models: vec![current.clone(), next.clone()],
             },
             SessionModel {
+                thinking: None,
                 profile: Some(next.profile.clone()),
                 selected: Some(next.clone()),
                 active: Some(current),

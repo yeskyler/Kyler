@@ -131,7 +131,11 @@ export function thinkingForModel(
   preferred?: ThinkingLevel,
 ) {
   const capabilities = catalog.models.find((m) => m.profile === profile)?.capabilities?.reasoning;
-  const levels = capabilities?.levels ?? [];
+  const levels: ThinkingLevel[] = capabilities
+    ? capabilities.levels.length
+      ? capabilities.levels
+      : ["off"]
+    : [];
   return {
     levels,
     level:

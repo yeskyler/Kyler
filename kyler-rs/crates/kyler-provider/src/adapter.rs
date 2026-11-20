@@ -320,3 +320,167 @@ mod tests {
         );
     }
 }
+
+impl Adapter {
+    /// Resolve per-model declarations without inheriting the installation model's capabilities.
+    /// Unknown models remain unknown unless metadata or explicit host configuration opts in.
+    pub fn resolve_capabilities(
+        self,
+        model: &str,
+        configured: &ModelCapabilities,
+        discovered: Option<&ModelCapabilities>,
+        effort: Option<ThinkingLevel>,
+    ) -> Result<ModelCapabilities> {
+        let inferred = self.capabilities(model, effort);
+        let metadata = discovered.cloned().unwrap_or_default();
+        let mut result = configured.clone();
+        result.reasoning = configured
+            .reasoning
+            .clone()
+            .map(|mut caps| {
+                caps.source = "configuration".into();
+                caps
+            })
+            .or_else(|| {
+                metadata.reasoning.clone().map(|mut caps| {
+                    caps.source = "provider".into();
+                    caps
+                })
+            })
+            .or(inferred.reasoning);
+        result.images = result.images.or(metadata.images).or(inferred.images);
+        result.tools = result.tools.or(metadata.tools).or(inferred.tools);
+        result.structured_output = result
+            .structured_output
+            .or(metadata.structured_output)
+            .or(inferred.structured_output);
+        result.max_context_tokens = result
+            .max_context_tokens
+            .or(metadata.max_context_tokens)
+            .or(inferred.max_context_tokens);
+        result.max_output_tokens = result
+            .max_output_tokens
+            .or(metadata.max_output_tokens)
+            .or(inferred.max_output_tokens);
+        if let Some(reasoning) = &mut result.reasoning {
+            ensure!(
+                reasoning.levels.len() <= ThinkingLevel::ALL.len(),
+                "Too many thinking levels"
+            );
+            ensure!(
+                reasoning
+                    .levels
+                    .iter()
+                    .enumerate()
+                    .all(|(index, level)| !reasoning.levels[..index].contains(level)),
+                "Duplicate thinking levels"
+            );
+            ensure!(
+                if reasoning.levels.is_empty() {
+                    reasoning.default == ThinkingLevel::Off
+                } else {
+                    reasoning.levels.contains(&reasoning.default)
+                },
+                "Default thinking level must be supported"
+            );
+            if let Some(effort) = effort {
+                ensure!(
+                    reasoning.levels.contains(&effort),
+                    "Configured thinking level is unsupported"
+                );
+                reasoning.default = effort;
+            }
+        }
+        Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod capability_resolution_tests {
+    use super::*;
+    #[test]
+    fn configuration_metadata_and_adapter_rules_have_per_model_precedence() {
+        let adapter = Adapter(AdapterKind::Openai);
+        let metadata = ModelCapabilities {
+            reasoning: Some(ReasoningCapabilities {
+                levels: vec![ThinkingLevel::High, ThinkingLevel::Ultra],
+                default: ThinkingLevel::High,
+                source: "untrusted".into(),
+            }),
+            ..Default::default()
+        };
+        let resolved = adapter
+            .resolve_capabilities("gpt-5.6-sol", &Default::default(), Some(&metadata), None)
+            .unwrap();
+        assert_eq!(
+            resolved.reasoning.unwrap().levels,
+            vec![ThinkingLevel::High, ThinkingLevel::Ultra]
+        );
+        let explicit = ModelCapabilities {
+            reasoning: Some(ReasoningCapabilities {
+                levels: vec![],
+                default: ThinkingLevel::Off,
+                source: "fixture".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(
+            adapter
+                .resolve_capabilities("gpt-5.6-sol", &explicit, Some(&metadata), None)
+                .unwrap()
+                .reasoning
+                .unwrap()
+                .levels
+                .is_empty()
+        );
+        assert!(
+            Adapter(AdapterKind::Generic)
+                .resolve_capabilities("gpt-5.6-sol", &Default::default(), None, None)
+                .unwrap()
+                .reasoning
+                .is_none()
+        );
+        assert!(
+            !adapter
+                .reasoning("gpt-5.6-sol", None)
+                .unwrap()
+                .levels
+                .contains(&ThinkingLevel::Ultra)
+        );
+    }
+    #[test]
+    fn ultra_is_never_silently_projected_as_max() {
+        let adapter = Adapter(AdapterKind::Generic);
+        let caps = ReasoningCapabilities {
+            levels: vec![ThinkingLevel::Max, ThinkingLevel::Ultra],
+            default: ThinkingLevel::Max,
+            source: "configuration".into(),
+        };
+        let mut request = serde_json::json!({});
+        adapter
+            .project(
+                &mut request,
+                "custom",
+                OutputTokenParameter::Auto,
+                Some(ThinkingLevel::Ultra),
+                Some(&caps),
+            )
+            .unwrap();
+        assert_eq!(request["reasoning_effort"], "ultra");
+        let caps = ReasoningCapabilities {
+            levels: vec![ThinkingLevel::Max],
+            ..caps
+        };
+        assert!(
+            adapter
+                .project(
+                    &mut request,
+                    "custom",
+                    OutputTokenParameter::Auto,
+                    Some(ThinkingLevel::Ultra),
+                    Some(&caps)
+                )
+                .is_err()
+        );
+    }
+}

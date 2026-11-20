@@ -126,6 +126,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
     let mut config = loader::load_from(&source).unwrap();
     config.server.access_token = SecretString::new("fixture-access");
     let server = Server::from_config(&config).await.unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     server
         .state
         .runs
@@ -205,7 +206,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .unwrap();
     assert_eq!(
         thinking,
-        json!({"follows_default":false,"enabled":false,"supported":true,"level":"off","levels":["off","low","medium","high","xhigh","max"]})
+        json!({"status":"supported","source":"configuration","profile":"fast","revision":1,"follows_default":false,"enabled":false,"supported":true,"level":"off","levels":["off","low","medium","high","xhigh","max"]})
     );
     assert_eq!(
         client
@@ -645,6 +646,7 @@ async fn editable_model_connection_is_private_durable_and_next_turn_only() {
     let mut settings = loader::load_from(&source).unwrap();
     settings.server.access_token = SecretString::new("fixture-access");
     let server = Server::from_config(&settings).await.unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     server
         .state
         .runs
@@ -938,4 +940,182 @@ async fn legacy_connection_edit_preserves_other_config_and_respects_startup_over
         "replacement"
     );
     server.state.runs.shutdown().await;
+}
+
+#[tokio::test]
+async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilities() {
+    let root = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let fixture = Fixture {
+        requests: Default::default(),
+        release: watch::channel(false).0,
+        authorization: Default::default(),
+    };
+    let router = Router::new()
+        .route("/v1/chat/completions", post(completion))
+        .with_state(fixture.clone());
+    let upstream = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let text = config(&base, &root.path().join("sessions"))
+        .replace("default = \"fast\"", "default = \"plain\"")
+        .replace("\"xhigh\", \"max\"", "\"xhigh\", \"max\", \"ultra\"");
+    let text = format!(
+        "{text}\n[models.profiles.plain]\nprovider=\"fixture\"\nmodel=\"plain-v1\"\noutput_tokens=1024\ncapabilities.reasoning={{levels=[],default=\"off\",source=\"fixture\"}}\n"
+    );
+    let source = root.path().join("config.toml");
+    std::fs::write(&source, text).unwrap();
+    let config = loader::load_from(&source).unwrap();
+    let server = Server::from_config(&config).await.unwrap();
+    let token = gateway_auth::issue(&server).await;
+    let client = gateway_auth::client(&token);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stopped) = oneshot::channel();
+    let service = tokio::spawn(server.serve(listener, async {
+        let _ = stopped.await;
+    }));
+    let session: Value = client
+        .post(format!("{base}/v1/sessions"))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = session["session_id"].as_str().unwrap();
+    let model_url = format!("{base}/v1/sessions/{id}/model");
+    let thinking_url = format!("{base}/v1/sessions/{id}/thinking");
+    let initial: SessionModel = client
+        .get(&model_url)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(initial.selected.unwrap().model, "plain-v1");
+    let state = initial.thinking.unwrap();
+    assert_eq!(
+        state.status,
+        kyler_protocol::api::models::ThinkingSupport::Unsupported
+    );
+    assert_eq!(
+        state.levels,
+        vec![kyler_protocol::api::models::ThinkingLevel::Off]
+    );
+    let selected: SessionModel = client
+        .put(&model_url)
+        .json(&json!({"profile":"fast"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let state = selected.thinking.unwrap();
+    assert_eq!(state.profile, selected.selected.as_ref().unwrap().profile);
+    assert_eq!(state.revision, selected.selected.as_ref().unwrap().revision);
+    assert!(
+        state
+            .levels
+            .contains(&kyler_protocol::api::models::ThinkingLevel::Ultra)
+    );
+    client
+        .put(&thinking_url)
+        .json(&json!({"level":"ultra"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let accepted: RunAccepted = client
+        .post(format!("{base}/v1/sessions/{id}/runs"))
+        .json(&json!({"input":"fixture"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        terminal(&client, &base, &accepted.run_id).await.status,
+        kyler_protocol::api::run::RunStatus::Completed
+    );
+    assert_eq!(
+        fixture.requests.lock().await.last().unwrap()["reasoning_effort"],
+        "ultra"
+    );
+    for profile in ["plain", "slow"] {
+        let selected: SessionModel = client
+            .put(&model_url)
+            .json(&json!({"profile":profile}))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let state = selected.thinking.unwrap();
+        assert!(!state.enabled);
+        assert_eq!(state.level, kyler_protocol::api::models::ThinkingLevel::Off);
+        assert_eq!(
+            state.status,
+            if profile == "plain" {
+                kyler_protocol::api::models::ThinkingSupport::Unsupported
+            } else {
+                kyler_protocol::api::models::ThinkingSupport::Unknown
+            }
+        );
+        assert_eq!(
+            client
+                .put(&thinking_url)
+                .json(&json!({"level":"ultra"}))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    let selected: SessionModel = client
+        .put(&model_url)
+        .json(&json!({"profile":"fast"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        selected.thinking.unwrap().level,
+        kyler_protocol::api::models::ThinkingLevel::Ultra
+    );
+    stop.send(()).unwrap();
+    service.await.unwrap().unwrap();
+    let restarted = Server::from_config(&config).await.unwrap();
+    assert_eq!(
+        restarted
+            .state
+            .runs
+            .session_model(id, None)
+            .await
+            .unwrap()
+            .thinking
+            .unwrap()
+            .level,
+        kyler_protocol::api::models::ThinkingLevel::Ultra
+    );
+    restarted.state.runs.shutdown().await;
+    upstream.abort();
 }

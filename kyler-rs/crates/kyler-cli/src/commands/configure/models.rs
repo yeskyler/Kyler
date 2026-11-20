@@ -393,13 +393,32 @@ fn window_policy(config: &AppConfig) -> (ContextPolicy, bool) {
         (policy, config.context.auto_model_window)
     }
 }
-pub(super) fn review(config: &AppConfig, advanced: bool, access: Option<&str>) -> Result<()> {
+pub(super) fn review(
+    config: &AppConfig,
+    advanced: bool,
+    access: Option<&str>,
+    discovered: &[Discovery],
+) -> Result<()> {
     let settings = config.effective_models();
     let profile = settings
         .profiles
         .get(&settings.default)
         .ok_or_else(|| CliError::new(2, "Select a model before saving"))?;
     let provider = &settings.providers[&profile.provider];
+    let cached = ModelRegistry::cached_model_ids(config, &profile.provider, provider);
+    let entries = discovered
+        .iter()
+        .find(|(name, settings, _)| {
+            name == &profile.provider
+                && settings.base_url == provider.base_url
+                && settings.adapter == provider.adapter
+        })
+        .map(|(_, _, entries)| entries.as_slice())
+        .unwrap_or(&cached);
+    let metadata = entries
+        .iter()
+        .find(|entry| entry.id == profile.model)
+        .map(|entry| &entry.capabilities);
     let mut details = vec![format!(
         "Provider  {}",
         match Adapter::resolve(provider.adapter, &provider.base_url).0 {
@@ -416,6 +435,7 @@ pub(super) fn review(config: &AppConfig, advanced: bool, access: Option<&str>) -
         &window_policy(config).0,
         window_policy(config).1,
         advanced,
+        metadata,
     )?);
     if let Some(access) = access {
         details.push(format!("Access    {access}"));
@@ -455,9 +475,12 @@ fn summary(
     policy: &ContextPolicy,
     automatic: bool,
     advanced: bool,
+    metadata: Option<&kyler_protocol::api::models::ModelCapabilities>,
 ) -> Result<String> {
-    let inferred = adapter.capabilities(model, effort);
-    let capacity = overrides.max_context_tokens.or(inferred.max_context_tokens);
+    let resolved = adapter
+        .resolve_capabilities(model, overrides, metadata, effort)
+        .map_err(|error| CliError::new(2, error.to_string()))?;
+    let capacity = resolved.max_context_tokens;
     let mut effective = policy.clone();
     if automatic {
         effective.context_tokens = capacity.unwrap_or(policy.context_tokens);
@@ -468,7 +491,7 @@ fn summary(
             format!("Invalid context budget: {e}. Use configure --advanced to adjust it."),
         )
     })?;
-    let reasoning = overrides.reasoning.as_ref().or(inferred.reasoning.as_ref());
+    let reasoning = resolved.reasoning.as_ref();
     let level = effort
         .or_else(|| reasoning.map(|r| r.default))
         .unwrap_or(kyler_protocol::api::models::ThinkingLevel::Off);
@@ -476,13 +499,15 @@ fn summary(
         format!("Model     {model}"),
         format!(
             "Thinking  {}",
-            match level {
-                kyler_protocol::api::models::ThinkingLevel::Off => "Off",
-                kyler_protocol::api::models::ThinkingLevel::Low => "Low",
-                kyler_protocol::api::models::ThinkingLevel::Medium => "Medium",
-                kyler_protocol::api::models::ThinkingLevel::High => "High",
-                kyler_protocol::api::models::ThinkingLevel::Xhigh => "Extra high",
-                kyler_protocol::api::models::ThinkingLevel::Max => "Max",
+            match (reasoning, level) {
+                (None, _) => "Unconfirmed",
+                (_, kyler_protocol::api::models::ThinkingLevel::Off) => "Off",
+                (_, kyler_protocol::api::models::ThinkingLevel::Low) => "Low",
+                (_, kyler_protocol::api::models::ThinkingLevel::Medium) => "Medium",
+                (_, kyler_protocol::api::models::ThinkingLevel::High) => "High",
+                (_, kyler_protocol::api::models::ThinkingLevel::Xhigh) => "Extra high",
+                (_, kyler_protocol::api::models::ThinkingLevel::Max) => "Max",
+                (_, kyler_protocol::api::models::ThinkingLevel::Ultra) => "Ultra",
             }
         ),
     ];

@@ -250,10 +250,33 @@ impl ThreadHandle {
         selection: Option<Option<kyler_protocol::api::models::ThinkingLevel>>,
     ) -> Result<kyler_protocol::api::models::ThinkingState> {
         let profile = self.inner.profile.read().await;
-        let agent = self.inner.agent.bind_model(profile.as_deref())?;
-        let supported = agent.thinking_supported();
-        let levels = agent.thinking_levels();
-        let path = migrate_thinking_path(&self.thinking_path().await, &agent)?;
+        let snapshot = self
+            .inner
+            .agent
+            .model_registry()
+            .context("model management is unavailable")?
+            .resolve(profile.as_deref())?;
+        self.thinking_for_snapshot(&snapshot, selection).await
+    }
+    async fn thinking_for_snapshot(
+        &self,
+        snapshot: &kyler_core::models::ModelSnapshot,
+        selection: Option<Option<kyler_protocol::api::models::ThinkingLevel>>,
+    ) -> Result<kyler_protocol::api::models::ThinkingState> {
+        use kyler_protocol::api::models::{ThinkingLevel, ThinkingState, ThinkingSupport};
+        let caps = snapshot.info.capabilities.reasoning.as_ref();
+        let status = match caps {
+            None => ThinkingSupport::Unknown,
+            Some(caps) if !caps.levels.is_empty() => ThinkingSupport::Supported,
+            Some(_) => ThinkingSupport::Unsupported,
+        };
+        let levels = match status {
+            ThinkingSupport::Unknown => vec![],
+            ThinkingSupport::Unsupported => vec![ThinkingLevel::Off],
+            ThinkingSupport::Supported => caps.unwrap().levels.clone(),
+        };
+        let default = caps.map_or(ThinkingLevel::Off, |caps| caps.default);
+        let path = migrate_thinking_path(&self.thinking_path().await, &snapshot.preference_key())?;
         if let Some(selection) = selection {
             if let Some(level) = selection {
                 ensure!(
@@ -264,26 +287,28 @@ impl ThreadHandle {
             } else {
                 match std::fs::remove_file(&path) {
                     Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(e.into()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
                 }
             }
         }
         let saved = read_thinking(&path)?;
-        let requested = saved.unwrap_or_else(|| agent.default_thinking_level());
-        let level = if levels.contains(&requested) {
-            requested
-        } else {
-            agent.default_thinking_level()
-        };
-        Ok(kyler_protocol::api::models::ThinkingState {
-            follows_default: saved.is_none() || !levels.contains(&requested),
-            enabled: level.enabled(),
-            supported,
+        let level = saved
+            .filter(|level| levels.contains(level))
+            .unwrap_or(default);
+        Ok(ThinkingState {
+            status,
+            source: caps.map(|caps| caps.source.clone()),
+            profile: snapshot.info.profile.clone(),
+            revision: snapshot.info.revision,
+            follows_default: saved.is_none_or(|level| !levels.contains(&level)),
+            enabled: status == ThinkingSupport::Supported && level.enabled(),
+            supported: status == ThinkingSupport::Supported,
             level,
             levels,
         })
     }
+
     pub async fn models(&self, reload: bool) -> Result<ModelCatalog> {
         let registry = self
             .inner
@@ -315,36 +340,41 @@ impl ThreadHandle {
         // Use the same lock ordering as permission updates.
         let permissions = self.inner.permissions.read().await;
         let mut profile = self.inner.profile.write().await;
-        if let Some(next) = selection {
-            ensure!(
-                next.as_ref().is_none_or(|name| !name.is_empty()
-                    && name.len() <= 128
-                    && name
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))),
-                "Invalid model profile name."
-            );
-            self.inner
-                .agent
-                .model_registry()
-                .context("model management is unavailable")?
-                .resolve(next.as_deref())?;
-            self.save_preferences(&permissions, &next, false).await?;
-            *profile = next;
-        }
+        let target = selection.clone().unwrap_or_else(|| profile.clone());
+        ensure!(
+            target.as_ref().is_none_or(|name| !name.is_empty()
+                && name.len() <= 128
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))),
+            "Invalid model profile name."
+        );
         let resolved = self
             .inner
             .agent
             .model_registry()
             .context("model management is unavailable")?
-            .resolve(profile.as_deref());
-        let (selected, error) = match resolved {
-            Ok(m) => (Some(m.info.clone()), None),
-            Err(e) => (None, Some(e.to_string())),
+            .resolve(target.as_deref());
+        if selection.is_some() {
+            if let Err(error) = &resolved {
+                anyhow::bail!("{error}");
+            }
+        }
+        let (selected, thinking, error) = match resolved {
+            Ok(snapshot) => {
+                let thinking = self.thinking_for_snapshot(&snapshot, None).await?;
+                (Some(snapshot.info.clone()), Some(thinking), None)
+            }
+            Err(error) => (None, None, Some(error.to_string())),
         };
+        if selection.is_some() {
+            self.save_preferences(&permissions, &target, false).await?;
+            *profile = target;
+        }
         Ok(SessionModel {
             profile: profile.clone(),
             selected,
+            thinking,
             error,
             active: self
                 .inner
@@ -395,23 +425,9 @@ fn save(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 /// Model identity includes the provider, so preferences cannot leak across services.
-pub(super) fn model_thinking_path(base: &Path, agent: &kyler_core::Agent) -> std::path::PathBuf {
-    use sha2::{Digest, Sha256};
-    let info = agent.model_info();
-    let key = format!(
-        "{}\0{}",
-        info.as_ref().map_or("", |i| i.provider.as_str()),
-        agent.model()
-    );
-    base.with_extension(format!("{:x}.thinking", Sha256::digest(key)))
-}
-
-/// Adopt a legacy session-wide preference for the currently selected model once.
-pub(super) fn migrate_thinking_path(
-    base: &Path,
-    agent: &kyler_core::Agent,
-) -> Result<std::path::PathBuf> {
-    let path = model_thinking_path(base, agent);
+/// A scoped preference is never reused across provider endpoints or wire protocols.
+pub(super) fn migrate_thinking_path(base: &Path, identity: &str) -> Result<std::path::PathBuf> {
+    let path = base.with_extension(format!("{identity}.thinking"));
     if !path.exists() && base.exists() {
         std::fs::rename(base, &path)?;
     }

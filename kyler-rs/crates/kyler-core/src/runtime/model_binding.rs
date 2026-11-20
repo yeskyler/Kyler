@@ -27,6 +27,22 @@ impl Agent {
         }
         Ok(agent)
     }
+    pub fn model_preference_key(&self) -> String {
+        use sha2::{Digest, Sha256};
+        self.model_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.preference_key())
+            .unwrap_or_else(|| {
+                format!(
+                    "{:x}",
+                    Sha256::digest(format!(
+                        "embedded\0{}\0{}",
+                        self.base_url.trim_end_matches('/'),
+                        self.model
+                    ))
+                )
+            })
+    }
     /// Explicit effort settings opt custom models in; known non-reasoning OpenAI
     /// models must not receive an automatically injected reasoning parameter.
     pub fn thinking_supported(&self) -> bool {

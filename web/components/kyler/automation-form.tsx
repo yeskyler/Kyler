@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { api } from "@/lib/kyler/client";
 import { randomUuid } from "@/lib/kyler/random-uuid";
+import { thinkingLevels, thinkingLabels } from "@/lib/kyler/model-settings";
 import { permissionLabels } from "@/lib/kyler/types";
 import {
   scheduleLabel,
@@ -335,17 +336,21 @@ export function AutomationForm({
                 <label className="space-y-2 text-sm font-medium">
                   <span>Thinking level</span>
                   <select
-                    value={config.thinking}
+                    value={thinking.levels.length ? config.thinking : ""}
                     disabled={thinking.levels.length === 0}
                     onChange={(event) =>
                       change("thinking", event.target.value as TaskConfig["thinking"])
                     }
                     className={selectClass}
                   >
-                    {thinking.levels.length === 0 && <option value="off">Unavailable</option>}
-                    {thinking.levels.map((value) => (
-                      <option key={value} value={value}>
-                        {value[0].toUpperCase() + value.slice(1)}
+                    {thinking.levels.length === 0 && (
+                      <option value="" hidden>
+                        Unconfirmed
+                      </option>
+                    )}
+                    {thinkingLevels.map((value) => (
+                      <option key={value} value={value} disabled={!thinking.levels.includes(value)}>
+                        {thinkingLabels[value]}
                       </option>
                     ))}
                   </select>

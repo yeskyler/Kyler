@@ -19,6 +19,22 @@ pub struct ModelSnapshot {
 }
 
 impl ModelSnapshot {
+    /// Connection and protocol are part of preference identity; credentials are not.
+    pub fn preference_key(&self) -> String {
+        use sha2::{Digest, Sha256};
+        format!(
+            "{:x}",
+            Sha256::digest(format!(
+                "{}\0{}\0{}\0{:?}\0{:?}",
+                self.info.provider,
+                self.base_url.trim_end_matches('/'),
+                self.info.model,
+                self.info.protocol,
+                self.adapter.0
+            ))
+        )
+    }
+
     pub fn connection_settings(&self) -> ModelConnectionSettings {
         ModelConnectionSettings {
             url: self.base_url.clone(),
