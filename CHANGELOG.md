@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0 — 2026-11-21
+
+### Added
+
+- Dedicated provider adapters and a session gateway with scoped tokens and request auditing.
+- Native CLI installation with a cliclack setup wizard and bundled ripgrep and Linux sandbox tools.
+- Skill proposal review cards in assistant messages.
+
+### Changed
+
+- Model discovery and model-aware provider request projection.
+- Chat model selection resets thinking to Off; all seven grades remain manually selectable.
+- System guidance reflects the execution loop, progressive tool discovery and reviewed experience.
+
+### Fixed
+
+- Provider failures retain actionable diagnostics in the Web interface.
+- Refined plugin menus and centered sidebar sign-out control.
+
 ## 0.5.0 — 2026-11-19
 
 ### Added
