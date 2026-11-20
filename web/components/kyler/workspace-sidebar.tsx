@@ -5,7 +5,6 @@ import { useAuiState } from "@assistant-ui/react";
 import {
   BlocksIcon,
   CalendarClockIcon,
-  LogOutIcon,
   ChevronRightIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -453,7 +452,7 @@ export function WorkspaceSidebar({
       </nav>
       <Button
         variant="ghost"
-        className="mx-2 mb-2 justify-start text-muted-foreground"
+        className="mx-2 mb-2 h-9 shrink-0 justify-center text-muted-foreground"
         onClick={async () => {
           try {
             const response = await fetch("/api/auth/logout", { method: "POST" });
@@ -464,7 +463,6 @@ export function WorkspaceSidebar({
           }
         }}
       >
-        <LogOutIcon className="size-4" aria-hidden />
         Sign out
       </Button>
 
