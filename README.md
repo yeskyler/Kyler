@@ -41,7 +41,7 @@ curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-Follow setup to configure the model and access scope. Open the displayed Web address
+Run `kyler configure` to configure the model and access scope, then choose **Save and start**. Open the displayed Web address
 and sign in with the generated token, or run `kyler tui` for the terminal interface.
 
 ```sh

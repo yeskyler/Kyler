@@ -183,6 +183,13 @@ fn select_primary(
     Some(addresses[0].clone())
 }
 
+pub(in crate::commands) fn primary_connection() -> Option<(String, Ipv4Addr)> {
+    interfaces()
+        .ok()
+        .zip(default_routes().ok())
+        .and_then(|(interfaces, routes)| select_primary(&interfaces, &routes))
+}
+
 pub(super) fn print(config: &AppConfig) {
     eprintln!(
         "\nLocal access:\n  Backend: {}",
@@ -200,10 +207,7 @@ pub(super) fn print(config: &AppConfig) {
         && config.web.bind.ip().is_unspecified();
     if backend || web {
         eprintln!("\nNetwork access:");
-        let primary = interfaces()
-            .ok()
-            .zip(default_routes().ok())
-            .and_then(|(interfaces, routes)| select_primary(&interfaces, &routes));
+        let primary = primary_connection();
         if let Some((name, address)) = primary {
             eprintln!("  Interface: {name}");
             if backend {

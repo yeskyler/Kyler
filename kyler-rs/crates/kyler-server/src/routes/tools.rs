@@ -8,9 +8,9 @@ use axum::{
     extract::{Path, State},
 };
 
+pub(super) use kyler_gateway::thread::projection::redact;
 use kyler_protocol::api::tools::ToolDetails;
 
-pub(super) use kyler_core::thread::projection::redact;
 pub async fn details(
     State(state): State<AppState>,
     Path((session, call)): Path<(String, String)>,
@@ -25,7 +25,7 @@ pub async fn details(
         .load(&session)
         .await
         .map_err(ApiError::storage)?;
-    kyler_core::thread::projection::tool_details(&snapshot, &call)
+    kyler_gateway::thread::projection::tool_details(&snapshot, &call)
         .map(Json)
         .map_err(|_| ApiError::missing())
 }

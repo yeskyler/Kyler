@@ -8,10 +8,11 @@ use serde::Deserialize;
 
 use kyler_protocol::api::models::{ModelCapabilities, ThinkingLevel};
 
-pub use kyler_provider::{AdapterKind, OutputTokenParameter};
+pub use kyler_provider::{AdapterKind, OutputTokenParameter, WireProtocol};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProviderSettings {
+    pub protocol: WireProtocol,
     pub adapter: AdapterKind,
     /// Discover available model IDs without issuing inference requests.
     pub discover_models: bool,
@@ -22,6 +23,7 @@ pub struct ProviderSettings {
 impl Default for ProviderSettings {
     fn default() -> Self {
         Self {
+            protocol: WireProtocol::Auto,
             adapter: AdapterKind::Auto,
             discover_models: true,
             base_url: String::new(),
@@ -134,6 +136,7 @@ impl AppConfig {
                     api_key: self.llm.api_key.clone(),
                     api_key_env: None,
                     adapter: self.llm.adapter,
+                    protocol: self.llm.protocol,
                     discover_models: self.llm.discover_models,
                 },
             )]

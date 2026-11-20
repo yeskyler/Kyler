@@ -9,6 +9,7 @@ export type Session = {
 };
 export type ThinkingLevel = "off" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelInfo = {
+  protocol?: "auto" | "responses" | "chat_completions";
   profile: string;
   model: string;
   provider: string;

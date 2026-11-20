@@ -1,6 +1,5 @@
 //! Composition boundary between the ACP adapter and the trusted local runtime.
 use crate::{CliError, Result};
-
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -11,10 +10,8 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use kyler_acp::{Host, HostEvent, HostSession, PlanEntry, PlanStatus};
-use kyler_core::{
-    runtime::UserTurn,
-    thread::{ThreadEvent, ThreadHandle, ThreadManager},
-};
+use kyler_core::runtime::UserTurn;
+use kyler_gateway::thread::{ThreadEvent, ThreadHandle, ThreadManager};
 use kyler_protocol::api::{permissions::ApprovalResponse, questions::QuestionResponse};
 
 struct LocalHost {

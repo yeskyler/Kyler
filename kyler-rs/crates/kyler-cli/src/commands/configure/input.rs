@@ -1,9 +1,10 @@
 //! Inline setup controls with typed navigation and credential-safe terminal input.
+use super::super::ui::{self, theme};
 use crate::{CliError, Result};
 
 use std::{
     future::{Future, poll_fn},
-    io::{self, IsTerminal, Write},
+    io::{self, Write},
     pin::Pin,
     task::Poll,
     time::Duration,
@@ -13,11 +14,7 @@ use crossterm::{
     event::{DisableBracketedPaste, EnableBracketedPaste},
     execute, terminal,
 };
-use inquire::{
-    Select, Text,
-    error::InquireError,
-    ui::{Color, RenderConfig, Styled},
-};
+use inquire::{Select, Text, error::InquireError};
 
 use kyler_config::{SecretString, models::ProviderSettings};
 use kyler_core::context::ContextPolicy;
@@ -40,23 +37,6 @@ fn prompt_error(error: InquireError) -> CliError {
             "Could not open the terminal wizard. Use --non-interactive for unattended setup.",
         ),
     }
-}
-fn theme() -> RenderConfig<'static> {
-    let mut config = RenderConfig::default();
-    let colored = std::env::var_os("NO_COLOR").is_none() && io::stderr().is_terminal();
-    config.prompt_prefix = if colored {
-        Styled::new("◆").with_fg(Color::LightCyan)
-    } else {
-        Styled::new("◆")
-    };
-    config.answered_prompt_prefix = if colored {
-        Styled::new("◇").with_fg(Color::LightGreen)
-    } else {
-        Styled::new("◇")
-    };
-    config.highlighted_option_prefix = Styled::new("›");
-    config.canceled_prompt_indicator = Styled::new("Back");
-    config
 }
 const HELP: &str = "↑↓ Select · Type to search · Enter Continue · Esc Back · Ctrl+C Cancel";
 pub(super) struct Prompts {
@@ -94,9 +74,6 @@ impl Prompts {
         .await?;
         Ok(Self { cancel })
     }
-    pub fn section(&mut self, title: &str) {
-        eprintln!("\n┌  Kyler · {title}\n│  Enter Continue · Esc Back · Ctrl+C Cancel\n│");
-    }
     pub fn select(&mut self, label: &str, options: Vec<String>, current: usize) -> Result<usize> {
         Select::new(label, options)
             .with_starting_cursor(current)
@@ -119,7 +96,7 @@ impl Prompts {
             vec![
                 "OpenAI".into(),
                 "SiliconFlow".into(),
-                "Custom (OpenAI-compatible API)".into(),
+                "Custom（OpenAI Completion）".into(),
             ],
             kinds.iter().position(|k| *k == default).unwrap_or(0),
         )?;
@@ -191,7 +168,7 @@ impl Prompts {
             .with_scorer(&scorer)
             .with_page_size(7)
             .with_help_message(HELP)
-            .with_render_config(theme())
+            .with_render_config(ui::model_list_theme())
             .prompt()
             .map(|o| o.choice)
             .map_err(prompt_error)
@@ -309,7 +286,7 @@ impl Prompts {
                 value=&mut future=>break Ok(value),
                 _=&mut self.cancel=>break Err(cancelled()),
                 exit=&mut keyboard=>{key_finished=true;break Err(exit.unwrap_or_else(|_|CliError::new(3,"Terminal input stopped")));},
-                _=ticks.tick()=>{let frames=["◐","◓","◑","◒"];eprint!("\r\x1b[2K{} {label} · Esc Back · Ctrl+C Cancel",frames[frame%frames.len()]);if let Err(e)=io::stderr().flush(){break Err(CliError::io(e));}frame+=1;}
+                _=ticks.tick()=>{let frames=ui::FRAMES;eprint!("\r\x1b[2K{} {label} · Esc Back · Ctrl+C Cancel",ui::paint(frames[frame%frames.len()], ui::Tone::Active));if let Err(e)=io::stderr().flush(){break Err(CliError::io(e));}frame+=1;}
             }
         };
         stop.store(true, Ordering::Relaxed);
@@ -525,24 +502,27 @@ fn key(label: &str, existing: &SecretString, optional: bool) -> Result<SecretStr
                     key_done(label);
                     return Ok(SecretString::new(value));
                 }
-                _ => eprintln!("Saved key is invalid. Paste a replacement."),
+                _ => ui::error("Saved key is invalid. Paste a replacement."),
             },
             Ok("") if optional => {
                 key_done(label);
                 return Ok(SecretString::default());
             }
-            Ok("") => eprintln!("An API key is required. Paste it, or press Esc to go back."),
+            Ok("") => ui::error("An API key is required. Paste it, or press Esc to go back."),
             Ok(value) => {
                 key_done(label);
                 return Ok(SecretString::new(value));
             }
-            Err(message) => eprintln!("{message}"),
+            Err(message) => ui::error(message),
         }
     }
 }
 
 fn key_done(label: &str) {
-    eprint!("\x1b[1A\r\x1b[2K◇ {label}: Configured\n");
+    eprint!(
+        "\x1b[1A\r\x1b[2K{} {label}:Configured\n",
+        ui::paint("■", ui::Tone::Success)
+    );
     let _ = io::stderr().flush();
 }
 
@@ -558,7 +538,7 @@ fn password(label: &str, hint: &str) -> Result<String> {
     terminal::enable_raw_mode().map_err(CliError::io)?;
     let _guard = Guard;
     execute!(io::stderr(), EnableBracketedPaste).map_err(CliError::io)?;
-    eprint!("◆ {label} [{hint}]: ");
+    eprint!("{} {label}:[{hint}]", ui::paint("▣", ui::Tone::Active));
     io::stderr().flush().map_err(CliError::io)?;
     read_password()
 }

@@ -126,6 +126,7 @@ class PackageSetupTests(unittest.TestCase):
         (web / "package-lock.json").write_text('{"packages":{}}')
         (project / "docs").mkdir()
         (project / "scripts").mkdir()
+        (project / "scripts/install.sh").write_text("fixture bootstrap")
         self.tool("kyler")
         distribution = self.root / "runtime"
         self.tool("node", distribution / "bin")
@@ -154,7 +155,10 @@ class PackageSetupTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertIn("Packaging complete", text)
         archive = output / "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
-        self.assertFalse((output / "install.sh").exists())
+        self.assertEqual((output / "install.sh").read_text(), "fixture bootstrap")
+        installer = output / "kyler-installer-v0.1.0-x86_64-unknown-linux-gnu"
+        self.assertEqual(installer.read_bytes(), (self.bin / "kyler").read_bytes())
+        self.assertIn(package.digest(installer), (output / "SHA256SUMS").read_text())
         self.assertIn(package.digest(archive), (output / "SHA256SUMS").read_text())
         with tarfile.open(archive) as bundle:
             prefix = archive.name[:-7]

@@ -3,7 +3,8 @@ pub mod approval;
 pub mod artifacts;
 pub mod attachments;
 pub mod context;
-mod diagnostics;
+#[doc(hidden)]
+pub mod diagnostics;
 pub mod environment;
 pub mod mcp;
 pub mod memory;
@@ -35,5 +36,3 @@ pub use tools::{
     CompressedToolOutput, ParallelToolContext, Tool, ToolBox, ToolConcurrency, ToolContext,
     ToolDefinition, ToolExecutionMode, ToolKind, ToolOutputBudget,
 };
-
-pub mod thread;

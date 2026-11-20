@@ -63,6 +63,7 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LlmSettings {
+    pub protocol: kyler_provider::WireProtocol,
     pub adapter: kyler_provider::AdapterKind,
     pub discover_models: bool,
     pub output_token_parameter: kyler_provider::OutputTokenParameter,
@@ -78,6 +79,7 @@ impl Default for LlmSettings {
         Self {
             adapter: Default::default(),
             discover_models: true,
+            protocol: Default::default(),
             output_token_parameter: Default::default(),
             reasoning_effort: None,
             capabilities: Default::default(),

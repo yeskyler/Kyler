@@ -1,13 +1,16 @@
-//! Shared Chat Completions transport and wire decoding for compatible adapters.
+//! Per-execution model transport with Chat Completions and Responses decoding.
+use crate::WireProtocol;
 use async_openai::{
     Client,
     config::OpenAIConfig,
     error::OpenAIError,
     types::chat::{ChatCompletionStreamResponseDelta, CompletionUsage, FinishReason},
 };
-use futures::Stream;
+use futures::{StreamExt, stream::BoxStream};
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub type ChatClient = Client<OpenAIConfig>;
 pub fn client(base_url: &str, api_key: &str) -> ChatClient {
@@ -16,6 +19,21 @@ pub fn client(base_url: &str, api_key: &str) -> ChatClient {
             .with_api_base(base_url)
             .with_api_key(api_key),
     )
+}
+/// Owned by one Agent execution; opaque provider state never crosses sessions.
+pub struct ModelSession {
+    pub(crate) sdk: ChatClient,
+    protocol: WireProtocol,
+    pub(crate) continuation: Arc<Mutex<crate::responses::Continuation>>,
+}
+impl ModelSession {
+    pub fn new(sdk: ChatClient, protocol: WireProtocol) -> Self {
+        Self {
+            sdk,
+            protocol,
+            continuation: Arc::new(Mutex::new(Default::default())),
+        }
+    }
 }
 #[derive(Deserialize)]
 pub struct ModelChunk {
@@ -37,14 +55,24 @@ pub struct ModelDelta {
     pub reasoning: Option<String>,
 }
 pub async fn stream(
-    client: &ChatClient,
+    client: &ModelSession,
     request: Value,
-) -> Result<impl Stream<Item = Result<ModelChunk, OpenAIError>> + Unpin + use<>, OpenAIError> {
-    client
-        .chat()
-        .create_stream_byot::<_, ModelChunk>(request)
-        .await
+) -> Result<BoxStream<'static, Result<ModelChunk, OpenAIError>>, OpenAIError> {
+    if client.protocol == WireProtocol::Responses {
+        crate::responses::stream(client, request).await
+    } else {
+        Ok(client
+            .sdk
+            .chat()
+            .create_stream_byot::<_, ModelChunk>(request)
+            .await?
+            .boxed())
+    }
 }
-pub async fn complete(client: &ChatClient, request: Value) -> Result<Value, OpenAIError> {
-    client.chat().create_byot(request).await
+pub async fn complete(client: &ModelSession, request: Value) -> Result<Value, OpenAIError> {
+    if client.protocol == WireProtocol::Responses {
+        crate::responses::complete(client, request).await
+    } else {
+        client.sdk.chat().create_byot(request).await
+    }
 }

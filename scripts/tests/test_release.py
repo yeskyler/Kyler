@@ -39,6 +39,10 @@ class ReleaseTests(unittest.TestCase):
             item = tarfile.TarInfo(self.name[:-7] + "/bundle.json")
             item.size = len(body)
             archive.addfile(item, io.BytesIO(body))
+            executable = b"fixture-installer"
+            binary = tarfile.TarInfo(self.name[:-7] + "/bin/kyler")
+            binary.size = len(executable)
+            archive.addfile(binary, io.BytesIO(executable))
             license_body = (self.root / "LICENSE").read_bytes()
             license_item = tarfile.TarInfo(self.name[:-7] + "/LICENSE")
             license_item.size = len(license_body)
@@ -53,6 +57,19 @@ class ReleaseTests(unittest.TestCase):
         with (self.dist / self.name).open("ab") as source:
             source.write(b"corrupted")
         with self.assertRaisesRegex(ValueError, "Checksum"):
+            release.assets(self.dist, "0.1.0", "commit-id")
+
+    def test_installer_is_published_only_when_it_matches_the_bundle(self):
+        installer = self.dist / "kyler-installer-v0.1.0-aarch64-apple-darwin"
+        installer.write_bytes(b"fixture-installer")
+        sums = self.dist / "SHA256SUMS"
+        sums.write_text(sums.read_text()+hashlib.sha256(installer.read_bytes()).hexdigest()+"  "+installer.name+"\n")
+        assets, manifest = release.assets(self.dist, "0.1.0", "commit-id")
+        self.assertIn(installer, assets)
+        self.assertIn(installer.name, manifest)
+        installer.write_bytes(b"different-installer")
+        sums.write_text(sums.read_text().splitlines()[0]+"\n"+hashlib.sha256(installer.read_bytes()).hexdigest()+"  "+installer.name+"\n")
+        with self.assertRaisesRegex(ValueError, "differs from its verified bundle"):
             release.assets(self.dist, "0.1.0", "commit-id")
 
     def test_wrong_bundle_version_is_rejected_and_installer_is_not_required(self):

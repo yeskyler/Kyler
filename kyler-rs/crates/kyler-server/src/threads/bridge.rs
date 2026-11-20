@@ -4,18 +4,15 @@ use crate::runs::{
     events::{Entry, prefix},
     persistence,
 };
-
 use std::{sync::Arc, time::Duration};
 
-use kyler_core::{
-    Agent, Session,
-    runtime::UserTurn,
-    thread::{HostedTurn, ThreadEvent},
-};
+use kyler_core::{Agent, Session, runtime::UserTurn};
+use kyler_gateway::thread::{HostedTurn, ThreadEvent};
 use kyler_protocol::api::{ApiErrorBody, event::EventPayload, run::RunStatus};
 
 fn failure(code: &str, message: &str) -> ApiErrorBody {
     ApiErrorBody {
+        details: None,
         code: code.into(),
         message: message.into(),
     }

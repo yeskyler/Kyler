@@ -299,3 +299,24 @@ execution behind its `Host` trait and perform core composition in the CLI. A
 prompt handler must spawn connection-owned work so permission responses and
 `session/cancel` remain receivable. Never log raw protocol frames or model keys.
 See [ACP integration](acp.md) for capabilities, storage and test commands.
+
+For installer work from source, use the built CLI as the trusted bootstrap:
+
+```sh
+KYLER_INSTALLER_BINARY="$PWD/kyler-rs/target/debug/kyler" sh scripts/install.sh --bundle /path/to/bundle.tar.gz
+```
+
+Use a temporary HOME when testing; the CLI accepts both directories and archives.
+
+## Gateway and provider validation
+
+`kyler-gateway` hosts shared channel operations above the core execution loop.
+Run `cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-gateway` after changing
+thread operations, cancellation, or channel event projection. Provider tests and
+the core Responses fixture cover protocol routing and complete tool continuations
+without credentials or paid model calls. Local fixture tests need loopback sockets.
+
+The installer uses a pinned local `inquire` patch under `kyler-rs/vendor/inquire`.
+Its opt-in `compact-options` feature removes the Select gutter for empty prefixes;
+selection uses terminal foreground colors, with a plain-terminal `Selected:` fallback.
+Keep the upstream license and patch notes when updating this dependency.

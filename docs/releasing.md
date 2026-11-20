@@ -183,3 +183,12 @@ Deploy `scripts/install.sh` separately as `/usr/share/caddy/install.sh`. Caddy m
 allow `/install.sh` and `/releases/*`; directory listing is not required. The GitHub
 publisher does not deploy files to this server. Installation prefers the server and
 falls back to GitHub for the same selected version.
+
+### CLI installer assets
+
+Native packaging also emits `kyler-installer-vVERSION-TARGET` and includes its
+SHA256 in `SHA256SUMS`. Publish it beside its native archive. Release validation
+checks that it is byte-identical to the archive's `bin/kyler`; artifact collection
+and incremental uploads include both files. The shell bootstrap downloads this
+executable before handing all bundle operations and UI to the CLI. Offline users
+should keep the executable, checksum manifest and archive together.

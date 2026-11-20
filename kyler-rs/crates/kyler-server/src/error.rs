@@ -17,6 +17,7 @@ impl ApiError {
         Self {
             status,
             body: ApiErrorBody {
+                details: None,
                 code: code.into(),
                 message: message.into(),
             },

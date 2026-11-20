@@ -1,3 +1,4 @@
+import { requestFailureMessage, type RequestFailure } from "./errors.ts";
 import { randomUuid } from "./random-uuid.ts";
 import { upsertCompaction, settleCompactions } from "./compaction.ts";
 import type { QuestionRecord } from "./questions.ts";
@@ -7,7 +8,7 @@ import type {
   ChatModelRunResult,
   ThreadAssistantMessagePart,
 } from "@assistant-ui/react";
-import { readEvents, type Approval } from "./events.ts";
+import { readEvents, type Approval, type KylerEvent } from "./events.ts";
 
 export class KylerApiError extends Error {
   readonly status: number;
@@ -39,7 +40,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     if (response.status === 401) redirectToLogin();
     const error = await response.json().catch(() => ({}));
     throw new KylerApiError(
-      error.message ?? error.error?.message ?? `Kyler request failed (${response.status}).`,
+      requestFailureMessage(
+        error.message
+          ? error
+          : (error.error ?? { message: `Kyler request failed (${response.status}).` }),
+      ),
       response.status,
     );
   }
@@ -89,7 +94,11 @@ export function attachments(reference: SessionReference): AttachmentAdapter {
   };
 }
 
-async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => void) {
+async function* followRun(
+  run: string,
+  signal: AbortSignal,
+  onReconnect?: () => void,
+): AsyncGenerator<KylerEvent> {
   let cursor = 0;
   let retries = 0;
   let expiredReplays = 0;
@@ -110,7 +119,7 @@ async function* followRun(run: string, signal: AbortSignal, onReconnect?: () => 
           status: string;
           last_event_seq: number;
           output: string | null;
-          error?: { message: string };
+          error?: RequestFailure;
           execution_id: string | null;
           finished_at: number | null;
         }>(`runs/${run}`, { signal });
@@ -490,11 +499,7 @@ export function chatAdapter(
             terminal = true;
             settleTools(false);
             yield update();
-            throw new Error(
-              typeof event.error === "string"
-                ? event.error
-                : (event.error?.message ?? "Kyler run failed."),
-            );
+            throw new Error(requestFailureMessage(event.error));
           } else if (event.type === "run_cancelled") {
             finishedAt = event.timestamp_ms ?? Date.now();
             terminal = true;

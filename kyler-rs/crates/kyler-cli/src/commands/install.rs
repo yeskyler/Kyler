@@ -1,13 +1,16 @@
-//! Local installation transaction. The shell bootstrap only downloads and unpacks bundles.
+//! CLI-owned acquisition, verification, installation and configuration flow.
 mod bundle;
 mod dependencies;
+mod source;
+
+use super::ui::{self, Progress};
 
 use super::configure;
 use crate::{CliError, Result};
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write,
+    io::{IsTerminal, Write},
     path::{Path, PathBuf},
     process::Output,
 };
@@ -145,11 +148,6 @@ async fn checked_output(command: &mut Command, log: &mut File, failure: &str) ->
     log.write_all(&result.stdout).map_err(CliError::io)?;
     log.write_all(&result.stderr).map_err(CliError::io)?;
     if !result.status.success() {
-        eprint!(
-            "{}{}",
-            String::from_utf8_lossy(&result.stdout),
-            String::from_utf8_lossy(&result.stderr)
-        );
         return Err(CliError::new(3, failure));
     }
     Ok(result)
@@ -283,7 +281,6 @@ impl Transaction {
         Ok(())
     }
     async fn rollback(&self) -> Result<()> {
-        eprintln!("Installation failed; restoring the previous installation...");
         if self.binary.is_file() {
             self.lifecycle(false, &["stop"]).await.map_err(|e| CliError::new(3, format!("Cleanup is not confirmed: {e}. Inspect kyler service status and logs before retrying.")))?;
         }
@@ -303,76 +300,188 @@ impl Transaction {
         if self.old_running {
             self.lifecycle(false, &["start"]).await?;
         }
-        eprintln!("Previous installation restored.");
+
         Ok(())
+    }
+}
+#[derive(Clone, Copy)]
+pub(super) struct Options {
+    pub start: Option<bool>,
+    pub configure: bool,
+    pub auto_configure: bool,
+    pub non_interactive: bool,
+}
+impl Options {
+    fn interactive_setup(self) -> bool {
+        self.auto_configure
+            && self.start != Some(false)
+            && !self.non_interactive
+            && std::io::stdin().is_terminal()
+            && ui::terminal_controls()
     }
 }
 pub async fn execute(
     explicit: Option<&Path>,
-    source: &Path,
-    no_start: bool,
-    no_configure: bool,
-    non_interactive: bool,
+    source: Option<&Path>,
+    version: Option<&str>,
+    options: Options,
 ) -> Result<()> {
+    let config = configure::config_path(explicit)?;
+    let log = tempfile::NamedTempFile::new().map_err(CliError::io)?;
+    let mut diagnostics = log.reopen().map_err(CliError::io)?;
+    let mut progress = Progress::new();
+    let result = async {
+        let prepared = tokio::select! {
+            signal = tokio::signal::ctrl_c() => {
+                signal.map_err(CliError::io)?;
+                return Err(CliError::new(130, "Installation cancelled."));
+            }
+            prepared = source::prepare(source, version, &mut diagnostics, &mut progress) => prepared?,
+        };
+        execute_inner(
+            &config,
+            &prepared.root,
+            options,
+            &mut diagnostics,
+            &mut progress,
+        )
+        .await
+    }
+    .await;
+    if let Err(error) = &result {
+        let _ = writeln!(diagnostics, "{error}");
+    }
+    let logs = config.parent().unwrap().join("logs");
+    let log_path = logs.join("install.log");
+    let saved = private_directory(&logs)
+        .and_then(|_| configure::publish(&log_path, &fs::read(log.path()).map_err(CliError::io)?));
+    match result {
+        Ok((needs_setup, restore_on_cancel)) => {
+            progress.begin("Configure Kyler");
+            if options.interactive_setup() {
+                progress.pause();
+                eprintln!("{} Configure Kyler", ui::paint("▣", ui::Tone::Active));
+                let binary = std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .unwrap()
+                    .join(".local/bin/kyler");
+                let status = Command::new(&binary)
+                    .arg("--config")
+                    .arg(&config)
+                    .arg("configure")
+                    .env("KYLER_INSTALL_SETUP", "1")
+                    .status()
+                    .await
+                    .map_err(CliError::io)?;
+                if status.success() {
+                    progress.dismiss();
+                } else if status.code() == Some(130) {
+                    progress.skipped("skipped; run kyler configure");
+                    if restore_on_cancel {
+                        progress.begin("Restore services");
+                        let path = std::env::var_os("PATH").unwrap_or_default();
+                        checked_output(
+                            service_command(&binary, &config, &path)
+                                .args(["--json", "service", "start"]),
+                            &mut diagnostics,
+                            "Configuration cancelled; service restoration failed.",
+                        )
+                        .await?;
+                        configure::publish(
+                            &log_path,
+                            &fs::read(log.path()).map_err(CliError::io)?,
+                        )?;
+                        progress.complete();
+                    }
+                } else {
+                    progress.dismiss();
+                    return Err(CliError::new(
+                        status
+                            .code()
+                            .and_then(|code| u8::try_from(code).ok())
+                            .unwrap_or(1),
+                        "Setup did not finish; Kyler remains installed. Run kyler configure to retry.",
+                    ));
+                }
+            } else if !needs_setup {
+                progress.complete();
+            } else {
+                progress.skipped("run kyler configure");
+            }
+            if let Err(error) = saved {
+                eprintln!("Installation succeeded, but diagnostics could not be saved: {error}");
+            }
+            Ok(())
+        }
+        Err(error) => {
+            progress.fail();
+            let log_path = if saved.is_ok() {
+                log_path
+            } else {
+                let (file, path) = log.keep().map_err(|e| CliError::io(e.error))?;
+                drop(file);
+                path
+            };
+            Err(CliError::new(
+                error.code,
+                format!(
+                    "{}\nLog: {}",
+                    error
+                        .message
+                        .lines()
+                        .next()
+                        .unwrap_or("Installation failed."),
+                    log_path.display()
+                ),
+            ))
+        }
+    }
+}
+async fn execute_inner(
+    config: &Path,
+    source: &Path,
+    options: Options,
+    log: &mut File,
+    progress: &mut Progress,
+) -> Result<(bool, bool)> {
     let source = source.canonicalize().map_err(CliError::io)?;
     let manifest = bundle::verify(&source)?;
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .ok_or_else(|| CliError::new(2, "HOME must be an absolute directory."))?;
-    let config = configure::config_path(explicit)?;
     if config.is_dir() {
         return Err(CliError::new(2, "Configuration path is a directory."));
     }
     let versions = home.join(".local/share/kyler/versions");
     private_directory(versions.parent().unwrap())?;
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
+    let mut open = OpenOptions::new();
+    open.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        open.mode(0o600);
     }
-    let lock = options
+    let lock = open
         .open(versions.parent().unwrap().join("install.lock"))
         .map_err(CliError::io)?;
     lock.try_lock()
         .map_err(|_| CliError::new(3, "Another installation is in progress."))?;
-    let environment = dependencies::Environment::current(non_interactive)?;
-    let mut transaction = Transaction::capture(&home, config, environment.path.clone())?;
-    let log = tempfile::NamedTempFile::new().map_err(CliError::io)?;
-    let mut diagnostics = log.reopen().map_err(CliError::io)?;
-    println!(
-        "\nKyler · Install\n\nInstall location: {}\nConfiguration: {}",
-        home.join(".local/share/kyler").display(),
-        transaction.config.display()
-    );
-    let result = install(
+    let environment = dependencies::Environment::current(options.non_interactive)?;
+    let mut transaction = Transaction::capture(&home, config.into(), environment.path.clone())?;
+    let needs_setup = transaction.old_config.is_none() && !options.configure;
+    install(
         &source,
         &manifest,
         &mut transaction,
         &versions,
-        &mut diagnostics,
-        no_start,
-        no_configure,
-        non_interactive,
+        log,
+        options,
         environment,
+        progress,
     )
-    .await;
-    if let Err(error) = &result {
-        let _ = writeln!(diagnostics, "{error}");
-    }
-    // Only environment diagnostics are retained; never write wizard answers or service tokens.
-    if !transaction.config.parent().unwrap().is_file() {
-        let logs = transaction.config.parent().unwrap().join("logs");
-        if private_directory(&logs).is_ok() {
-            let _ = configure::publish(
-                &logs.join("install.log"),
-                &fs::read(log.path()).unwrap_or_default(),
-            );
-        }
-    }
-    result
+    .await?;
+    Ok((needs_setup, transaction.old_running))
 }
 async fn install(
     source: &Path,
@@ -380,11 +489,11 @@ async fn install(
     tx: &mut Transaction,
     versions: &Path,
     log: &mut File,
-    no_start: bool,
-    no_configure: bool,
-    non_interactive: bool,
+    options: Options,
     mut environment: dependencies::Environment,
+    progress: &mut Progress,
 ) -> Result<()> {
+    progress.begin("Check environment");
     // Execute only the private verified copy, not a mutable download directory.
     private_directory(versions)?;
     let verified = tempfile::Builder::new()
@@ -402,12 +511,12 @@ async fn install(
         &environment.path,
     )
     .map_err(CliError::io)?;
-    println!("\n[1/5] Check environment and dependencies");
+
     let mut dependency_log = log.try_clone().map_err(CliError::io)?;
     tokio::task::spawn_blocking(move || environment.prepare(&mut dependency_log))
         .await
         .map_err(|e| CliError::new(3, e.to_string()))??;
-    println!("\n[2/5] Check application and sandbox");
+
     let candidate_binary = source.join("bin/kyler");
     let version = checked_output(
         command(&candidate_binary, &tx.path).arg("--version"),
@@ -431,10 +540,13 @@ async fn install(
         "Bundled Node.js cannot run on this machine; previous installation was kept.",
     )
     .await?;
-    println!("Checking native sandbox with the new binary as the current user...");
-    checked_output(command(&candidate_binary, &tx.path).arg("doctor"), log, "Sandbox self-check failed. Previous installation and configuration were kept. Inspect install.log and run kyler doctor; no host security settings were changed.").await?;
-    println!("Sandbox ready.");
-    println!("\n[3/5] Configure installation");
+    checked_output(
+        command(&candidate_binary, &tx.path).arg("doctor"),
+        log,
+        "Sandbox verification failed.",
+    )
+    .await?;
+    progress.complete();
     private_directory(tx.config.parent().unwrap())?;
     let seed = tempfile::Builder::new()
         .prefix(".config-seed-")
@@ -445,28 +557,28 @@ async fn install(
         .tempfile_in(tx.config.parent().unwrap())
         .map_err(CliError::io)?;
     let baseline = if tx.old_config.is_some() {
-        println!("Preserved {}", tx.config.display());
         tx.config.as_path()
     } else {
         fs::write(seed.path(), DEFAULT_CONFIG).map_err(CliError::io)?;
         seed.path()
     };
-    if !no_configure {
+    if options.configure {
+        progress.begin("Configure model");
+        progress.pause();
         if let Err(error) = configure::configure(
             Some(baseline),
-            non_interactive,
+            options.non_interactive,
             true,
             true,
             Some(draft.path()),
             false,
+            false,
         )
         .await
         {
-            if error.code == 130 {
-                eprintln!("Setup cancelled; installed binary and configuration were kept.");
-            }
             return Err(error);
         }
+        progress.complete();
     } else {
         fs::write(
             draft.path(),
@@ -476,14 +588,24 @@ async fn install(
         )
         .map_err(CliError::io)?;
     }
+    progress.begin("Install Kyler");
     private_directory(versions)?;
-    let destination = versions.join(format!("v{version}-{}", &manifest[..12]));
+    let mut destination = versions.join(format!("v{version}-{}", &manifest[..12]));
     if destination.exists() {
-        if bundle::verify(&destination)? != manifest {
-            return Err(CliError::new(
-                2,
-                "Installed bundle checksum differs from source.",
-            ));
+        if !bundle::verify(&destination).is_ok_and(|installed| installed == manifest) {
+            // Running applications may create caches inside an installed bundle.
+            // Never overwrite that directory: rollback must retain its original target.
+            writeln!(
+                log,
+                "Existing version differs from its manifest; staging a clean replacement."
+            )
+            .map_err(CliError::io)?;
+            let replacement = tempfile::Builder::new()
+                .prefix(&format!("v{version}-{}-", &manifest[..12]))
+                .tempdir_in(versions)
+                .map_err(CliError::io)?;
+            fs::rename(verified.path(), replacement.path()).map_err(CliError::io)?;
+            destination = replacement.keep();
         }
     } else {
         fs::rename(verified.path(), &destination).map_err(CliError::io)?;
@@ -491,14 +613,13 @@ async fn install(
 
     private_directory(tx.binary.parent().unwrap())?;
     let activation = async {
-        println!("\n[4/5] Activate installation");
         tx.validate_unchanged()?;
         tx.stop_previous().await?;
         tx.touched = true;
-        if no_configure {
-            configure::publish(&tx.config, &fs::read(draft.path()).map_err(CliError::io)?)?;
-        } else {
+        if options.configure {
             configure::apply(Some(&tx.config), draft.path())?;
+        } else if tx.old_config.is_none() {
+            configure::publish(&tx.config, &fs::read(draft.path()).map_err(CliError::io)?)?;
         }
         atomic_link(&destination, &tx.current)?;
         atomic_link(&tx.current.join("bin/kyler"), &tx.binary)?;
@@ -511,27 +632,18 @@ async fn install(
             startup.extend_from_slice(format!("\n# Kyler\n{PATH_LINE}\n").as_bytes());
             configure::publish(&tx.startup, &startup)?;
         }
-        println!(
-            "Installed kyler {version}\nPATH ready for new terminals ({}).\nFor this terminal, run:\n  {PATH_LINE}",
-            tx.startup.display()
-        );
-        println!("\n[5/5] Start and check services");
-        if !no_start {
-            println!("Starting services...");
-            tx.lifecycle(true, &["start", "--restart"]).await.map_err(|e| CliError::new(3, format!("{e}\nServices could not start. Check kyler service status, ~/.kyler/logs/server.log and ~/.kyler/logs/web.log.")))?;
-            println!("\nKyler · Service status and management\n");
-            let status = tx.lifecycle(false, &["status"]).await?;
-            print!("{}", String::from_utf8_lossy(&status.stdout));
-            eprint!("{}", String::from_utf8_lossy(&status.stderr));
-            match tx.lifecycle(false, &["token"]).await {
-                Ok(token) => println!(
-                    "\nWeb token: {}",
-                    String::from_utf8_lossy(&token.stdout).trim()
-                ),
-                Err(_) => println!("Web token unavailable. Run kyler configure --web."),
-            }
-        } else {
-            println!("\nKyler · Service status and management\n\nServices not started.");
+        progress.complete();
+        if options.start.unwrap_or(tx.old_running) && !options.interactive_setup() {
+            progress.begin(if tx.old_running {
+                "Restore services"
+            } else {
+                "Start services"
+            });
+            let result = tx.lifecycle(true, &["start", "--restart"]).await?;
+            log.write_all(&result.stdout)
+                .and_then(|_| log.write_all(&result.stderr))
+                .map_err(CliError::io)?;
+            progress.complete();
         }
         Ok(())
     };
@@ -552,24 +664,46 @@ async fn install(
     let result = activation.await;
     if let Err(error) = result {
         if tx.touched {
-            tx.rollback().await.map_err(|recovery| {
-                CliError::new(
+            progress.fail();
+            progress.begin("Restore previous installation");
+            if let Err(recovery) = tx.rollback().await {
+                return Err(CliError::new(
                     3,
-                    format!("{error}\nAutomatic recovery needs attention: {recovery}"),
-                )
-            })?;
+                    format!(
+                        "Installation failed and recovery needs attention.\n{error}\nRecovery: {recovery}"
+                    ),
+                ));
+            }
+            progress.complete();
         }
         return Err(error);
     }
-    println!(
-        "\nInstallation complete.\n\nConfiguration: {}\nInstall log: {}\n\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n  Token:    kyler service token\n  Diagnose: kyler doctor\n  Logs:     kyler logs backend\n  Web logs: kyler logs web\n\nRun in your project:\n  kyler tui",
-        tx.config.display(),
-        tx.config
-            .parent()
-            .unwrap()
-            .join("logs/install.log")
-            .display()
-    );
+    // Cleanup happens only after activation and service recovery can no longer roll back.
+    for entry in fs::read_dir(versions).map_err(CliError::io)? {
+        let entry = entry.map_err(CliError::io)?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if path == destination
+            || !entry.file_type().map_err(CliError::io)?.is_dir()
+            || !name.strip_prefix('v').is_some_and(|rest| {
+                rest.starts_with(|c: char| c.is_ascii_digit()) && rest.contains('-')
+            })
+            || !path.join("SHA256SUMS").is_file()
+            || !path.join("bin/kyler").is_file()
+        {
+            continue;
+        }
+        if let Err(error) = fs::remove_dir_all(&path) {
+            writeln!(
+                log,
+                "Old version cleanup failed: {}: {error}",
+                path.display()
+            )
+            .map_err(CliError::io)?;
+            eprintln!("Old version cleanup was incomplete; see the installation log.");
+        }
+    }
     Ok(())
 }
 

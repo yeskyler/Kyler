@@ -1,4 +1,5 @@
 //! Interactive model discovery and capability-aware setup; never sends inference requests.
+use super::super::ui;
 use super::input::{ModelChoice, Prompts};
 use crate::{CliError, Result};
 
@@ -50,6 +51,7 @@ impl Wizard {
         let provider = if names.is_empty() {
             ProviderSettings {
                 adapter: config.llm.adapter,
+                protocol: config.llm.protocol,
                 base_url: config.llm.base_url.clone(),
                 api_key: config.llm.api_key.clone(),
                 api_key_env: None,
@@ -132,18 +134,18 @@ impl Wizard {
                         .filter(|m| adapter.selectable_model(&m.id))
                         .collect();
                     self.discovered = Some(self.models.clone());
-                    eprintln!("◇ Models: {} available", self.models.len());
+                    ui::field("Models", &format!("{} available", self.models.len()));
                 }
-                Ok(Err(error)) => eprintln!(
-                    "◇ Model directory unavailable: {error}. Choose retry, cached models, or manual entry."
-                ),
-                Err(_) => eprintln!(
-                    "◇ Model directory timed out. Choose retry, cached models, or manual entry."
+                Ok(Err(error)) => ui::warning(&format!(
+                    "Model directory unavailable: {error}. Choose retry, cached models, or manual entry."
+                )),
+                Err(_) => ui::warning(
+                    "Model directory timed out. Choose retry, cached models, or manual entry.",
                 ),
             }
         }
         if self.discovered.is_none() && !self.cached.is_empty() {
-            eprintln!("◇ Using {} cached model IDs", self.cached.len());
+            ui::field("Models", &format!("{} cached", self.cached.len()));
         }
         self.directory_for = Some((self.name.clone(), self.provider.clone()));
         Ok(())
@@ -210,6 +212,9 @@ impl Wizard {
                     .provider("Provider", wizard_adapter(&self.provider))
                     .map(|kind| {
                         self.provider.base_url = default_url(kind, &self.provider.base_url);
+                        if self.provider.adapter != kind {
+                            self.provider.protocol = Default::default();
+                        }
                         self.provider.adapter = kind;
                         self.step = if kind == AdapterKind::Generic {
                             Step::Url
@@ -328,6 +333,7 @@ impl Wizard {
             config.llm.base_url = self.provider.base_url.clone();
             config.llm.api_key = self.provider.api_key.clone();
             config.llm.adapter = self.provider.adapter;
+            config.llm.protocol = self.provider.protocol;
             if let Some(window) = self.window {
                 config.context.auto_model_window = window.is_none();
                 if let Some(n) = window {
@@ -388,16 +394,21 @@ fn window_policy(config: &AppConfig) -> (ContextPolicy, bool) {
         (policy, config.context.auto_model_window)
     }
 }
-pub(super) fn review(config: &AppConfig) -> Result<()> {
+pub(super) fn review(config: &AppConfig, advanced: bool) -> Result<()> {
     let settings = config.effective_models();
     let profile = settings
         .profiles
         .get(&settings.default)
         .ok_or_else(|| CliError::new(2, "Select a model before saving"))?;
     let provider = &settings.providers[&profile.provider];
-    eprintln!(
-        "\n┌  Review setup\n│  API URL: {}\n│  API key: Configured",
-        provider.base_url
+    eprintln!("Review setup");
+    ui::field(
+        "Provider",
+        match Adapter::resolve(provider.adapter, &provider.base_url).0 {
+            AdapterKind::Openai => "OpenAI",
+            AdapterKind::Siliconflow => "SiliconFlow",
+            _ => "Custom（OpenAI Completion）",
+        },
     );
     summary(
         Adapter::resolve(provider.adapter, &provider.base_url),
@@ -406,6 +417,7 @@ pub(super) fn review(config: &AppConfig) -> Result<()> {
         profile.reasoning_effort,
         &window_policy(config).0,
         window_policy(config).1,
+        advanced,
     )
 }
 fn wizard_adapter(provider: &ProviderSettings) -> AdapterKind {
@@ -439,6 +451,7 @@ fn summary(
     effort: Option<kyler_protocol::api::models::ThinkingLevel>,
     policy: &ContextPolicy,
     automatic: bool,
+    advanced: bool,
 ) -> Result<()> {
     let inferred = adapter.capabilities(model, effort);
     let capacity = overrides.max_context_tokens.or(inferred.max_context_tokens);
@@ -452,7 +465,10 @@ fn summary(
             format!("Invalid context budget: {e}. Use configure --advanced to adjust it."),
         )
     })?;
-    eprintln!("Selected model: {model}");
+    ui::field("Model", model);
+    if !advanced {
+        return Ok(());
+    }
     match capacity {
         Some(tokens) => eprintln!("Model context capacity: {tokens} tokens (capability metadata)."),
         None => eprintln!("Model context capacity: unknown."),

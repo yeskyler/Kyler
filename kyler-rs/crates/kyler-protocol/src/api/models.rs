@@ -1,6 +1,16 @@
 //! Credential-free model catalog and session selection API.
 use serde::{Deserialize, Serialize};
 
+/// A provider's wire API, independently selectable from its branding.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WireProtocol {
+    #[default]
+    Auto,
+    ChatCompletions,
+    Responses,
+}
+
 /// None means undeclared; existing providers remain compatible until configured.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -32,6 +42,8 @@ pub enum Tokenizer {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelInfo {
+    #[serde(default)]
+    pub protocol: WireProtocol,
     #[serde(default)]
     pub capabilities: ModelCapabilities,
     pub profile: String,

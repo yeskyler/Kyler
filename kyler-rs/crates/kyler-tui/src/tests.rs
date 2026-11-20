@@ -87,6 +87,7 @@ fn model_failure() -> AgentEvent {
     info.status = RunStatus::Failed;
     info.output = None;
     info.error = Some(ApiErrorBody {
+        details: None,
         code: "model_image_unsupported".into(),
         message: "The selected model does not support image input. Use /model to select a vision-capable model, then resend.".into(),
     });

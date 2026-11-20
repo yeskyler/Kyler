@@ -1,6 +1,7 @@
 [llm]
 # auto detects official hosts; set openai/siliconflow/generic for a proxy.
 # adapter = "auto"
+# protocol = "auto" # auto / chat_completions / responses; explicit for proxy endpoints
 # discover_models = true
 # output_token_parameter = "auto"
 base_url = "https://api.siliconflow.cn/v1"

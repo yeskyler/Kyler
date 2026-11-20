@@ -112,8 +112,10 @@ impl ModelRegistry {
                 Arc::new(ModelSnapshot {
                     adapter,
                     adapter_kind: provider.adapter,
+                    protocol_kind: provider.protocol,
                     discover_models: provider.discover_models,
                     info: ModelInfo {
+                        protocol: adapter.protocol(&profile.model, provider.protocol),
                         capabilities,
                         profile: name,
                         provider: profile.provider,

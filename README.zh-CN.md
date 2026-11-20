@@ -41,7 +41,7 @@ curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-按提示配置模型与访问方式。安装后打开显示的 Web 地址，使用自动生成的 token 登录。
+安装的最后一步会引导配置模型与访问方式，选择“Save and start”即可启动。后续可运行 `kyler configure` 重新配置。打开显示的 Web 地址，使用自动生成的 token 登录。
 也可以运行 `kyler tui` 使用终端界面。
 
 ```sh

@@ -21,15 +21,26 @@ pub struct Args {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Install a verified, unpacked release bundle and configure local services.
+    /// Install a complete release bundle and open setup as the final interactive step.
     Install {
-        /// Unpacked bundle containing bin/kyler, runtime/node, web/server.js and SHA256SUMS.
+        /// Local bundle directory or .tar.gz archive; omit to download a release.
         #[arg(long)]
-        bundle: PathBuf,
+        bundle: Option<PathBuf>,
+        /// Release version to download (default: latest).
+        #[arg(long, conflicts_with = "bundle")]
+        version: Option<String>,
+        /// Start services even on a first install (requires valid saved configuration).
+        #[arg(long, conflicts_with = "no_start")]
+        start: bool,
+        /// Prepare configuration before activation, including unattended installation.
+        #[arg(long, conflicts_with = "no_configure")]
+        configure: bool,
         #[arg(long)]
         no_start: bool,
         #[arg(long)]
         no_configure: bool,
+        #[arg(long, hide = true)]
+        bootstrap: bool,
         #[arg(long)]
         non_interactive: bool,
     },

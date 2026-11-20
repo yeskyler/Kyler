@@ -99,6 +99,7 @@ impl Client {
         let status = response.status().as_u16();
         let body = self.body(response).await?;
         let error = serde_json::from_slice::<ApiErrorBody>(&body).unwrap_or(ApiErrorBody {
+            details: None,
             code: format!("http_{status}"),
             message: "The server rejected the request.".into(),
         });

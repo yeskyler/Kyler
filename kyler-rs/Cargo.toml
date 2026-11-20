@@ -1,8 +1,10 @@
 [workspace]
 resolver = "3"
+exclude = ["vendor/inquire"]
 members = [
     "crates/kyler-protocol",
     "crates/kyler-core",
+    "crates/kyler-gateway",
     "crates/kyler-provider",
     "crates/kyler-mcp",
     "crates/kyler-skills",
@@ -24,11 +26,14 @@ version = "0.5.0"
 edition = "2024"
 
 [workspace.dependencies]
+tar = "0.4.44"
+flate2 = "1"
 pulldown-cmark = { version = "0.13.6", default-features = false }
 percent-encoding = "2.3.2"
 # local crates
 kyler-protocol = { path = "crates/kyler-protocol" }
 kyler-core = { path = "crates/kyler-core" }
+kyler-gateway = { path = "crates/kyler-gateway" }
 kyler-provider = { path = "crates/kyler-provider" }
 kyler-mcp = { path = "crates/kyler-mcp" }
 kyler-skills = { path = "crates/kyler-skills" }
@@ -45,9 +50,10 @@ kyler-scheduler = { path = "crates/kyler-scheduler" }
 kyler-evals = { path = "crates/kyler-evals" }
 
 # external crates
-inquire = { version = "=0.9.4", default-features = false }
+inquire = { version = "=0.9.4", default-features = false, features = ["compact-options"] }
+indicatif = "=0.18.6"
 rmcp = { version = "2.2.0", features = ["client","server","macros","transport-child-process","transport-io","transport-streamable-http-client-reqwest",]}
-async-openai = {version = "0.41.0", features = ["chat-completion","embedding","byot"]}
+async-openai = {version = "0.41.0", features = ["chat-completion","embedding","responses","byot"]}
 anyhow = "1.0.102"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.150"
@@ -91,3 +97,6 @@ croner = "4"
 # Installer validation hashes complete release bundles, including debug binaries.
 [profile.dev.package.sha2]
 opt-level = 3
+
+[patch.crates-io]
+inquire = { path = "vendor/inquire" }

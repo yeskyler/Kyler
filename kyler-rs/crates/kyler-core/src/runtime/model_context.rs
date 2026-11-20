@@ -17,13 +17,9 @@ use kyler_protocol::api::inspection::{
 };
 
 use anyhow::Result;
-use async_openai::{
-    Client,
-    config::OpenAIConfig,
-    types::chat::{
-        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-        ChatCompletionRequestSystemMessageArgs, ChatCompletionTools,
-    },
+use async_openai::types::chat::{
+    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    ChatCompletionRequestSystemMessageArgs, ChatCompletionTools,
 };
 
 impl Agent {
@@ -31,7 +27,7 @@ impl Agent {
         &self,
         session: &mut Session,
         tools: &[ChatCompletionTools],
-        client: &Client<OpenAIConfig>,
+        client: &kyler_provider::transport::ModelSession,
         stream: Option<&StreamControl>,
     ) -> Result<Vec<ChatCompletionRequestMessage>> {
         let store = ContextCompactor::new(self.context_policy.clone())?.with_tokenizer(

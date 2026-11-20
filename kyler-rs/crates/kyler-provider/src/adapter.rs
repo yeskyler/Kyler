@@ -21,9 +21,28 @@ pub enum OutputTokenParameter {
     MaxTokens,
     MaxCompletionTokens,
 }
+pub use kyler_protocol::api::models::WireProtocol;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Adapter(pub AdapterKind);
 impl Adapter {
+    pub fn protocol(self, model: &str, configured: WireProtocol) -> WireProtocol {
+        if configured != WireProtocol::Auto {
+            return configured;
+        }
+        if self.0 == AdapterKind::Openai
+            && (model.starts_with("gpt-5")
+                || model.starts_with("gpt-6")
+                || model.starts_with("o1")
+                || model.starts_with("o3")
+                || model.starts_with("o4"))
+        {
+            WireProtocol::Responses
+        } else {
+            WireProtocol::ChatCompletions
+        }
+    }
+
     pub fn resolve(kind: AdapterKind, base_url: &str) -> Self {
         if kind != AdapterKind::Auto {
             return Self(kind);
@@ -208,6 +227,31 @@ impl Adapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn protocol_selection_honors_provider_and_explicit_override() {
+        for model in ["gpt-5.6-sol", "gpt-6.1-sol", "o3"] {
+            assert_eq!(
+                Adapter(AdapterKind::Openai).protocol(model, WireProtocol::Auto),
+                WireProtocol::Responses
+            );
+            assert_eq!(
+                Adapter(AdapterKind::Generic).protocol(model, WireProtocol::Auto),
+                WireProtocol::ChatCompletions
+            );
+            assert_eq!(
+                Adapter(AdapterKind::Openai).protocol(model, WireProtocol::ChatCompletions),
+                WireProtocol::ChatCompletions
+            );
+        }
+        assert_eq!(
+            Adapter(AdapterKind::Generic).protocol("custom", WireProtocol::Responses),
+            WireProtocol::Responses
+        );
+        assert_eq!(
+            Adapter(AdapterKind::Siliconflow).protocol("deepseek", WireProtocol::Auto),
+            WireProtocol::ChatCompletions
+        );
+    }
     #[test]
     fn provider_projection_is_specific_and_exclusive() {
         for (kind, model, key) in [

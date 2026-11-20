@@ -36,7 +36,8 @@ impl Environment {
             .bundle
             .as_ref()
             .ok_or_else(|| CliError::new(2, "Verified runtime payload is missing."))?;
-        println!(
+        writeln!(
+            log,
             "Platform: {} {}",
             if self.host == Host::Macos {
                 "Darwin"
@@ -44,7 +45,8 @@ impl Environment {
                 "Linux"
             },
             std::env::consts::ARCH
-        );
+        )
+        .map_err(CliError::io)?;
         let mut tools = vec![(root.join("runtime/tools/rg"), vec!["--version"])];
         if self.host == Host::Linux {
             for name in [
@@ -109,17 +111,20 @@ impl Environment {
                 if !version.starts_with("ripgrep ") {
                     return Err(CliError::new(2, "Invalid bundled ripgrep."));
                 }
-                println!("{} (bundled)", version.lines().next().unwrap());
+                writeln!(log, "{} (bundled)", version.lines().next().unwrap())
+                    .map_err(CliError::io)?;
             }
         }
-        println!(
+        writeln!(
+            log,
             "Bundled tools ready. {} will be checked by real sandbox execution.",
             if self.host == Host::Macos {
                 "System Seatbelt"
             } else {
                 "Host kernel namespaces and security policy"
             }
-        );
+        )
+        .map_err(CliError::io)?;
         Ok(())
     }
 }

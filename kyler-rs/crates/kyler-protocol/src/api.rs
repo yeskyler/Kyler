@@ -24,8 +24,30 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiErrorBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<ModelFailureDetails>,
     pub code: String,
     pub message: String,
+}
+
+/// Credential-free request diagnostics shared by every channel.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModelFailureDetails {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<models::WireProtocol>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameter: Option<String>,
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 /// Effective runtime values; never includes credentials or model endpoint URLs.

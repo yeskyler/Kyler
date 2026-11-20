@@ -10,10 +10,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use tokio::sync::{Mutex, mpsc};
 
-use kyler_core::{
-    Session, SessionStore,
-    thread::{HostedThread, ThreadEvent, ThreadHandle, ThreadManager},
-};
+use kyler_core::{Session, SessionStore};
+use kyler_gateway::thread::{HostedThread, ThreadEvent, ThreadHandle, ThreadManager};
 
 #[derive(Clone)]
 pub(crate) struct CoreThread {

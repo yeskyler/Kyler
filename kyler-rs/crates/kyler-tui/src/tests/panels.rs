@@ -268,6 +268,7 @@ async fn model_menu_is_local_and_running_model_is_distinct_from_next_selection()
     assert!(state.model_open && state.model_busy && state.pending.is_none());
     assert!(state.entries.is_empty());
     let current = ModelInfo {
+        protocol: Default::default(),
         capabilities: Default::default(),
         profile: "first".into(),
         provider: "fixture".into(),
@@ -278,6 +279,7 @@ async fn model_menu_is_local_and_running_model_is_distinct_from_next_selection()
         output_tokens: 2048,
     };
     let next = ModelInfo {
+        protocol: Default::default(),
         capabilities: Default::default(),
         profile: "second".into(),
         model: "Next model".into(),
@@ -800,6 +802,7 @@ fn long_lists_keep_selection_visible_and_details_scroll_without_moving_history()
         default_profile: "0".into(),
         models: (0..50)
             .map(|n| ModelInfo {
+                protocol: Default::default(),
                 capabilities: Default::default(),
                 profile: n.to_string(),
                 provider: "fixture".into(),

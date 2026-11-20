@@ -25,7 +25,7 @@ pub async fn list(
         .load(&id)
         .await
         .map_err(ApiError::storage)?;
-    kyler_core::thread::projection::history(&session, cursor, limit)
+    kyler_gateway::thread::projection::history(&session, cursor, limit)
         .map(Json)
         .map_err(|error| ApiError::bad(&error.to_string()))
 }

@@ -92,7 +92,7 @@ impl RunManager {
 }
 
 #[cfg(test)]
-use kyler_core::thread::projection::tool_summary;
+use kyler_gateway::thread::projection::tool_summary;
 
 #[cfg(test)]
 mod presentation_tests {

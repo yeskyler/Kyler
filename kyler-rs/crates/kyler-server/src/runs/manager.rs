@@ -269,6 +269,7 @@ impl RunManager {
 }
 pub(super) fn public_error(code: &str, message: &str) -> ApiErrorBody {
     ApiErrorBody {
+        details: None,
         code: code.into(),
         message: message.into(),
     }

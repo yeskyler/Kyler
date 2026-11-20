@@ -1,4 +1,4 @@
-mod addresses;
+pub(super) mod addresses;
 mod web;
 
 use super::configure::config_path;

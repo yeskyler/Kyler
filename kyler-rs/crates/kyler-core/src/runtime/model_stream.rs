@@ -11,13 +11,9 @@ use crate::{
 use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{Context, Result};
-use async_openai::{
-    Client,
-    config::OpenAIConfig,
-    types::chat::{
-        ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls, ChatCompletionStreamOptions,
-        CreateChatCompletionRequest, FinishReason, FunctionCall,
-    },
+use async_openai::types::chat::{
+    ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls, ChatCompletionStreamOptions,
+    CreateChatCompletionRequest, FinishReason, FunctionCall,
 };
 use futures::StreamExt;
 
@@ -47,7 +43,7 @@ async fn read_model_chunk<S: futures::Stream + Unpin>(
 impl Agent {
     pub(super) async fn streaming_response(
         &self,
-        client: &Client<OpenAIConfig>,
+        client: &kyler_provider::transport::ModelSession,
         mut request: CreateChatCompletionRequest,
         session: &mut Session,
         events: &StreamControl,

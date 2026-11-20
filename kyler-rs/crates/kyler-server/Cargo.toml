@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+kyler-gateway.workspace = true
 async-trait.workspace = true
 percent-encoding.workspace = true
 kyler-core.workspace = true

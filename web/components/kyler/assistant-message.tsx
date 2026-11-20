@@ -500,7 +500,7 @@ export function AssistantMessage() {
       <MessagePrimitive.Error>
         <ErrorPrimitive.Root
           role="alert"
-          className="mt-4 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          className="mt-4 whitespace-pre-wrap break-words rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive"
         >
           <ErrorPrimitive.Message />
         </ErrorPrimitive.Root>

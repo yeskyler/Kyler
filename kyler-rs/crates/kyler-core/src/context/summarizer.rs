@@ -5,13 +5,9 @@ use crate::{
 
 use std::time::Duration;
 
-use async_openai::{
-    Client,
-    config::OpenAIConfig,
-    types::chat::{
-        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        CreateChatCompletionRequestArgs,
-    },
+use async_openai::types::chat::{
+    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+    CreateChatCompletionRequestArgs,
 };
 
 use kyler_config::OutputTokenParameter;
@@ -19,7 +15,7 @@ use kyler_protocol::prompts;
 
 pub(crate) struct ModelSummarizer<'a> {
     pub(crate) observer: Option<&'a dyn crate::runtime::observation::RuntimeObserver>,
-    pub(crate) client: &'a Client<OpenAIConfig>,
+    pub(crate) client: &'a kyler_provider::transport::ModelSession,
     pub(crate) output_tokens: u32,
     pub(crate) output_token_parameter: OutputTokenParameter,
     pub(crate) model: &'a str,
@@ -46,14 +42,18 @@ impl Summarizer for ModelSummarizer<'_> {
         if let Some(observer) = self.observer {
             observer.observe(crate::runtime::observation::RuntimeObservation::ModelRequestStarted);
         }
-        let response =
-            tokio::time::timeout(Duration::from_secs(60), self.client.chat().create(request))
-                .await
-                .map_err(|error| ModelError::wrap(error.into()))?
-                .map_err(|error| ModelError::wrap(error.into()))?;
+        let response = tokio::time::timeout(
+            Duration::from_secs(60),
+            kyler_provider::transport::complete(self.client, serde_json::to_value(request)?),
+        )
+        .await
+        .map_err(|error| ModelError::wrap(error.into()))?
+        .map_err(|error| ModelError::wrap(error.into()))?;
         if let Some(observer) = self.observer {
             observer.observe(crate::runtime::observation::RuntimeObservation::FirstModelEvent);
         }
+        let response: async_openai::types::chat::CreateChatCompletionResponse =
+            serde_json::from_value(response)?;
         let usage = response
             .usage
             .map(|u| (u.prompt_tokens, u.completion_tokens, u.total_tokens));

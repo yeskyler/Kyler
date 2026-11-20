@@ -73,6 +73,7 @@ impl Effects {
                         .send((
                             generation,
                             Event::Rejected(ApiErrorBody {
+                                details: None,
                                 code: "local_submission_failed".into(),
                                 message: error.to_string(),
                             }),

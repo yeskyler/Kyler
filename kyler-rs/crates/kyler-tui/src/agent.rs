@@ -9,10 +9,8 @@ use anyhow::{Context, Result};
 use tokio::sync::{Mutex, OnceCell, mpsc};
 
 use kyler_config::AppConfig;
-use kyler_core::{
-    runtime::UserTurn,
-    thread::{ThreadEvent, ThreadHandle, ThreadManager},
-};
+use kyler_core::runtime::UserTurn;
+use kyler_gateway::thread::{ThreadEvent, ThreadHandle, ThreadManager};
 use kyler_protocol::api::{
     attachments::AttachmentInfo,
     history::HistoryPage,

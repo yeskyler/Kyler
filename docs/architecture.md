@@ -14,12 +14,14 @@ flowchart TD
     Browser[Web browser] --> Next[Next.js server and API proxy]
     Next --> Server[Rust HTTP and SSE server]
     CLI[HTTP CLI commands] --> Client[kyler-client]
-    TUI[Terminal UI] --> Threads[In-process core ThreadManager]
+    TUI[Terminal UI] --> Threads[kyler-gateway ThreadManager]
+    ACP[ACP adapter] --> Threads
     Threads --> Runtime
     Client --> Server
     Server --> Threads
     Runtime[kyler-core runtime]
-    Runtime --> Model[Configured model provider]
+    Runtime --> Provider[kyler-provider: protocol and capability adaptation]
+    Provider --> Model[Configured model: Responses or Chat Completions]
     Runtime --> Tools[Tools and integrations]
     Tools --> Worker[Sandbox worker and managed processes]
     Server --> Store[Session store and Rollout]
@@ -42,7 +44,8 @@ and artifacts through their respective views.
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
 | `kyler-acp` | Official Agent Client Protocol v1 SDK transport, session routing, updates and permission requests |
 | `kyler-provider` | Provider adapters, model discovery, capability rules, request projection, stream decoding and error classification |
-| `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integration policy |
+| `kyler-gateway` | Channel-independent thread operations, turn admission, cancellation, preferences and event projection |
+| `kyler-core` | Agent runtime, tools, sessions, context, memory, sandbox, integration policy |
 | `kyler-store` | Shared SQLite infrastructure, scoped session/run indexes and UI preference persistence |
 | `kyler-skills` | Skill discovery, package validation, reviewed versions, caches, resources and package storage |
 | `kyler-mcp` | MCP protocol sessions, connection lifecycle, immutable catalogs, calls and local metadata search |
@@ -322,7 +325,7 @@ uses `kyler-client`, backend HTTP/SSE routes, service discovery, or service toke
 New sessions bind to the current directory. Resumed sessions retain their original
 workspace and must match the current host sandbox policy.
 
-`kyler-core/src/thread/` owns thread creation, bounded operation/event channels,
+`kyler-gateway/src/thread/` owns thread creation, bounded operation/event channels,
 turn execution, cancellation, preferences, and shutdown. `kyler-tui/src/agent.rs`
 adapts those operations and events to the terminal state. The existing core agent
 loop remains the only execution implementation. Local model configuration is
@@ -335,16 +338,16 @@ questions, and managed process records are scoped to the owning session. Exiting
 TUI cancels active work and awaits checkpoint and resource cleanup.
 
 Web retains its HTTP/SSE architecture and server-authorized project workspaces.
-The server attaches hosted sessions to the same core `ThreadManager`. Both adapters
+The server attaches hosted sessions to the same gateway `ThreadManager`. Both adapters
 submit `ThreadOp` for turns, cancellation, approvals, questions, model selection,
 and permission changes. Core owns execution, timeout accounting (excluding human
 waits), session checkpoints, and terminal events. A hosted turn includes an explicitly
 host-authorized agent/session and retains the service's admitted run ID as its operation ID.
 
-`kyler-core/src/thread/protocol.rs` defines operations and notifications with
+`kyler-gateway/src/thread/protocol.rs` defines operations and notifications with
 thread ID, operation ID, execution ID, and sequence number. `handle.rs` owns operation
 submission and read-only queries; `runner.rs` is shared by both entry points.
-`kyler-server/src/threads/` adapts host contexts and consumes each core stream through
+`kyler-server/src/threads/` adapts host contexts and consumes each gateway stream through
 one serialized bridge. SSE clients read the service cache and never compete for
 core events. Slow or disconnected browsers do not cancel execution. Service
 shutdown cancels active work, joins hosted threads, then shuts down shared resources.
@@ -427,8 +430,26 @@ does not infer data dependencies or prevent cross-session file conflicts.
 `kyler-core` and `kyler-config` depend on `kyler-provider`; the provider crate depends
 only on shared protocol types and transport libraries, never on core. It receives
 projected requests and host-injected credentials, not sessions, tool permissions,
-or user configuration paths. The current adapters share Chat Completions transport;
-this does not introduce a Responses API backend.
+or user configuration paths. Providers support Chat Completions and Responses.
+`protocol = "auto"` routes recognized OpenAI reasoning families through Responses;
+other compatible providers keep Chat Completions. Explicit `protocol = "responses"`
+or `protocol = "chat_completions"` overrides this choice per provider. The protocol
+is frozen in the execution snapshot; failures never silently switch protocol,
+model, or thinking level.
+
+Responses uses `store: false` and carries original output items, including encrypted
+reasoning, through tool continuations in their original order. This opaque state
+lives only inside one execution and is never emitted to client events. Tools run
+only after a complete, validated response; incomplete streams do not execute calls.
+
+Channel adapters submit operations to `kyler-gateway`, which depends on core. Core
+does not depend on gateway. HTTP/SSE stays in server, while wire adaptation stays
+in provider. The runtime loop itself remains in core.
+
+Model failures carry a safe message and optional structured model, protocol, HTTP
+status, provider code, rejected parameter and retry guidance. Provider response
+bodies and credentials never reach clients. Only transient failures are eligible
+for retry; validation, authentication and protocol errors fail immediately.
 
 Core owns model selection, immutable execution snapshots, context budgets, discovery
 scheduling and persistence. Providers discover IDs and resolve documented capabilities.

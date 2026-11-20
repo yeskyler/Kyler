@@ -206,7 +206,7 @@ async fn configure_persists_escaped_credentials_enables_sessions_and_preserves_o
 }
 
 #[tokio::test]
-async fn configure_preserves_named_profiles_and_captures_provider_credentials() {
+async fn configure_preserves_named_profiles_and_provider_credential_references() {
     let h = Harness::new().await;
     let text = std::fs::read_to_string(&h.config).unwrap();
     std::fs::write(
@@ -240,7 +240,13 @@ output_tokens = 1000
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(!String::from_utf8_lossy(&out.stderr).contains("provider-secret"));
-    let config = kyler_config::loader::load_from_with_env(&h.config, &Default::default()).unwrap();
+    let saved = std::fs::read_to_string(&h.config).unwrap();
+    assert!(saved.contains("KYLER_TEST_PROVIDER_KEY"));
+    assert!(!saved.contains("provider-secret"));
+    let environment = [("KYLER_TEST_PROVIDER_KEY".into(), "provider-secret".into())]
+        .into_iter()
+        .collect();
+    let config = kyler_config::loader::load_from_with_env(&h.config, &environment).unwrap();
     assert_eq!(config.models.default, "fast");
     assert_eq!(
         config.models.providers["remote"].api_key.expose(),
@@ -282,10 +288,7 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
         } else {
             let input = messages[user]["content"].as_str().unwrap();
             let (name, arguments) = match input {
-                "mkdir" => (
-                    "run_command",
-                    json!({"program":"/bin/mkdir","args":["-p","assets/nested"]}),
-                ),
+                "mkdir" => ("exec_command", json!({"command":"mkdir -p assets/nested"})),
                 "auto edit" => (
                     "apply_patch",
                     json!({"input":"*** Begin Patch\n*** Update File: auto-created.txt\n@@\n-approved\n+updated\n*** End Patch"}),
@@ -455,7 +458,11 @@ async fn managed_workspace_access_writes_after_approval_and_read_only_denies_wri
             .iter()
             .filter(|record| record.run_id == run.run_id)
             .collect::<Vec<_>>();
-        assert!(!records.is_empty());
+        assert!(
+            !records.is_empty(),
+            "run: {:?}",
+            client.run(&run.run_id).await.unwrap()
+        );
         assert!(
             records
                 .iter()

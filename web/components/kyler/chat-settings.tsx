@@ -160,7 +160,9 @@ export function ModelThinkingControl() {
   }
   const modelName = model?.selected?.model ?? initialModel;
   const supportsThinking = thinking?.supported && thinking.levels.length > 0;
-  const label = supportsThinking ? thinkingLabels[thinking.level] : "";
+  const displayedLevel: ThinkingLevel = supportsThinking ? thinking.level : "off";
+  const displayedLevels: ThinkingLevel[] = supportsThinking ? thinking.levels : ["off"];
+  const label = thinkingLabels[displayedLevel];
   return (
     <span className="min-w-0 shrink">
       <Menu.Root open={open} onOpenChange={setOpen}>
@@ -179,7 +181,7 @@ export function ModelThinkingControl() {
           }
         >
           <span className="min-w-0 truncate">{modelName}</span>
-          {supportsThinking && <span className="shrink-0">{label}</span>}
+          <span className="shrink-0">{label}</span>
         </Menu.Trigger>
         <Menu.Portal>
           <Menu.Positioner side="top" align="end" sideOffset={8} className="z-50">
@@ -206,26 +208,24 @@ export function ModelThinkingControl() {
                   ))}
                 </Menu.RadioGroup>
               </SettingsSubmenu>
-              {supportsThinking && (
-                <SettingsSubmenu label="Thinking level" value={label}>
-                  <Menu.RadioGroup aria-label="Thinking level" value={thinking?.level ?? ""}>
-                    {(thinking?.levels ?? []).map((level) => (
-                      <Menu.RadioItem
-                        key={level}
-                        value={level}
-                        onClick={() => void selectThinking(level)}
-                        disabled={busy || running || !thinking?.levels.includes(level)}
-                        className="flex min-h-9 cursor-default items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-40"
-                      >
-                        {thinkingLabels[level]}
-                        <Menu.RadioItemIndicator>
-                          <CheckIcon className="size-3.5" aria-hidden />
-                        </Menu.RadioItemIndicator>
-                      </Menu.RadioItem>
-                    ))}
-                  </Menu.RadioGroup>
-                </SettingsSubmenu>
-              )}
+              <SettingsSubmenu label="Thinking level" value={label}>
+                <Menu.RadioGroup aria-label="Thinking level" value={displayedLevel}>
+                  {displayedLevels.map((level) => (
+                    <Menu.RadioItem
+                      key={level}
+                      value={level}
+                      onClick={() => void selectThinking(level)}
+                      disabled={busy || running || !supportsThinking}
+                      className="flex min-h-9 cursor-default items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-40"
+                    >
+                      {thinkingLabels[level]}
+                      <Menu.RadioItemIndicator>
+                        <CheckIcon className="size-3.5" aria-hidden />
+                      </Menu.RadioItemIndicator>
+                    </Menu.RadioItem>
+                  ))}
+                </Menu.RadioGroup>
+              </SettingsSubmenu>
             </Menu.Popup>
           </Menu.Positioner>
         </Menu.Portal>

@@ -1,3 +1,4 @@
+import type { RequestFailure } from "./errors.ts";
 import type { QuestionRecord } from "./questions.ts";
 import type { Compaction } from "./compaction.ts";
 export type KylerEvent = {
@@ -17,7 +18,7 @@ export type KylerEvent = {
   activity?: string;
   source?: { kind: "builtin" | "skill" | "mcp"; name?: string; server_id?: string };
   status?: string;
-  error?: { message: string } | string;
+  error?: RequestFailure | string;
   approval?: Approval;
   question?: QuestionRecord;
 };

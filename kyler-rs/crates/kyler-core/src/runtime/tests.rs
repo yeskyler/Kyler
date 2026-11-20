@@ -1,5 +1,6 @@
 mod concurrency;
 mod mcp_tools;
+mod responses;
 mod review;
 use super::Agent;
 use crate::{
@@ -570,6 +571,10 @@ async fn summarizer_uses_only_summary_prompt_and_preserves_history_as_user_data(
         OpenAIConfig::new()
             .with_api_base(url)
             .with_api_key("fixture"),
+    );
+    let client = kyler_provider::transport::ModelSession::new(
+        client,
+        kyler_provider::WireProtocol::ChatCompletions,
     );
     let mut summarizer = ModelSummarizer {
         observer: None,
@@ -1158,6 +1163,10 @@ async fn compaction_failure_records_terminal_status_without_losing_history() {
             .with_api_base("http://127.0.0.1:1/v1")
             .with_api_key("fixture"),
     );
+    let client = kyler_provider::transport::ModelSession::new(
+        client,
+        kyler_provider::WireProtocol::ChatCompletions,
+    );
     assert!(
         agent
             .prepare_messages(&mut session, &[], &client, None)
@@ -1226,6 +1235,10 @@ async fn compaction_cancellation_is_checkpointed_before_execution_finishes() {
         OpenAIConfig::new()
             .with_api_base(url)
             .with_api_key("fixture"),
+    );
+    let client = kyler_provider::transport::ModelSession::new(
+        client,
+        kyler_provider::WireProtocol::ChatCompletions,
     );
     let task = tokio::spawn(async move {
         let result = agent

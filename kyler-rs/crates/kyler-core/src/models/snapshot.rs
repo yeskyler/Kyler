@@ -7,6 +7,7 @@ use kyler_protocol::api::models::{ModelConnectionSettings, ModelInfo};
 #[derive(Clone)]
 pub struct ModelSnapshot {
     pub adapter: kyler_provider::Adapter,
+    pub(crate) protocol_kind: kyler_provider::WireProtocol,
     pub(crate) adapter_kind: kyler_provider::AdapterKind,
     pub(crate) discover_models: bool,
     pub info: ModelInfo,
@@ -28,6 +29,7 @@ impl ModelSnapshot {
     /// Trusted host configuration access. SecretString redacts the credential in Debug.
     pub fn provider_settings(&self) -> ProviderSettings {
         ProviderSettings {
+            protocol: self.protocol_kind,
             base_url: self.base_url.clone(),
             api_key: self.api_key.clone(),
             api_key_env: None,

@@ -9,12 +9,12 @@ use std::{
 
 use tokio::sync::mpsc;
 
-pub(crate) fn enabled() -> bool {
+pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var("KYLER_TRACE_LATENCY").is_ok_and(|value| value == "1"))
 }
 
-pub(crate) struct ChannelTiming {
+pub struct ChannelTiming {
     channel: &'static str,
     session_id: String,
     sends: AtomicU64,

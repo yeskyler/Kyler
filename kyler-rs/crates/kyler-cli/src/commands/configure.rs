@@ -1,6 +1,7 @@
 mod input;
 mod models;
 
+use super::ui::{self, Progress};
 use crate::{CliError, Result};
 use input::Prompts;
 
@@ -34,6 +35,7 @@ pub async fn configure(
     addresses: bool,
     output: Option<&Path>,
     advanced: bool,
+    install_setup: bool,
 ) -> Result<()> {
     let path = config_path(explicit)?;
     // An explicit missing file is a new setup, not a load error.
@@ -70,6 +72,16 @@ pub async fn configure(
     }
     config.session.enabled = true;
     let mut discovered = Vec::new();
+    let can_start = output.is_none()
+        && std::env::current_exe()
+            .ok()
+            .and_then(|worker| kyler_core::sandbox::paths::bundled_runtime_root(&worker))
+            .is_some_and(|runtime| {
+                runtime.join("node").is_file()
+                    && runtime.parent().unwrap().join("web/server.js").is_file()
+            });
+    let mut start_after_save = false;
+
     let old_backend = config.server.bind;
     let saved_backend = values
         .get("server")
@@ -83,7 +95,7 @@ pub async fn configure(
                 .get("client")
                 .and_then(|v| v.get("server_url"))
                 .is_none());
-    let interactive = io::stdin().is_terminal() && !non_interactive;
+    let interactive = io::stdin().is_terminal() && ui::terminal_controls() && !non_interactive;
     if enable_web {
         config.web.enabled = true;
     }
@@ -95,7 +107,26 @@ pub async fn configure(
             Review,
         }
         let mut prompts = Prompts::new().await?;
-        prompts.section("Setup");
+        if install_setup && can_start && !advanced && !text.is_empty() && config.validate().is_ok()
+        {
+            match prompts.select(
+                "Configuration",
+                vec![
+                    "Keep current configuration and start".into(),
+                    "Edit configuration".into(),
+                ],
+                0,
+            )? {
+                0 => {
+                    ui::field("Configuration", "Saved settings kept");
+                    let mut progress = Progress::new();
+                    progress.begin("Configure Kyler");
+                    progress.complete();
+                    return launch(&path, &config).await;
+                }
+                _ => {}
+            }
+        }
         let mut wizard = models::Wizard::new(&config, &values);
         let scope = addresses || enable_web || config.web.enabled;
         let mut lan = !config.server.bind.ip().is_loopback()
@@ -155,10 +186,10 @@ pub async fn configure(
                     page = Page::Review;
                 }
                 Page::Review => {
-                    models::review(&config)?;
+                    models::review(&config, advanced)?;
                     if scope {
                         eprintln!(
-                            "│  Access: {}",
+                            "Access:{}",
                             if lan {
                                 "Local network"
                             } else {
@@ -166,14 +197,25 @@ pub async fn configure(
                             }
                         );
                     }
-                    let mut choices = vec!["Save and continue".into(), "Edit model".into()];
+                    let mut choices = vec![
+                        if can_start {
+                            "Save and start".into()
+                        } else {
+                            "Save configuration".into()
+                        },
+                        "Edit model".into(),
+                    ];
                     if scope {
                         choices.push("Edit access scope".into());
+                    }
+                    let save_only = can_start.then_some(choices.len());
+                    if can_start {
+                        choices.push("Save without starting".into());
                     }
                     choices.push("Cancel setup".into());
                     match prompts.select("Finish setup", choices, 0) {
                         Ok(0) => {
-                            eprintln!("└  Setup ready\n");
+                            start_after_save = can_start;
                             break;
                         }
                         Ok(1) => {
@@ -181,6 +223,7 @@ pub async fn configure(
                             page = Page::Model;
                         }
                         Ok(2) if scope => page = Page::Access,
+                        Ok(index) if Some(index) == save_only => break,
                         Ok(_) => return Err(input::cancelled()),
                         Err(e) if e.code == input::BACK => {
                             page = if scope { Page::Access } else { Page::Model };
@@ -278,6 +321,14 @@ pub async fn configure(
         )?;
         let llm = table(root, "llm")?;
         llm.insert(
+            "protocol".into(),
+            serde_json::to_value(config.llm.protocol)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .into(),
+        );
+        llm.insert(
             "adapter".into(),
             toml::Value::String(
                 serde_json::to_value(config.llm.adapter)
@@ -306,6 +357,14 @@ pub async fn configure(
         let providers = table(table(root, "models")?, "providers")?;
         for (name, provider) in &config.models.providers {
             let value = table(providers, name)?;
+            value.insert(
+                "protocol".into(),
+                serde_json::to_value(provider.protocol)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .into(),
+            );
             value.insert(
                 "base_url".into(),
                 toml::Value::String(provider.base_url.clone()),
@@ -371,14 +430,80 @@ pub async fn configure(
             ));
         }
         publish(&output, encoded.as_bytes())?;
-        eprintln!("Configuration prepared.");
         return Ok(());
     }
     publish(&path, encoded.as_bytes())?;
     models::save_cache(&config, discovered);
-    eprintln!("Saved: {}", path.display());
+    let mut progress = Progress::new();
+    progress.begin("Configure Kyler");
+    progress.complete();
+    if start_after_save {
+        launch(&path, &config).await?;
+    }
     Ok(())
 }
+async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
+    let mut progress = Progress::new();
+    progress.begin("Launch");
+    let output = tokio::process::Command::new(std::env::current_exe().map_err(CliError::io)?)
+        .arg("--config")
+        .arg(path)
+        .args(["--json", "service", "start", "--restart"])
+        .env_remove("KYLER_INTERNAL_TOOL_WORKER")
+        .env_remove("KYLER_INSTALL_SETUP")
+        .kill_on_drop(true)
+        .output()
+        .await
+        .map_err(CliError::io)?;
+    if !output.status.success() {
+        progress.fail();
+        let logs = path.parent().unwrap().join("logs");
+        std::fs::create_dir_all(&logs).map_err(CliError::io)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&logs, Permissions::from_mode(0o700)).map_err(CliError::io)?;
+        }
+        let log = logs.join("launch.log");
+        let mut diagnostics = output.stdout;
+        diagnostics.extend_from_slice(&output.stderr);
+        publish(&log, &diagnostics)?;
+        return Err(CliError::new(
+            3,
+            format!("Could not start services. Log:{}", log.display()),
+        ));
+    }
+    progress.complete();
+    let saved = loader::load_for_setup(Some(path)).ok();
+    let config = saved.as_ref().unwrap_or(config);
+    let primary = super::service::addresses::primary_connection();
+    eprintln!();
+    if config.web.enabled {
+        let url = match &primary {
+            Some((_, address))
+                if config.web.bind.ip().is_ipv4() && config.web.bind.ip().is_unspecified() =>
+            {
+                format!("http://{address}:{}", config.web.bind.port())
+            }
+            _ => kyler_config::web::connect_url(config.web.bind),
+        };
+        eprintln!("Web: {url}");
+        if config.web.access_token.is_empty() {
+            eprintln!("Token: Run kyler service token");
+        } else {
+            eprintln!("Token: {}", config.web.access_token.expose());
+        }
+    }
+    match primary {
+        Some((name, address)) => eprintln!("Interface: {name} ({address})"),
+        None => eprintln!("Interface: Primary network connection unavailable"),
+    }
+    if config.web.enabled && config.web.bind.ip().is_loopback() {
+        eprintln!("Access: This machine only");
+    }
+    Ok(())
+}
+
 pub(super) fn publish(path: &Path, bytes: &[u8]) -> Result<()> {
     let destination = if path.exists() {
         std::fs::canonicalize(&path).map_err(CliError::io)?

@@ -144,6 +144,7 @@ fn info(state: &StateData) -> RunInfo {
         output: None,
         usage: None,
         error: state.failed.then(|| ApiErrorBody {
+            details: None,
             code: "model_failed".into(),
             message: "Model unavailable".into(),
         }),

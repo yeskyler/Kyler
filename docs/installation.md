@@ -23,14 +23,36 @@ it downloads both files again from GitHub for the same version. Checksum failure
 stop installation; they do not silently switch sources. `--version VERSION` skips
 latest-version discovery.
 
-The shell bootstrap identifies the platform, downloads or opens a bundle, verifies
-its checksums, and starts the bundle's `kyler install` command. The CLI owns five
-installation stages: environment/dependencies, application and sandbox checks,
-configuration, activation, and service startup. It verifies a private staged copy
-before executing package binaries.
-Downloads show the source, file, size, speed, and remaining time. Failed downloads
-display manual download and local installation commands. Local bundles skip release
-downloads but still undergo compatibility and sandbox checks.
+The shell bootstrap only obtains and verifies a native CLI executable, then hands
+control to `kyler install`. All bundle downloading, archive extraction, integrity
+checks, native sandbox checks, activation and configuration UI run in Rust. The
+bootstrap uses one brief preparation line. Installation groups its checks into
+**Prepare package**, **Check environment**, and **Install Kyler**, then opens
+configuration and launch. All stages share inline `indicatif` progress and
+`inquire` setup controls. Diagnostics are saved to
+private installation logs; failures show a concise reason and the log path.
+
+Packages also provide `kyler-installer-vVERSION-TARGET`, covered by the release's
+`SHA256SUMS`. This currently reuses the full CLI executable rather than maintaining
+a separate installer engine. Keep that executable, `SHA256SUMS` and the archive
+together for offline use. If absent, the bootstrap downloads a verified installer.
+For source development or a trusted offline installer, set `KYLER_INSTALLER_BINARY`
+to its executable path. This explicit override is trusted executable code, not a
+replacement for verification of the selected bundle.
+
+An interactive installation opens `kyler configure` as the final step, after
+activation and PATH setup. Choose **Save and start** or **Save without starting**.
+Cancelling setup keeps the installed program; run `kyler configure` to resume.
+On upgrades with valid saved settings, choose **Keep current configuration and start**
+to avoid model discovery and repeated credential entry, or **Edit configuration**.
+Running `kyler configure` directly always opens the editing flow.
+Non-interactive installs skip this wizard unless `--configure` is explicitly requested. Upgrades preserve existing configuration and restore
+previously running services; stopped services remain stopped. During interactive
+upgrades, restoration waits until configuration finishes. Choosing **Save without
+starting** leaves services stopped; cancelling setup restores previously running
+services using their saved configuration. For explicit automation,
+use `--configure --start` (with `--non-interactive` when appropriate).
+Local bundles skip downloading but retain integrity and sandbox verification.
 
 Verified downloads are kept in `${XDG_CACHE_HOME:-$HOME/.cache}/kyler/downloads/vVERSION/`.
 Before downloading an archive, the installer fetches the selected source's current
@@ -61,8 +83,12 @@ cannot be bundled as user-space executables. Both offline and outbound native
 sandbox execution are mandatory checks before activation. No host security setting
 is weakened and there is no unrestricted-execution fallback.
 
-The Shell bootstrap still needs basic shell/archive/checksum utilities and curl
-for remote downloads. These bootstrap utilities are separate from Kyler's private
+The Shell bootstrap needs basic shell/checksum utilities and curl for remote
+downloads. The CLI also uses curl for HTTPS transfer and parses archives internally;
+installation with an adjacent installer no longer requires a host tar executable.
+For a standalone offline archive without that executable, the bootstrap can use tar
+to read only its CLI and checksum manifest; the CLI verifies and extracts the
+complete package. These bootstrap utilities are separate from Kyler's private
 runtime. Node.js is included; Rust is only needed when building from source.
 
 ### Native sandbox self-check
@@ -119,10 +145,16 @@ An already unpacked bundle can be installed without the shell bootstrap:
 ./path/to/bundle/bin/kyler install --bundle ./path/to/bundle
 ```
 
-The CLI accepts an unpacked directory. Use `install.sh --bundle` for `.tar.gz`
-archives. Both paths run the same CLI installation transaction. The bootstrap needs
-`tar`, SHA256 tools and, for remote downloads, `curl`; missing bootstrap utilities
-must be installed before it can launch the CLI.
+The CLI accepts unpacked directories and `.tar.gz` archives, or downloads a release:
+
+```sh
+kyler install --bundle ./kyler-v0.5.0-aarch64-apple-darwin.tar.gz
+kyler install --version 0.5.0
+```
+
+These paths share the same transaction and UI. Archive links, special files,
+duplicate entries and paths outside the extraction directory are rejected before
+any bundled program runs.
 
 Archive names follow `kyler-v<version>-<target>.tar.gz`. The target identifies the
 operating system and architecture. [Release management](releasing.md) defines packaging
@@ -130,22 +162,23 @@ requirements and artifact validation.
 
 ## Configuration stages
 
-The installer completes three stages in sequence. Each stage advances after its required
-inputs pass validation; no additional navigation confirmation is required.
+The final interactive installation step opens the configuration wizard. Run
+`kyler configure` to open it again later. Each
+required input is validated before proceeding.
 
 ### Model configuration
 
 | Input | Requirement or default |
 | --- | --- |
-| Provider | OpenAI, SiliconFlow, or Custom (OpenAI-compatible API) |
-| API URL | Custom only; official providers use fixed URLs |
+| Provider | OpenAI, SiliconFlow, or Custom（OpenAI Completion） |
+| API URL | Custom（OpenAI Completion） only; official providers use fixed URLs |
 | API key | Required; input is hidden |
 | Model | Searchable keyboard selection, with manual entry and retry/cache actions |
 
-Provider choices are **OpenAI**, **SiliconFlow**, and **Custom (OpenAI-compatible API)**.
+Provider choices are **OpenAI**, **SiliconFlow**, and **Custom（OpenAI Completion）**.
 OpenAI and SiliconFlow use their official API URLs without an address prompt. Only
-Custom asks for a base URL; use it for local servers and compatible gateways.
-Existing custom endpoints default to Custom.
+Custom（OpenAI Completion） asks for a base URL; use it for local servers and compatible gateways.
+Existing custom endpoints default to Custom（OpenAI Completion）.
 
 Setup is an inline terminal wizard built with Rust `inquire`. It keeps normal
 terminal history, uses arrow-key selection, and filters lists as you type. Completed
@@ -161,7 +194,8 @@ values and avoids refetching an unchanged connection's directory.
 
 For multiple configured providers, first select the connection to configure; other
 profiles remain intact. Before saving, review the selected model, address, capacity,
-and access scope. Choose **Save and continue**, edit a previous step, or cancel.
+and access scope. For a complete installed bundle, choose **Save and start** or **Save without starting**,
+edit a previous step, or cancel. Source builds offer **Save configuration**.
 No configuration is replaced until this final choice. Unattended setup retains
 `--non-interactive` and does not open terminal widgets.
 
@@ -207,17 +241,24 @@ workspace. Local project selection requires a loopback backend listener.
 
 ### Service status and management
 
-After successful activation, the installer displays backend and Web status, connection
-local addresses plus one primary interface under `Network access` in network mode,
-the Web token, the configuration path, and service management commands. The interface
-is selected from active IPv4 links and the host's default routes (Linux route metric;
-macOS unscoped defaults before scoped defaults). Known VPN/tunnel/container links and
-reserved addresses are excluded; a scoped physical default can be selected beneath a
-VPN. Equal-priority links, multiple addresses on the selected link, missing routes or
-routing-table errors produce an identification message instead of an arbitrary URL.
-This changes display only, not listeners or routing. No external IP service is queried,
-and an interface address is not claimed to be a public IP. The default browser address
-is **http://127.0.0.1:30002**.
+The installer uses a compact, left-aligned layout without decorative blank lines,
+boxed headings or alignment padding. It inherits the terminal background and normal
+text colors. Active controls use the terminal's cyan palette, success green,
+attention yellow and errors red; selected options are bold without a background
+fill. `NO_COLOR`, `TERM=dumb` and redirected output suppress color. Active steps
+show a spinner; completed steps occupy one line. Configuration inputs keep secrets
+hidden, including after validation errors. Model choices use unpadded numeric
+indexes without scroll-arrow markers; search and arrow-key navigation remain
+available. Configuration can start services and
+display the Web address and login token together, followed by the primary
+interface name/address. A single blank line separates these connection details
+from the completed steps; no blank header precedes installation. Network
+mode uses the detected interface address in the Web URL; local-only mode retains
+the loopback URL and labels its access scope. Ambiguous routing produces an
+unavailable message instead of selecting an arbitrary interface. Inspect services
+and retrieve the token again with
+`kyler service status` and `kyler service token`. The default browser address is
+**http://127.0.0.1:30002**.
 
 | Operation | Command |
 | --- | --- |
@@ -266,16 +307,16 @@ sessions, skills, and project files are preserved.
 
 If startup fails, the installer attempts to stop the new services and restore the
 previous installation, configuration, shell startup content, and service state. When cleanup cannot be
-verified, installation reports the failure for inspection. Version directories remain
-available for recovery. A local installation lock prevents simultaneous activations.
+verified, installation reports the failure for inspection. Old version directories remain available during activation for rollback and are
+removed after successful activation and service recovery. A local installation lock prevents simultaneous activations.
 Cancellation during activation also invokes recovery; cancellation during setup
 does not publish the candidate configuration. [Troubleshooting](troubleshooting.md) covers service diagnostics
 and recovery.
 
 ## Installation options
 
-Run `sh install.sh` to install the latest release, configure the application, and start
-both services. The installer automatically configures PATH for new terminals.
+Run `sh install.sh` to install the latest release and configure it in the final step.
+The installer automatically configures PATH for new terminals.
 
 | Option | Behavior |
 | --- | --- |
@@ -287,11 +328,13 @@ Advanced options support automation and maintenance:
 
 | Option | Behavior |
 | --- | --- |
-| `--no-start` | Install without starting services; existing managed services are stopped during upgrades |
+| `--configure` | Open configuration during installation |
+| `--start` | Start services explicitly after activation |
+| `--no-start` | Install without starting services or opening automatic setup; existing managed services are stopped during upgrades |
 | `--no-configure` | Skip the configuration wizard; create defaults only when configuration is absent |
 | `--non-interactive` | Use saved configuration and process environment without prompts |
 
-The three advanced options are also available on `kyler install`. The CLI accepts
+These advanced options are also available on `kyler install`. The CLI accepts
 `--config` for a separate configuration path and rejects `--server` and `--json`.
 Runtime checks are validation-only, including in non-interactive mode; missing
 payloads must be repaired with a complete bundle.

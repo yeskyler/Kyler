@@ -11,6 +11,7 @@ mod run;
 mod serve;
 mod service;
 mod skills;
+mod ui;
 
 use crate::{
     CliError, Result,
@@ -41,8 +42,12 @@ pub async fn execute(args: Args) -> Result<()> {
     }
     if let Some(Command::Install {
         bundle,
+        version,
+        start,
+        configure,
         no_start,
         no_configure,
+        bootstrap: _,
         non_interactive,
     }) = &args.command
     {
@@ -54,10 +59,20 @@ pub async fn execute(args: Args) -> Result<()> {
         }
         return install::execute(
             args.config.as_deref(),
-            bundle,
-            *no_start,
-            *no_configure,
-            *non_interactive,
+            bundle.as_deref(),
+            version.as_deref(),
+            install::Options {
+                start: if *start {
+                    Some(true)
+                } else if *no_start {
+                    Some(false)
+                } else {
+                    None
+                },
+                configure: *configure && !*no_configure,
+                auto_configure: !*configure && !*no_configure,
+                non_interactive: *non_interactive,
+            },
         )
         .await;
     }
@@ -80,6 +95,7 @@ pub async fn execute(args: Args) -> Result<()> {
             *addresses,
             output.as_deref(),
             *advanced,
+            std::env::var("KYLER_INSTALL_SETUP").as_deref() == Ok("1"),
         )
         .await;
     }

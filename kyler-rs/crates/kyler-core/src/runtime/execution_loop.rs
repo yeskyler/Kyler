@@ -36,6 +36,21 @@ impl Agent {
                 .with_api_key(&self.api_key),
             &self.base_url,
         )?;
+        let adapter = self
+            .model_snapshot
+            .as_ref()
+            .map(|s| s.adapter)
+            .unwrap_or_else(|| {
+                kyler_provider::Adapter::resolve(kyler_provider::AdapterKind::Auto, &self.base_url)
+            });
+        let protocol = adapter.protocol(
+            &self.model,
+            self.model_snapshot
+                .as_ref()
+                .map(|s| s.info.protocol)
+                .unwrap_or_default(),
+        );
+        let client = kyler_provider::transport::ModelSession::new(client, protocol);
         let mut retrieval = super::mcp_tools::McpRetrieval::default();
         let mut explicit_loaded = false;
         let mut patch_retries = 0;
@@ -198,7 +213,11 @@ impl Agent {
                         ));
                         continue;
                     }
-                    Err(error) => return Err(ModelError::wrap(error).into()),
+                    Err(error) => {
+                        return Err(ModelError::wrap(error)
+                            .with_model(&self.model, protocol)
+                            .into());
+                    }
                 }
             } else {
                 let request = self.provider_request(request, session)?;
@@ -209,11 +228,14 @@ impl Agent {
                         self.observe(super::observation::RuntimeObservation::ModelRequestStarted);
                         kyler_provider::transport::complete(&client, request.clone()).await
                     })
-                    .retry(ExponentialBuilder::default().with_max_times(3)),
+                    .retry(ExponentialBuilder::default().with_max_times(3))
+                    .when(kyler_provider::error::retryable),
                 )
                 .await
-                .map_err(|error| ModelError::wrap(error.into()))?
-                .map_err(|error| ModelError::wrap(error.into()))?;
+                .map_err(|error| ModelError::wrap(error.into()).with_model(&self.model, protocol))?
+                .map_err(|error| {
+                    ModelError::wrap(error.into()).with_model(&self.model, protocol)
+                })?;
                 let request_elapsed = request_started.elapsed();
                 self.observe(super::observation::RuntimeObservation::FirstModelEvent);
                 if let Some(text) = response["choices"][0]["message"]["reasoning_content"]
@@ -224,7 +246,9 @@ impl Agent {
                     self.record(session, vec![ContentItem::Reasoning { text: text.into() }])?;
                 }
                 let response: CreateChatCompletionResponse = serde_json::from_value(response)
-                    .map_err(|error| ModelError::wrap(error.into()))?;
+                    .map_err(|error| {
+                        ModelError::wrap(error.into()).with_model(&self.model, protocol)
+                    })?;
                 let output_tokens = response
                     .usage
                     .as_ref()
