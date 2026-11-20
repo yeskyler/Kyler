@@ -1,4 +1,4 @@
-//! Validate only the release's private tool payload. Never install or substitute host tools.
+//! Validate bundled ripgrep and system Linux sandbox dependencies without installing packages.
 use crate::{CliError, Result};
 
 use std::{ffi::OsString, fs::File, io::Write, path::PathBuf, process::Command};
@@ -47,36 +47,28 @@ impl Environment {
             std::env::consts::ARCH
         )
         .map_err(CliError::io)?;
-        let mut tools = vec![(root.join("runtime/tools/rg"), vec!["--version"])];
+        let mut tools = vec![(root.join("runtime/tools/rg"), vec!["--version"], true)];
         if self.host == Host::Linux {
-            for name in [
-                "bwrap",
-                "slirp4netns",
-                "ip",
-                "unshare",
-                "nsenter",
-                "iptables",
-                "ip6tables",
-                "iptables-restore",
-                "ip6tables-restore",
-                "sh",
-                "sleep",
-            ] {
+            let system_tools = kyler_core::sandbox::paths::system_sandbox_tools()
+                .map_err(|error| CliError::new(2, format!("{error:#}")))?;
+            for (name, path) in system_tools {
+                writeln!(log, "System sandbox helper: {}", path.display()).map_err(CliError::io)?;
                 let arguments = match name {
                     "sh" => vec!["-c", "exit 0"],
                     "sleep" => vec!["0"],
                     "ip" => vec!["-V"],
                     _ => vec!["--version"],
                 };
-                tools.push((root.join("runtime/sandbox/bin").join(name), arguments));
+                tools.push((path, arguments, false));
             }
         }
-        for (path, arguments) in tools {
+        for (path, arguments, bundled) in tools {
+            let source = if bundled { "Bundled" } else { "System sandbox" };
             if !path.is_file() {
                 return Err(CliError::new(
                     2,
                     format!(
-                        "Bundled tool missing: {}. Reinstall the complete bundle; no host substitution or package installation is performed.",
+                        "{source} tool missing: {}. Repair the package or system dependencies; no packages are installed automatically.",
                         path.display()
                     ),
                 ));
@@ -93,7 +85,7 @@ impl Environment {
                 return Err(CliError::new(
                     3,
                     format!(
-                        "Bundled tool failed: {}. Repair the bundle; host tools are never substituted.",
+                        "{source} tool failed: {}. Repair the package or system dependencies.",
                         path.display()
                     ),
                 ));
@@ -104,7 +96,7 @@ impl Environment {
             {
                 return Err(CliError::new(
                     2,
-                    "Bundled Bubblewrap must be at least 0.5.0.",
+                    "System Bubblewrap must be at least 0.5.0.",
                 ));
             }
             if path.file_name().is_some_and(|n| n == "rg") {
@@ -117,11 +109,11 @@ impl Environment {
         }
         writeln!(
             log,
-            "Bundled tools ready. {} will be checked by real sandbox execution.",
+            "Bundled ripgrep ready. {} will be checked by real sandbox execution.",
             if self.host == Host::Macos {
                 "System Seatbelt"
             } else {
-                "Host kernel namespaces and security policy"
+                "System Bubblewrap, network tools and host security policy"
             }
         )
         .map_err(CliError::io)?;

@@ -19,7 +19,7 @@ pub async fn execute(json: bool) -> Result<()> {
         ))?;
     }
     let worker = std::env::current_exe().map_err(CliError::io)?;
-    let checks = kyler_core::sandbox::diagnostics::check(&worker).await.map_err(|error| CliError::new(3, format!("Sandbox check failed: {error:#}. On Linux, check Bubblewrap/network dependencies, user namespaces, AppArmor and container host restrictions. No host security settings were changed.")))?;
+    let checks = kyler_core::sandbox::diagnostics::check(&worker).await.map_err(|error| CliError::new(3, format!("Sandbox check failed: {error:#}. On Linux, check system Bubblewrap/network dependencies, user namespaces, AppArmor and container host restrictions; see docs/linux-sandbox.md. No host security settings were changed.")))?;
     if json {
         output::json(
             &serde_json::json!({"type":"sandbox_diagnostics","backend":backend,"checks":checks}),

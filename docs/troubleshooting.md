@@ -1,5 +1,9 @@
 # Troubleshooting
 
+For Linux sandbox startup failures, see [system sandbox dependencies](linux-sandbox.md).
+Install distribution-provided tools and run `kyler doctor` as the normal user;
+Kyler does not install a separate AppArmor profile or disable host restrictions.
+
 Record the installed version, service status, and relevant log entries before diagnosing
 a failure. Redact model keys, backend tokens, Web tokens, and private tool output
 before sharing diagnostics.

@@ -1,7 +1,6 @@
-"""Offline tests for third-party payload integrity, linkage and Linux relocation."""
+"""Offline tests for bundled ripgrep integrity and standalone linkage."""
 import importlib.util
 from pathlib import Path
-import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -76,58 +75,6 @@ class RuntimePackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsafe"):
                 runtime.extract_regular_archive(archive, self.root)
 
-    def test_linux_dependency_closure_keeps_host_glibc_but_requires_other_libraries(self):
-        output = "libcap.so.2 => /usr/lib/libcap.so.2 (0x123)\nlibc.so.6 => /lib/libc.so.6 (0x456)\n"
-        with patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output, "")):
-            self.assertEqual(runtime.libraries(Path("bwrap")), [("libcap.so.2", Path("/usr/lib/libcap.so.2"))])
-        with patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "libcap.so.2 => not found", "")):
-            with self.assertRaisesRegex(ValueError, "Unresolved"):
-                runtime.libraries(Path("bwrap"))
-
-    def test_sandbox_requires_all_tools_licenses_and_relocatable_libraries(self):
-        source = self.root / "source"
-        (source / "bin").mkdir(parents=True)
-        (source / "licenses").mkdir()
-        (source / "licenses/COPYING").write_text("licenses")
-        for name in runtime.SANDBOX_TOOLS:
-            (source / "bin" / name).write_bytes(b"\x7fELFfixture")
-        destination = self.root / "output with spaces"
-        with patch.object(runtime, "libraries", return_value=[]), patch.object(runtime.subprocess, "run") as run, patch.object(runtime.subprocess, "check_output", return_value="bubblewrap 0.9.0\n"):
-            info = runtime.prepare_linux_sandbox(destination, source)
-        self.assertEqual(len(run.call_args_list), len(runtime.SANDBOX_TOOLS))
-        self.assertEqual(info["host_abi"], "glibc")
-        wrapper = (destination / "bin/iptables").read_text()
-        self.assertIn('export XTABLES_LIBDIR="$root/lib/xtables"', wrapper)
-        self.assertIn('exec "$root/libexec/iptables" "$@"', wrapper)
-        self.assertNotIn(str(source), wrapper)
-        with patch.object(runtime, "libraries", return_value=[("libcap.so.2", Path("/host/libcap.so.2"))]):
-            with self.assertRaisesRegex(ValueError, "escaped private"):
-                runtime.prepare_linux_sandbox(self.root / "invalid closure", source)
-        (source / "bin/bwrap").unlink()
-        with self.assertRaisesRegex(ValueError, "bwrap"):
-            runtime.prepare_linux_sandbox(self.root / "missing tool", source)
-        shutil.rmtree(source / "licenses")
-        with self.assertRaisesRegex(ValueError, "licenses"):
-            runtime.prepare_linux_sandbox(self.root / "missing licenses", source)
-
-    def test_library_filename_collisions_are_not_silently_overwritten(self):
-        first, second, destination = [self.root / name for name in ("first", "second", "libcap.so.2")]
-        first.write_text("one")
-        second.write_text("two")
-        runtime.copy_library(first, destination)
-        with self.assertRaisesRegex(ValueError, "Conflicting"):
-            runtime.copy_library(second, destination)
-        self.assertEqual(destination.read_text(), "one")
-
-    def test_dpkg_license_lookup_includes_only_verified_usr_merge_aliases(self):
-        for same_file in (True, False):
-            with patch.object(runtime.shutil, "which", side_effect=lambda name: name if name == "dpkg-query" else None), patch.object(Path, "is_file", return_value=True), patch.object(Path, "samefile", return_value=same_file), patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")) as run:
-                with self.assertRaisesRegex(ValueError, "license metadata"):
-                    runtime.collect_license(Path("/usr/bin/ip"), self.root / "licenses")
-            expected = ["dpkg-query", "-S", "/usr/bin/ip"]
-            if same_file:
-                expected.append("/bin/ip")
-            self.assertEqual(run.call_args.args[0], expected)
 
 
 if __name__ == "__main__":

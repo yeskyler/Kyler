@@ -137,53 +137,84 @@ pub fn bundled_tool_directories(worker: &Path) -> Vec<PathBuf> {
     let Some(root) = bundled_runtime_root(worker) else {
         return Vec::new();
     };
-    [root.join("tools"), root.join("sandbox/bin")]
+    [root.join("tools")]
         .into_iter()
         .filter(|p| p.is_dir())
         .collect()
 }
+
+pub const LINUX_SANDBOX_TOOLS: [&str; 11] = [
+    "bwrap",
+    "slirp4netns",
+    "ip",
+    "unshare",
+    "nsenter",
+    "iptables",
+    "ip6tables",
+    "iptables-restore",
+    "ip6tables-restore",
+    "sh",
+    "sleep",
+];
+pub const SYSTEM_TOOL_DIRECTORIES: [&str; 6] = [
+    "/usr/bin",
+    "/usr/sbin",
+    "/bin",
+    "/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+];
+
+fn executable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+pub fn system_sandbox_tools() -> Result<Vec<(&'static str, PathBuf)>> {
+    system_sandbox_tools_in(&SYSTEM_TOOL_DIRECTORIES.map(PathBuf::from))
+}
+
+fn system_sandbox_tools_in(directories: &[PathBuf]) -> Result<Vec<(&'static str, PathBuf)>> {
+    LINUX_SANDBOX_TOOLS.into_iter().map(|name| {
+        let path = directories.iter().map(|directory| directory.join(name))
+            .find(|path| executable(path))
+            .with_context(|| format!("System sandbox dependency missing: {name}. On Debian/Ubuntu install bubblewrap slirp4netns iproute2 util-linux iptables. Kyler does not install packages or change host security policy automatically"))?;
+        Ok((name, path))
+    }).collect()
+}
+
 pub fn require_bundled_tools(worker: &Path) -> anyhow::Result<()> {
     let runtime = bundled_runtime_root(worker).context("Bundled runtime is missing; prepare the development runtime or reinstall the complete Kyler bundle")?;
-    let mut required = vec![runtime.join("tools/rg")];
-    if cfg!(target_os = "linux") {
-        required.extend(
-            [
-                "bwrap",
-                "slirp4netns",
-                "ip",
-                "unshare",
-                "nsenter",
-                "iptables",
-                "ip6tables",
-                "iptables-restore",
-                "ip6tables-restore",
-                "sh",
-                "sleep",
-            ]
-            .map(|n| runtime.join("sandbox/bin").join(n)),
-        );
-    }
-    for path in required {
+    let rg = runtime.join("tools/rg");
+    ensure!(
+        std::fs::symlink_metadata(&rg).is_ok_and(|m| m.file_type().is_file()),
+        "Bundled ripgrep is missing: {}. Reinstall the complete Kyler bundle; host rg is never substituted",
+        rg.display()
+    );
+    #[cfg(target_os = "linux")]
+    for (name, expected) in system_sandbox_tools()? {
+        let selected = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .filter(|directory| directory.is_absolute())
+            .map(|directory| directory.join(name))
+            .find(|path| executable(path));
         ensure!(
-            std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file()),
-            "Bundled tool missing: {}. Reinstall the complete Kyler bundle; host tools are never substituted",
-            path.display()
+            selected.and_then(|path| path.canonicalize().ok()) == expected.canonicalize().ok(),
+            "System sandbox helper {name} is shadowed. Restart Kyler through its packaged executable; expected {}",
+            expected.display()
         );
-        #[cfg(target_os = "linux")]
-        if path
-            .parent()
-            .is_some_and(|p| p.file_name().is_some_and(|n| n == "bin"))
-        {
-            let name = path.file_name().unwrap();
-            let selected = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-                .map(|directory| directory.join(name))
-                .find(|candidate| candidate.is_file());
-            ensure!(
-                selected.and_then(|p| p.canonicalize().ok()) == path.canonicalize().ok(),
-                "Bundled sandbox helper {} is not selected. Start Kyler through its packaged executable; host helpers are never used",
-                name.to_string_lossy()
-            );
-        }
     }
     Ok(())
 }
@@ -196,6 +227,10 @@ pub fn bundled_search_path(
     if directories.is_empty() {
         return Ok(existing.to_owned());
     }
+    // Prefer distribution paths so copied tools from older Kyler releases cannot
+    // shadow the system executables and their path-specific security profiles.
+    #[cfg(target_os = "linux")]
+    directories.extend(SYSTEM_TOOL_DIRECTORIES.map(PathBuf::from));
     for directory in std::env::split_paths(existing).filter(|p| p.is_absolute()) {
         if !directories.contains(&directory) {
             directories.push(directory);
@@ -229,17 +264,14 @@ mod bundled_tests {
         std::fs::write(root.join("bin/kyler"), "fixture").unwrap();
         std::fs::write(root.join("runtime/tools/rg"), "fixture").unwrap();
         let directories = bundled_tool_directories(&root.join("bin/kyler"));
-        assert_eq!(
-            directories,
-            [root.join("runtime/tools"), root.join("runtime/sandbox/bin")]
-        );
+        assert_eq!(directories, [root.join("runtime/tools")]);
         let value = bundled_search_path(
             &root.join("bin/kyler"),
             std::ffi::OsStr::new("relative:/usr/bin"),
         )
         .unwrap();
         let paths = std::env::split_paths(&value).collect::<Vec<_>>();
-        assert_eq!(&paths[..2], directories);
+        assert_eq!(&paths[..directories.len()], directories);
         assert!(!paths.contains(&PathBuf::from("relative")));
         assert_eq!(
             bundled_search_path(&root.join("bin/kyler"), &value).unwrap(),
@@ -261,5 +293,55 @@ mod bundled_tests {
             bundled_ripgrep(&root.join("bin/kyler")).unwrap(),
             root.join("runtime/tools/rg")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_dependencies_skip_nonexecutables_and_report_missing_tools() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        for name in LINUX_SANDBOX_TOOLS {
+            let path = second.join(name);
+            std::fs::write(&path, "fixture").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::fs::write(first.join("bwrap"), "not executable").unwrap();
+        std::fs::set_permissions(first.join("bwrap"), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        let directories = [first, second.clone()];
+        let found = system_sandbox_tools_in(&directories).unwrap();
+        assert_eq!(found[0].1, second.join("bwrap"));
+        std::fs::remove_file(second.join("slirp4netns")).unwrap();
+        let error = system_sandbox_tools_in(&directories)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("slirp4netns") && error.contains("Debian/Ubuntu"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn legacy_private_helpers_do_not_shadow_distribution_directories() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("bin")).unwrap();
+        std::fs::create_dir_all(root.path().join("runtime/tools")).unwrap();
+        let legacy = root.path().join("runtime/sandbox/bin");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let worker = root.path().join("bin/kyler");
+        std::fs::write(&worker, "fixture").unwrap();
+        let path = bundled_search_path(&worker, legacy.as_os_str()).unwrap();
+        let directories = std::env::split_paths(&path).collect::<Vec<_>>();
+        assert_eq!(directories[0], root.path().join("runtime/tools"));
+        let index = directories.iter().position(|path| path == &legacy).unwrap();
+        assert!(SYSTEM_TOOL_DIRECTORIES.iter().all(|directory| {
+            directories
+                .iter()
+                .position(|path| path == Path::new(directory))
+                .unwrap()
+                < index
+        }));
     }
 }

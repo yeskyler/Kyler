@@ -36,6 +36,9 @@ Use it through Web, TUI, or CLI.
 Available for macOS and Linux. Complete bundles include the backend, Web application,
 and Node.js runtime.
 
+Linux requires system Bubblewrap and network tools; see [Linux dependencies](docs/linux-sandbox.md).
+Ripgrep is bundled on both platforms; macOS uses system Seatbelt.
+
 ```sh
 curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh

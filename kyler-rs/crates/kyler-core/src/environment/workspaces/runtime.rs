@@ -65,13 +65,7 @@ impl Runtime {
         let mut runtime = Self::default();
         for directory in &bundled {
             runtime.add_directory(directory.clone());
-            // Sandboxed helpers may need their private libexec, libraries and modules.
-            let root = if directory.file_name().is_some_and(|n| n == "bin") {
-                directory.parent().unwrap()
-            } else {
-                directory.as_path()
-            };
-            runtime.readonly_paths.push(root.to_path_buf());
+            runtime.readonly_paths.push(directory.to_path_buf());
         }
         if let Some(binary) = worker.and_then(crate::sandbox::paths::bundled_ripgrep) {
             runtime.add_directory(binary.parent().unwrap().to_path_buf());

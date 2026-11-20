@@ -2,13 +2,12 @@
 """Prepare the same private runtime beside a Cargo binary; never use a host rg fallback."""
 import argparse
 import json
-import os
 from pathlib import Path
 import platform
 import shutil
 import tempfile
 
-from package_runtime import prepare_linux_sandbox, prepare_ripgrep
+from package_runtime import prepare_ripgrep
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,7 +17,6 @@ def main():
     parser.add_argument("--profile", choices=("debug", "release"), default="debug")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--ripgrep-binary", type=Path)
-    parser.add_argument("--sandbox-dist", type=Path)
     args = parser.parse_args()
     node_os = {"Darwin": "darwin", "Linux": "linux"}.get(platform.system())
     arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64"}.get(platform.machine())
@@ -30,8 +28,7 @@ def main():
         scratch = Path(temporary)
         payload = scratch / "runtime"
         info = {"ripgrep": prepare_ripgrep(payload / "tools/rg", payload / "licenses/ripgrep", scratch, node_os, arch, args.ripgrep_binary)}
-        if node_os == "linux":
-            info["sandbox"] = prepare_linux_sandbox(payload / "sandbox", args.sandbox_dist)
+        info["sandbox"] = {"source": "system", "backend": "bubblewrap" if node_os == "linux" else "seatbelt"}
         (payload / "components.json").write_text(json.dumps(info, indent=2)+"\n")
         backup = scratch / "previous"
         if destination.exists():
@@ -43,7 +40,7 @@ def main():
                 backup.rename(destination)
             raise
     print(f"Private runtime ready: {destination}")
-    print("Kyler automatically uses these tools; no host rg or sandbox helper fallback.")
+    print("Kyler uses bundled ripgrep and the operating system sandbox (system Bubblewrap tools on Linux).")
 
 
 if __name__ == "__main__":

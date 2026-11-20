@@ -36,6 +36,9 @@ Kyler 是一个面向编码、研究与日常工作的 AI 助手。支持 Web、
 
 支持 macOS 和 Linux，完整发行包包含后端、Web 前端和 Node.js 运行时。
 
+Linux 使用系统安装的 Bubblewrap 和网络工具，见 [Linux 依赖说明](docs/linux-sandbox.md)。
+两个平台均内置 ripgrep；macOS 使用系统 Seatbelt。
+
 ```sh
 curl -fsSL http://www.kyler.work/install.sh -o install.sh
 sh install.sh

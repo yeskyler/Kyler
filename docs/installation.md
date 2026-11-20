@@ -66,15 +66,17 @@ Release bundles contain their own ripgrep. Kyler never selects a host `rg`, even
 when one is installed. macOS uses a standalone native build without Homebrew/PCRE2
 dylib dependencies and the operating system's Seatbelt backend.
 
-Linux bundles also contain Bubblewrap >= 0.5.0, slirp4netns, ip, unshare, nsenter,
-iptables/ip6tables and their restore commands, sh, sleep, xtables extensions, and
-the required non-glibc shared libraries. Private launchers scope library/module
-paths to the package. SDK helpers must resolve to this payload; missing, damaged
-or shadowed payloads fail instead of falling back to system tools.
+Linux uses system-installed Bubblewrap >= 0.5.0, slirp4netns, ip, unshare,
+nsenter, iptables/ip6tables and their restore commands, sh and sleep. These tools
+and their libraries are managed by the operating system, not copied into the
+release. Installation checks executable paths and versions, then exercises both
+native sandbox modes. See [Linux sandbox dependencies](linux-sandbox.md) for
+package-manager commands and host-policy diagnostics.
 
-The installer does not invoke brew, apt, sudo or another package manager, and never
-fetches helper tools separately. All runtime files are covered by the installation
-manifest and version switching/rollback. Install the complete native archive;
+The installer does not invoke brew, apt, sudo or another package manager. Missing
+system tools produce an actionable dependency error. Ripgrep and Node.js remain
+covered by the bundle manifest and version switching/rollback; system packages
+are not changed or rolled back by Kyler. Install the complete native archive;
 copying only `bin/kyler` is insufficient.
 
 macOS/Linux and x86_64/ARM64 builds are supported. Linux still requires the host's

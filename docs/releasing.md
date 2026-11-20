@@ -41,17 +41,16 @@ published crate; Linux source builds target musl. Hash mismatches stop immediate
 LICENSE-MIT and UNLICENSE. Host rg executables are never discovered as a fallback;
 macOS linkage checks reject Homebrew and other external dylibs.
 
-Linux packaging collects native sandbox executables from the build host, copies
-their non-glibc shared-library closure and xtables extensions, and generates
-relocatable launchers. Each component's distro copyright metadata and package
-version are retained. `--sandbox-dist PATH` accepts a prepared bin/lib/licenses
-payload instead. Missing tools, attribution, private libraries, incompatible
-versions or unresolved host-library references stop packaging. This build-time
-collection does not authorize using host helpers after installation.
+Linux sandbox execution uses distribution-installed Bubblewrap and network
+helpers. Packaging does not collect host sandbox binaries, shared libraries or
+xtables modules. These remain runtime prerequisites of the target host, including
+when the native archive is built elsewhere. Only ripgrep is bundled as a private
+command-line dependency.
 
 Validate native `kyler doctor` on every target before distributing a release.
-Runtime execution requires the private tools and retains host kernel/ABI checks;
-there is no brew/apt/sudo installation or fallback to host rg/Bubblewrap.
+Linux checks require the system dependencies and host namespace/security support;
+macOS uses system Seatbelt. Installation does not invoke a package manager or
+change host security policy. Host rg is never substituted for bundled ripgrep.
 
 ## 1. Prepare the source
 

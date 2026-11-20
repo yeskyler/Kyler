@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build a native release bundle. No end-user npm/Cargo installation is needed."""
-from package_runtime import prepare_ripgrep, prepare_linux_sandbox
+from package_runtime import prepare_ripgrep
 
 import argparse
 import hashlib
@@ -163,7 +163,6 @@ def source_revision():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ripgrep-binary", type=Path, help="Standalone native rg with upstream licenses beside it (offline builds)")
-    parser.add_argument("--sandbox-dist", type=Path, help="Native Linux sandbox tool distribution with bin/lib/licenses (otherwise collect host tools)")
     parser.add_argument("--node-dist", type=Path, help="Extracted official Node distribution (bin/node and LICENSE)")
     parser.add_argument("--download-node", action="store_true", help="Download official Node.js 24 instead of reusing local Node.js")
     parser.add_argument("--skip-build", action="store_true", help="Use an already-built backend and web/.next/standalone")
@@ -227,10 +226,7 @@ def main():
         shutil.copy2(node, bundle / "runtime/node")
         (bundle / "licenses").mkdir()
         runtime_tools = {"ripgrep": prepare_ripgrep(bundle / "runtime/tools/rg", bundle / "licenses/ripgrep", temporary, node_os, arch, args.ripgrep_binary)}
-        if node_os == "linux":
-            runtime_tools["sandbox"] = prepare_linux_sandbox(bundle / "runtime/sandbox", args.sandbox_dist)
-        elif args.sandbox_dist:
-            raise ValueError("--sandbox-dist only applies to native Linux packages")
+        runtime_tools["sandbox"] = {"source": "system", "backend": "bubblewrap" if node_os == "linux" else "seatbelt"}
 
         shutil.copy2(license_path, bundle / "licenses/NODE-LICENSE")
         standalone = WEB / ".next/standalone"

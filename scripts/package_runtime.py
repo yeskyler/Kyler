@@ -1,9 +1,7 @@
-"""Pinned ripgrep and relocatable Linux sandbox dependencies for native release bundles."""
+"""Pinned standalone ripgrep for native release bundles."""
 import hashlib
-import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tarfile
@@ -17,10 +15,6 @@ RG_DIGESTS = {
     "aarch64-unknown-linux-musl": "800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915",
     "x86_64-unknown-linux-musl": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
 }
-SANDBOX_TOOLS = ("bwrap", "slirp4netns", "ip", "unshare", "nsenter", "iptables", "ip6tables", "iptables-restore", "ip6tables-restore", "sh", "sleep")
-# These belong to the required host glibc ABI, not to the redistributable tool payload.
-SYSTEM_LIBRARIES = re.compile(r"^(?:libc|libm|libpthread|libdl|librt|libresolv|libutil|libanl)\.so(?:\..*)?$|^ld-linux.*\.so(?:\..*)?$")
-
 
 def digest(path):
     value = hashlib.sha256()
@@ -139,128 +133,3 @@ def prepare_ripgrep(binary, licenses, scratch, node_os, arch, supplied=None):
     version = check_ripgrep(binary, node_os)
     print(f"Bundled {version}", flush=True)
     return {"version": version, "sha256": digest(binary)}
-
-
-def libraries(path, environment=None):
-    result = subprocess.run(["ldd", str(path)], env=environment, text=True, capture_output=True, timeout=15)
-    text = result.stdout + result.stderr
-    if result.returncode and any(value in text for value in ("not a dynamic executable", "statically linked")):
-        return []
-    if result.returncode or "not found" in text:
-        raise ValueError(f"Unresolved Linux dependency for {Path(path).name}: {text.strip()}")
-    found = []
-    for line in text.splitlines():
-        match = re.match(r"\s*([^ ]+)\s+=>\s+(.+?)\s+\(0x[0-9a-f]+\)", line)
-        if match and not SYSTEM_LIBRARIES.fullmatch(match[1]):
-            found.append((match[1], Path(match[2])))
-    return found
-
-
-def copy_library(source, destination):
-    if destination.exists():
-        if digest(source) != digest(destination):
-            raise ValueError(f"Conflicting Linux libraries: {destination.name}")
-        return
-    shutil.copy2(source, destination)
-    destination.chmod(0o644)
-
-
-def collect_license(path, destination):
-    """Native distro attribution must be present before redistributing a host binary."""
-    if shutil.which("dpkg-query"):
-        # usr-merge resolves executables into /usr, while dpkg can retain /bin
-        # or /lib ownership records. Only query aliases of the exact same file.
-        candidates = [Path(path)]
-        relative = Path(path).parts
-        if len(relative) > 2 and relative[1] == "usr" and relative[2] in ("bin", "sbin", "lib", "lib64"):
-            alias = Path("/").joinpath(*relative[2:])
-            if alias.is_file() and alias.samefile(path):
-                candidates.append(alias)
-        query = subprocess.run(["dpkg-query", "-S", *map(str, candidates)], text=True, capture_output=True, timeout=15)
-        for line in query.stdout.splitlines():
-            package = line.split(": ", 1)[0]
-            license_path = Path("/usr/share/doc") / package.split(":", 1)[0] / "copyright"
-            if license_path.is_file():
-                destination.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(license_path, destination / (package.replace(":", "-") + "-copyright"))
-                version = subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", package], text=True, timeout=15).strip()
-                return {"package": package, "version": version}
-    if shutil.which("rpm"):
-        query = subprocess.run(["rpm", "-qf", "--qf", "%{NAME}", str(path)], text=True, capture_output=True, timeout=15)
-        if query.returncode == 0:
-            package = query.stdout.strip()
-            files = subprocess.check_output(["rpm", "-ql", package], text=True, timeout=15).splitlines()
-            license_files = [Path(name) for name in files if name.startswith("/usr/share/licenses/") and Path(name).is_file()]
-            if license_files:
-                destination.mkdir(parents=True, exist_ok=True)
-                for index, source in enumerate(license_files):
-                    shutil.copy2(source, destination / f"{package}-{index}-{source.name}")
-                version = subprocess.check_output(["rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", package], text=True, timeout=15).strip()
-                return {"package": package, "version": version}
-    raise ValueError(f"No redistribution license metadata found for {path}; use --sandbox-dist with licenses/")
-
-
-def prepare_linux_sandbox(destination, supplied=None):
-    """Copy native tools with their non-glibc library closure and private launchers."""
-    destination.mkdir(parents=True, exist_ok=True)
-    licenses = destination / "licenses"
-    if supplied:
-        source = Path(supplied).resolve()
-        if not (source / "licenses").is_dir() or not any(path.is_file() for path in (source / "licenses").rglob("*")):
-            raise ValueError("Sandbox distribution must include redistribution licenses/")
-        for name in ("bin", "libexec", "lib", "licenses"):
-            if (source / name).is_dir():
-                shutil.copytree(source / name, destination / name, dirs_exist_ok=True, symlinks=False, ignore=shutil.ignore_patterns(".env", ".env.*"))
-        if (source / "components.json").is_file():
-            shutil.copy2(source / "components.json", destination / "components.json")
-        if not (destination / "libexec").is_dir():
-            (destination / "bin").rename(destination / "libexec")
-    else:
-        (destination / "libexec").mkdir()
-        (destination / "lib").mkdir()
-        owners = {}
-        originals = []
-        for name in SANDBOX_TOOLS:
-            path = shutil.which(name)
-            if not path:
-                raise ValueError(f"Build host lacks {name}; install native sandbox build dependencies or provide --sandbox-dist")
-            original = Path(path).resolve()
-            originals.append(original)
-            shutil.copy2(original, destination / "libexec" / name)
-            owners[name] = collect_license(original, licenses)
-        # xtables dynamically loads extensions which are not in the executable's DT_NEEDED list.
-        candidates = sorted({parent / "xtables" for path in originals for _, library in libraries(path) for parent in [library.parent]})
-        extensions = next((path for path in candidates if path.is_dir()), None)
-        if extensions is None:
-            raise ValueError("Cannot locate xtables extensions; provide a complete --sandbox-dist")
-        shutil.copytree(extensions, destination / "lib/xtables", symlinks=False)
-        for path in [*originals, *extensions.glob("*.so")]:
-            for name, library in libraries(path):
-                copy_library(library, destination / "lib" / name)
-                if name not in owners:
-                    owners[name] = collect_license(library.resolve(), licenses)
-        (destination / "components.json").write_text(json.dumps(owners, indent=2) + "\n")
-    bin_dir = destination / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    for name in SANDBOX_TOOLS:
-        executable = destination / "libexec" / name
-        if not executable.is_file() or executable.read_bytes()[:4] != b"\x7fELF":
-            raise ValueError(f"Sandbox distribution needs a native ELF executable: {name}")
-        executable.chmod(0o755)  # Never ship setuid/setgid helpers.
-        # Resolve the root without dirname/readlink dependencies and without shell interpolation of paths.
-        wrapper = '#!/bin/sh\nroot=${0%/*}/..\nroot=$(CDPATH= cd -- "$root" && pwd -P) || exit 1\nexport LD_LIBRARY_PATH="$root/lib"\nexport XTABLES_LIBDIR="$root/lib/xtables"\nexec "$root/libexec/'+name+'" "$@"\n'
-        (bin_dir / name).write_text(wrapper)
-        (bin_dir / name).chmod(0o755)
-    environment = dict(os.environ, LD_LIBRARY_PATH=str(destination / "lib"))
-    for path in [*(destination / "libexec").iterdir(), *(destination / "lib").rglob("*.so*")]:
-        if path.is_file():
-            for _, library in libraries(path, environment):
-                if not library.resolve().is_relative_to(destination.resolve()):
-                    raise ValueError(f"Sandbox dependency escaped private library directory: {library}")
-    for name in SANDBOX_TOOLS:
-        args = ["-c", "exit 0"] if name == "sh" else ["0"] if name == "sleep" else ["-V"] if name == "ip" else ["--version"]
-        subprocess.run([str(bin_dir / name), *args], check=True, capture_output=True, timeout=15)
-    version = subprocess.check_output([str(bin_dir / "bwrap"), "--version"], text=True).strip()
-    if not re.fullmatch(r"bubblewrap \d+\.\d+\.\d+", version) or tuple(map(int, version.split()[1].split('.'))) < (0, 5, 0):
-        raise ValueError("Bundled Bubblewrap must be at least 0.5.0")
-    return {"tools": list(SANDBOX_TOOLS), "bubblewrap": version, "host_abi": "glibc"}

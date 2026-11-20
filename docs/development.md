@@ -15,9 +15,8 @@ Rust workspace is inside `kyler-rs/`; the repository root has no Cargo manifest.
 
 On macOS, install command-line build tools with `xcode-select --install`. Ubuntu and
 Debian builds require `build-essential`, `pkg-config`, and `libssl-dev`; native Linux
-sandbox payload builds also need Bubblewrap and isolated-network dependencies listed in
-[installation](installation.md#host-compatibility-and-sandbox-dependencies), plus a host
-that permits user namespaces.
+sandbox tests also need the system Bubblewrap and isolated-network dependencies listed in
+[installation](linux-sandbox.md), plus a host that permits user namespaces.
 Additional native libraries are determined by the build dependencies. Install Python
 through your operating system or the official Python distribution. Verify the
 development tools before building:
@@ -89,15 +88,14 @@ or native tests:
 python3 scripts/prepare_runtime.py --profile debug
 ```
 
-The runtime is placed beside Cargo's binary (`target/debug/runtime`). No host
-ripgrep or sandbox-helper fallback exists. Release packaging creates its own
-payload. Use `--ripgrep-binary` for an offline standalone distribution with its
-upstream licenses, and `--sandbox-dist` for a prebuilt Linux tool distribution.
-Linux builders must have the source tools, ldd, xtables modules and distro copyright
-metadata available; installation of the resulting archive needs none of those host
-tool executables. Library-level Linux tests should prepend
-`kyler-rs/target/debug/runtime/sandbox/bin` to PATH; the Kyler executable performs
-this initialization itself before starting threads.
+The runtime is placed beside Cargo's binary (`target/debug/runtime`). Host ripgrep
+is never used. Use `--ripgrep-binary` for an offline standalone distribution with
+its upstream licenses. Linux sandbox helpers are system packages; no private
+sandbox binary or library distribution is prepared. The CLI selects system helper
+directories before inherited PATH entries, so old private helper directories do
+not shadow the distribution tools. Library-level Linux tests should use the same
+system PATH directories and prepend only `kyler-rs/target/debug/runtime/tools` for
+bundled ripgrep. Explicit project-runtime paths can still be supplied per command.
 
 For first-time backend setup from a checkout:
 
