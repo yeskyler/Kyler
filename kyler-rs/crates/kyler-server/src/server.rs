@@ -172,8 +172,18 @@ impl Server {
         let manager = self.state.runs.clone();
         let address = listener.local_addr()?;
         ensure!(
-            listener.local_addr()?.ip().is_loopback() || !manager.settings.access_token.is_empty(),
-            "non-loopback listener requires a server access token"
+            manager
+                .security
+                .store
+                .list()
+                .await?
+                .iter()
+                .any(|token| token.role.administrative()
+                    && token.revoked_at.is_none()
+                    && token
+                        .expires_at
+                        .is_none_or(|expiry| expiry > chrono::Utc::now().timestamp_millis())),
+            "No active gateway administrator token. Run kyler configure or kyler token create --name administrator --role owner"
         );
         ensure!(
             listener.local_addr()?.ip().is_loopback()

@@ -11,6 +11,7 @@ mod run;
 mod serve;
 mod service;
 mod skills;
+mod token;
 mod ui;
 
 use crate::{
@@ -22,6 +23,24 @@ use crate::{
 use kyler_client::Client;
 
 pub async fn execute(args: Args) -> Result<()> {
+    if let Some(Command::Token { command }) = &args.command {
+        if args.server.is_some() {
+            return Err(CliError::new(
+                2,
+                "Token administration is local; --server is not supported",
+            ));
+        }
+        return token::execute(args.config.as_deref(), command, args.json).await;
+    }
+    if let Some(Command::Gateway { command }) = &args.command {
+        if args.server.is_some() {
+            return Err(CliError::new(
+                2,
+                "Gateway audit administration is local; --server is not supported",
+            ));
+        }
+        return token::audit(args.config.as_deref(), command).await;
+    }
     if args.json && matches!(&args.command, Some(Command::Tui { .. })) {
         return Err(CliError::new(2, "--json cannot be combined with tui"));
     }
@@ -252,7 +271,9 @@ pub async fn execute(args: Args) -> Result<()> {
                 }
             }
         },
-        Command::Logs { .. }
+        Command::Token { .. }
+        | Command::Gateway { .. }
+        | Command::Logs { .. }
         | Command::Doctor
         | Command::Serve(_)
         | Command::Configure { .. }

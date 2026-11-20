@@ -1,4 +1,5 @@
 //! Transport-neutral session admission, controls and event projection above Agent Runtime.
+pub mod security;
 pub mod thread;
 pub use thread::{
     HostedThread, HostedTurn, NewThread, ThreadEvent, ThreadHandle, ThreadManager,

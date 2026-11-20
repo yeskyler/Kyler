@@ -6,7 +6,7 @@ use crate::{
 use std::collections::HashMap;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
 };
@@ -15,8 +15,21 @@ use kyler_protocol::api::workspaces::{
     SaveWorkspaceRequest, WorkspaceFiles, WorkspaceInfo, WorkspaceInput,
 };
 
-pub async fn list(State(state): State<AppState>) -> ApiResult<Json<Vec<WorkspaceInfo>>> {
-    state.runs.list_workspaces().await.map(Json)
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
+) -> ApiResult<Json<Vec<WorkspaceInfo>>> {
+    let mut workspaces = state.runs.list_workspaces().await?;
+    if !principal.role.administrative() {
+        workspaces.retain(|workspace| {
+            !principal.scope.workspaces.is_empty()
+                && kyler_gateway::security::Security::workspace_allowed(
+                    &principal,
+                    Some(std::path::Path::new(&workspace.path)),
+                )
+        });
+    }
+    Ok(Json(workspaces))
 }
 pub async fn save(
     State(state): State<AppState>,

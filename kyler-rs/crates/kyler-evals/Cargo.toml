@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 kyler-core.workspace = true
+kyler-gateway.workspace = true
 kyler-config.workspace = true
 kyler-protocol.workspace = true
 kyler-server.workspace = true

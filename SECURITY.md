@@ -23,10 +23,11 @@ The maintainer should document these details when establishing the release polic
 
 ## Operating guidance
 
-- Keep services on loopback for local use. Web access requires a token in both modes;
+- Keep services on loopback for local use. HTTP business routes require gateway-issued tokens even on loopback;
   use TLS at a reverse proxy across untrusted networks.
 - Keep backend tokens and model keys on the server. Restrict access to configuration,
-  service records, logs, and conversation storage.
+  service records, logs, conversation storage, and the gateway database.
+  See [gateway authorization](docs/gateway.md) for revocation and resource scopes.
 - Use workspace access or read-only permissions when they meet the task's needs.
   Managed sessions keep a private filesystem boundary; Full access is unavailable
   when it would bypass session isolation. Approval never exceeds host authority.

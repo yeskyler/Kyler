@@ -30,6 +30,7 @@ use kyler_protocol::{
 };
 
 pub struct RunManager {
+    pub security: Arc<kyler_gateway::security::Security>,
     pub(crate) threads: crate::threads::CoreThreads,
     pub(crate) questions: Arc<kyler_core::questions::QuestionManager>,
     pub(crate) approval_settings: ApprovalSettings,
@@ -137,7 +138,15 @@ impl RunManager {
                 .with_attachments(attachments.clone())
                 .with_processes(processes.clone()),
         );
+        let security_root = store.directory().to_path_buf();
+        let security = Arc::new(
+            tokio::task::spawn_blocking(move || {
+                kyler_gateway::security::Security::open(&security_root)
+            })
+            .await??,
+        );
         Ok(Arc::new(Self {
+            security,
             threads: crate::threads::CoreThreads::new(store.clone()),
             questions: Arc::new(kyler_core::questions::QuestionManager::persistent(
                 store.directory().join("_questions"),
@@ -152,7 +161,16 @@ impl RunManager {
             approvals: None,
             protected_paths: ["", "-wal", "-shm"]
                 .into_iter()
-                .map(|suffix| PathBuf::from(format!("{}{suffix}", store.catalog().path.display())))
+                .flat_map(|suffix| {
+                    [
+                        PathBuf::from(format!("{}{suffix}", store.catalog().path.display())),
+                        PathBuf::from(format!(
+                            "{}{suffix}",
+                            kyler_gateway::security::Security::database_path(store.directory())
+                                .display()
+                        )),
+                    ]
+                })
                 .collect(),
             agent,
             workspaces: None,
@@ -214,7 +232,7 @@ impl RunManager {
         if let Some(environment) = self.isolated_environment(session)? {
             agent = agent.with_environment(environment);
         }
-        if self.approvals.is_some() {
+        {
             if let Some(environment) = agent.execution_environment() {
                 let mut protected = self.protected_paths.clone();
                 // Private execution is inside the store, but its parent metadata is not readable.

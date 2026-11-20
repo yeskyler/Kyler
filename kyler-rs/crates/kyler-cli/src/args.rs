@@ -21,6 +21,16 @@ pub struct Args {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Manage gateway credentials in the selected local service store.
+    Token {
+        #[command(subcommand)]
+        command: TokenCommand,
+    },
+    /// Inspect local gateway authorization records.
+    Gateway {
+        #[command(subcommand)]
+        command: GatewayCommand,
+    },
     /// Install a complete release bundle and open setup as the final interactive step.
     Install {
         /// Local bundle directory or .tar.gz archive; omit to download a release.
@@ -132,6 +142,42 @@ pub enum Command {
 pub enum LogTarget {
     Backend,
     Web,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TokenCommand {
+    Create {
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value="member", value_parser=["owner","admin","member","viewer"])]
+        role: String,
+        #[arg(long)]
+        workspace: Vec<String>,
+        #[arg(long)]
+        session: Vec<String>,
+        #[arg(long)]
+        model: Vec<String>,
+        #[arg(long, conflicts_with = "no_expiry")]
+        expires_in_seconds: Option<u64>,
+        #[arg(long)]
+        no_expiry: bool,
+    },
+    List,
+    Revoke {
+        id: String,
+    },
+    Rotate {
+        id: String,
+    },
+}
+#[derive(Debug, Subcommand)]
+pub enum GatewayCommand {
+    Audit {
+        #[arg(long)]
+        before: Option<i64>,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
 }
 
 #[derive(Debug, Subcommand)]

@@ -18,7 +18,7 @@ use crate::config::EvalConfig;
 
 pub const ISOLATION_OVERRIDES: &[&str] = &[
     "KYLER_SERVER_BIND",
-    "KYLER_SERVER_TOKEN",
+    "KYLER_GATEWAY_TOKEN",
     "KYLER_SESSION_DIR",
     "KYLER_SESSION_ENABLED",
 ];
@@ -262,7 +262,21 @@ pub async fn prepare(
         root.join("sessions").to_string_lossy().into_owned(),
     );
     set(&mut raw, "server", "bind", "127.0.0.1:0");
-    set(&mut raw, "server", "access_token", "");
+    // Provision before measurements; HTTP cold-start never has an anonymous exemption.
+    let security = kyler_gateway::security::Security::open(&root.join("sessions"))?;
+    let issued = security
+        .issue(
+            &kyler_protocol::api::gateway::Principal::local(),
+            kyler_protocol::api::gateway::CreateToken {
+                name: "startup-fixture".into(),
+                role: kyler_protocol::api::gateway::Role::Admin,
+                scope: Default::default(),
+                expires_at: None,
+            },
+        )
+        .await?;
+    set(&mut raw, "server", "access_token", issued.secret);
+
     set(&mut raw, "logging", "ansi", false);
     // Benchmark profiles never inherit extra filesystem grants from a daily-use service.
     set(&mut raw, "sandbox", "mode", "workspace-write");

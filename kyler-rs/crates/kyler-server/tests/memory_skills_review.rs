@@ -1,4 +1,6 @@
-//! Real authenticated HTTP review, isolated workspaces, and no model requests.
+#[path = "support/auth.rs"]
+mod gateway_auth;
+// Real authenticated HTTP review, isolated workspaces, and no model requests.
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -45,6 +47,7 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     let server = Server::from_config_with_workspaces(&config, factory)
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let store = server.state.runs.store.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -52,7 +55,8 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
-    let http = reqwest::Client::builder()
+    let http = gateway_auth::client(&gateway_token);
+    let anonymous = reqwest::Client::builder()
         .no_proxy()
         .tls_certs_only([])
         .build()
@@ -63,7 +67,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         project: &std::path::Path,
     ) -> SessionSummary {
         http.post(format!("{base}/v1/sessions"))
-            .bearer_auth("fixture-token")
             .json(&json!({"cwd":project,"workspace_mode":"isolated"}))
             .send()
             .await
@@ -97,7 +100,8 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     let prefix_a = format!("{base}/v1/sessions/{}", a.session_id);
     let prefix_b = format!("{base}/v1/sessions/{}", b.session_id);
     assert_eq!(
-        http.get(format!("{prefix_a}/memory/entries"))
+        anonymous
+            .get(format!("{prefix_a}/memory/entries"))
             .send()
             .await
             .unwrap()
@@ -106,7 +110,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     let page: Value = http
         .get(format!("{prefix_a}/memory/entries"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -118,7 +121,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     assert_eq!(page["entries"][0]["key"], key);
     let other: Value = http
         .get(format!("{prefix_b}/memory/entries"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -129,7 +131,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     assert_eq!(
         http.get(format!("{prefix_b}/memory/entry"))
             .query(&[("key", key)])
-            .bearer_auth("fixture-token")
             .send()
             .await
             .unwrap()
@@ -138,7 +139,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     assert_eq!(
         http.get(format!("{prefix_a}/learning/memories"))
-            .bearer_auth("fixture-token")
             .send()
             .await
             .unwrap()
@@ -148,7 +148,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     let review = |scope: &str, revision| json!({"key":key,"expected_scope":scope,"expected_revision":revision,"status":"active"});
     assert_eq!(
         http.post(format!("{prefix_b}/memory/review"))
-            .bearer_auth("fixture-token")
             .json(&review(&scope_a, 1))
             .send()
             .await
@@ -158,7 +157,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     assert_eq!(
         http.post(format!("{prefix_b}/memory/review"))
-            .bearer_auth("fixture-token")
             .json(&review(&scope_b, 1))
             .send()
             .await
@@ -168,7 +166,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     assert_eq!(
         http.post(format!("{prefix_a}/memory/review"))
-            .bearer_auth("fixture-token")
             .json(&review(&scope_a, 0))
             .send()
             .await
@@ -179,7 +176,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     let detail: Value = http
         .get(format!("{prefix_a}/memory/entry"))
         .query(&[("key", key)])
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -190,7 +186,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .unwrap();
     assert_eq!(detail["entry"]["revision"], 1);
     http.post(format!("{prefix_a}/memory/review"))
-        .bearer_auth("fixture-token")
         .json(&review(&scope_a, 1))
         .send()
         .await
@@ -203,7 +198,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     assert_eq!(
         http.get(format!("{prefix_a}/memory/entries?limit=0"))
-            .bearer_auth("fixture-token")
             .send()
             .await
             .unwrap()
@@ -234,7 +228,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .unwrap();
     let drafts: Value = http
         .get(format!("{prefix_a}/skills/drafts"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -246,7 +239,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     assert_eq!(drafts["total"], 1);
     let foreign: Value = http
         .get(format!("{prefix_b}/skills/drafts"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -256,7 +248,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     assert_eq!(foreign["total"], 0);
     assert_eq!(
         http.get(format!("{prefix_b}/skills/drafts/workflow"))
-            .bearer_auth("fixture-token")
             .send()
             .await
             .unwrap()
@@ -265,7 +256,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     assert_eq!(
         http.post(format!("{prefix_b}/skills/drafts/workflow/publish"))
-            .bearer_auth("fixture-token")
             .json(&json!({"expected_scope":scope_b,"fingerprint":draft.fingerprint}))
             .send()
             .await
@@ -275,7 +265,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     let inspected: Value = http
         .get(format!("{prefix_a}/skills/drafts/workflow"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -297,7 +286,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .unwrap();
     assert_eq!(
         http.post(format!("{prefix_a}/skills/drafts/workflow/publish"))
-            .bearer_auth("fixture-token")
             .json(&json!({"expected_scope":scope_a,"fingerprint":draft.fingerprint}))
             .send()
             .await
@@ -318,7 +306,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     ] {
         assert_eq!(
             http.post(url)
-                .bearer_auth("fixture-token")
                 .json(&json!({"expected_scope":scope,"fingerprint":fingerprint}))
                 .send()
                 .await
@@ -328,7 +315,8 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         );
     }
     assert_eq!(
-        http.post(&discard_url)
+        anonymous
+            .post(&discard_url)
             .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
             .send()
             .await
@@ -337,7 +325,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         401
     );
     http.post(&discard_url)
-        .bearer_auth("fixture-token")
         .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
         .send()
         .await
@@ -346,7 +333,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .unwrap();
     let discarded: Value = http
         .get(format!("{prefix_a}/skills/drafts/workflow"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -364,7 +350,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     assert_eq!(
         http.post(format!("{prefix_a}/skills/drafts/workflow/publish"))
-            .bearer_auth("fixture-token")
             .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
             .send()
             .await
@@ -382,7 +367,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .unwrap();
     let pending: Value = http
         .get(format!("{prefix_a}/skills/drafts/workflow"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -391,7 +375,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .unwrap();
     assert_eq!(pending["review_status"], "pending");
     http.post(format!("{prefix_a}/skills/drafts/workflow/publish"))
-        .bearer_auth("fixture-token")
         .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
         .send()
         .await
@@ -400,7 +383,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .unwrap();
     let installed: Value = http
         .get(format!("{prefix_a}/skills/drafts/workflow"))
-        .bearer_auth("fixture-token")
         .send()
         .await
         .unwrap()
@@ -418,7 +400,6 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
     );
     assert_eq!(
         http.post(&discard_url)
-            .bearer_auth("fixture-token")
             .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
             .send()
             .await
@@ -426,7 +407,7 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
             .status(),
         409
     );
-    assert_eq!(http.post(format!("{prefix_a}/skills/drafts/workflow/publish")).bearer_auth("fixture-token").json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint,"expected_installed":"stale"})).send().await.unwrap().status(),409);
+    assert_eq!(http.post(format!("{prefix_a}/skills/drafts/workflow/publish")).json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint,"expected_installed":"stale"})).send().await.unwrap().status(),409);
     assert!(
         manager
             .settings

@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use std::{
     convert::Infallible,
     future::IntoFuture,
@@ -187,13 +189,14 @@ async fn mcp_management_and_dynamic_agent_tools_work_end_to_end_per_session() {
         },
     );
     let server = Server::from_config(&config).await.unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let (stop, stopped) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
-    let http = reqwest::Client::new();
+    let http = gateway_auth::client(&gateway_token);
     let first: SessionSummary = http
         .post(format!("{base}/v1/sessions"))
         .send()

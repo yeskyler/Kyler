@@ -57,9 +57,8 @@ impl TransportFactory for HostTransport {
                 let mut http = reqwest::Client::builder()
                     .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(Duration::from_secs(10));
-                // Plain HTTP unit fixtures need neither host proxies nor native
-                // TLS roots. Explicit sandbox proxies below still take precedence.
-                #[cfg(test)]
+                // Loopback endpoints stay local. Explicit sandbox proxy and deny
+                // policy below still takes precedence over ambient OS settings.
                 if reqwest::Url::parse(&self.settings.url)
                     .ok()
                     .filter(|url| url.scheme() == "http")
@@ -69,7 +68,14 @@ impl TransportFactory for HostTransport {
                     })
                     .is_some_and(|address| address.is_loopback())
                 {
-                    http = http.no_proxy().tls_certs_only([]);
+                    http = http.no_proxy();
+                }
+                let plaintext =
+                    reqwest::Url::parse(&self.settings.url).is_ok_and(|url| url.scheme() == "http");
+                let tls_proxy=["HTTP_PROXY","http_proxy","ALL_PROXY","all_proxy"].iter().any(|key|std::env::var(key).ok().is_some_and(|value|reqwest::Url::parse(&value).is_ok_and(|url|url.scheme()=="https")))
+                    || self.environment.as_ref().is_some_and(|environment|matches!(&environment.policy().network,NetworkAccess::Proxy{url} if reqwest::Url::parse(url).is_ok_and(|url|url.scheme()=="https")));
+                if plaintext && !tls_proxy {
+                    http = http.tls_certs_only([]);
                 }
                 if let Some(environment) = &self.environment {
                     match &environment.policy().network {

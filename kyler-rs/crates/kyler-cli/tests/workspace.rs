@@ -60,23 +60,23 @@ async fn completion(
             .unwrap();
         let (name, args) = if input == "cargo version" {
             (
-                "run_command",
-                json!({"program":"cargo","args":["--version"]}),
+                "exec_command",
+                json!({"command":"cargo --version","yield_time_ms":60000}),
             )
         } else if input == "rustc version" {
             (
-                "run_command",
-                json!({"program":"rustc","args":["--version"]}),
+                "exec_command",
+                json!({"command":"rustc --version","yield_time_ms":60000}),
             )
         } else if input == "cargo check" {
             (
-                "run_command",
-                json!({"program":"cargo","args":["check","--offline","--quiet"]}),
+                "exec_command",
+                json!({"command":"cargo check --offline --quiet","yield_time_ms":60000}),
             )
         } else if input == "missing command" {
             (
-                "run_command",
-                json!({"program":"kyler-unavailable-test-tool","args":[]}),
+                "exec_command",
+                json!({"command":"kyler-unavailable-test-tool","yield_time_ms":60000}),
             )
         } else if input == "write" {
             (
@@ -191,6 +191,20 @@ async fn check(workspace_write: bool) {
     });
     let config = dir.path().join("kyler.toml");
     std::fs::write(&config,format!("[llm]\nbase_url={model_url:?}\nmodel='test'\napi_key='test'\n[session]\nenabled=true\ndirectory='sessions'\n[server]\nbind='127.0.0.1:0'\n")).unwrap();
+    let security = kyler_gateway::security::Security::open(&dir.path().join("sessions")).unwrap();
+    let credential = security
+        .issue(
+            &kyler_protocol::api::gateway::Principal::local(),
+            kyler_protocol::api::gateway::CreateToken {
+                name: "workspace-fixture".into(),
+                role: kyler_protocol::api::gateway::Role::Owner,
+                scope: Default::default(),
+                expires_at: None,
+            },
+        )
+        .await
+        .unwrap()
+        .secret;
     let mut command = Command::new(env!("CARGO_BIN_EXE_kyler"));
     command
         .arg("--config")
@@ -213,7 +227,7 @@ async fn check(workspace_write: bool) {
         .env_remove("KYLER_SESSION_DIR")
         .env_remove("KYLER_SERVER_BIND")
         .env_remove("KYLER_SESSION_ENABLED")
-        .env_remove("KYLER_SERVER_TOKEN")
+        .env_remove("KYLER_GATEWAY_TOKEN")
         .env_remove("KYLER_CLIENT_TOKEN")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -240,6 +254,7 @@ async fn check(workspace_write: bool) {
     .unwrap();
     let client = Client::new(ClientSettings {
         server_url: format!("http://{address}"),
+        access_token: kyler_config::SecretString::new(credential),
         ..Default::default()
     })
     .unwrap();
@@ -268,7 +283,7 @@ async fn check(workspace_write: bool) {
         assert!(names.contains(&tool));
     }
     assert_eq!(names.contains(&"apply_patch"), workspace_write);
-    assert!(names.contains(&"run_command"));
+    assert!(names.contains(&"exec_command"));
     let prompts = first["messages"].to_string();
     let cwd: PathBuf = std::fs::canonicalize(cwd).unwrap();
     assert!(prompts.contains(execution_workspace.to_str().unwrap()));
@@ -348,7 +363,7 @@ async fn check(workspace_write: bool) {
             let output: Value = serde_json::from_str(&result).unwrap();
             assert_eq!(output["exit_code"], 0, "{result}");
             assert!(
-                output["stdout"].as_str().unwrap().contains(expected),
+                output["output"].as_str().unwrap().contains(expected),
                 "{result}"
             );
         }
@@ -358,7 +373,12 @@ async fn check(workspace_write: bool) {
         assert!(build_workspace.join("target").is_dir());
         assert!(!cwd.join("target").exists());
         let (result, _) = run(&client, "missing command", &cwd).await;
-        assert!(result.contains("sandbox PATH"), "{result}");
+        let output: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(output["exit_code"], 127, "{result}");
+        assert!(
+            output["output"].as_str().unwrap().contains("not found"),
+            "{result}"
+        );
     }
     let pid = child.id().unwrap();
     assert!(

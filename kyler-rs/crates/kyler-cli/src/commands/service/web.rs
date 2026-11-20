@@ -198,7 +198,7 @@ pub(super) async fn start(path: &Path, config: &AppConfig, directory: &Path) -> 
         )
         .env_remove("KYLER_INTERNAL_TOOL_WORKER")
         .env_remove("NODE_OPTIONS")
-        .env_remove("KYLER_SERVER_TOKEN")
+        .env_remove("KYLER_GATEWAY_TOKEN")
         .env_remove("KYLER_LLM_API_KEY")
         .env_remove("OPENAI_API_KEY")
         .stdin(Stdio::null())

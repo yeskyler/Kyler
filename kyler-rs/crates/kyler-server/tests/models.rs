@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use std::{convert::Infallible, path::Path, sync::Arc, time::Duration};
 
 use axum::{
@@ -143,7 +145,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .default_headers(
             [(
                 reqwest::header::AUTHORIZATION,
-                "Bearer fixture-access".parse().unwrap(),
+                format!("Bearer {gateway_token}").parse().unwrap(),
             )]
             .into_iter()
             .collect(),
@@ -657,7 +659,7 @@ async fn editable_model_connection_is_private_durable_and_next_turn_only() {
         .default_headers(
             [(
                 reqwest::header::AUTHORIZATION,
-                "Bearer fixture-access".parse().unwrap(),
+                format!("Bearer {gateway_token}").parse().unwrap(),
             )]
             .into_iter()
             .collect(),

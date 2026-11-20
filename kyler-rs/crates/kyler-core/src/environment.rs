@@ -164,6 +164,60 @@ impl ExecutionEnvironment {
         Ok(self)
     }
 
+    /// Intersect host filesystem authority with this session's execution workspace.
+    /// Runtime mounts remain host-controlled; unrelated project/data roots are removed.
+    pub fn with_workspace_boundary(&self) -> Result<Self> {
+        ensure!(
+            self.policy.mode.isolated(),
+            "Scoped execution requires an isolated host sandbox"
+        );
+        let root = self
+            .snapshot
+            .managed
+            .as_ref()
+            .map(|managed| &managed.root)
+            .or_else(|| self.snapshot.project_root())
+            .unwrap_or(&self.snapshot.cwd)
+            .canonicalize()?;
+        let intersect = |paths: &[PathBuf]| -> Result<Vec<PathBuf>> {
+            let mut result = Vec::new();
+            for path in paths {
+                let path = resolve_path(Path::new("/"), path)?;
+                if root.starts_with(&path) {
+                    result.push(root.clone());
+                } else if path.starts_with(&root) {
+                    result.push(path);
+                }
+            }
+            result.sort();
+            result.dedup();
+            Ok(result)
+        };
+        let mut environment = self.clone();
+        let readonly = self
+            .policy
+            .filesystem
+            .readonly_paths
+            .iter()
+            .filter(|readonly| {
+                // Preserve the original longest-prefix precedence when clamping a broad
+                // read-only ancestor and a more specific writable workspace to one root.
+                !(root.starts_with(readonly)
+                    && self.policy.filesystem.readwrite_paths.iter().any(|write| {
+                        root.starts_with(write)
+                            && write.components().count() > readonly.components().count()
+                    }))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        environment.policy.filesystem.readonly_paths = intersect(&readonly)?;
+        environment.policy.filesystem.readwrite_paths =
+            intersect(&self.policy.filesystem.readwrite_paths)?;
+        environment.policy.allow_full_access = false;
+        environment.policy.validate()?;
+        Ok(environment)
+    }
+
     /// Allocate no files: bind an existing private directory within the host policy.
     pub fn isolated_session(&self, directory: &Path, project: &Path) -> Result<Self> {
         let root = directory.canonicalize()?;
@@ -390,6 +444,72 @@ mod isolation_tests {
     use super::ExecutionEnvironment;
     use crate::sandbox::{SandboxMode, SandboxPolicy, direct::DirectSandbox};
     use std::sync::Arc;
+
+    #[test]
+    fn gateway_workspace_floor_removes_other_roots_without_granting_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("project");
+        let other = root.path().join("other");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::create_dir(&other).unwrap();
+        std::fs::create_dir(workspace.join(".git")).unwrap();
+        let mut policy = SandboxPolicy::workspace_write("gateway-floor", &workspace);
+        policy.allow_full_access = true;
+        policy
+            .filesystem
+            .readonly_paths
+            .push(std::path::PathBuf::from("/"));
+        policy
+            .filesystem
+            .readonly_paths
+            .push(workspace.join(".git"));
+        policy.filesystem.readwrite_paths.push(other.clone());
+        let original = ExecutionEnvironment::new(
+            &workspace,
+            &workspace,
+            policy,
+            std::env::current_exe().unwrap(),
+            Arc::new(DirectSandbox),
+        )
+        .unwrap();
+        let narrowed = original.with_workspace_boundary().unwrap();
+        let fs = &narrowed.policy().filesystem;
+        assert!(
+            fs.check_write(&workspace, &workspace.join("result.txt"))
+                .is_ok()
+        );
+        assert!(fs.check_read(&workspace, &other).is_err());
+        assert!(
+            fs.check_write(&workspace, &other.join("result.txt"))
+                .is_err()
+        );
+        assert!(
+            fs.check_write(&workspace, &workspace.join(".git/config"))
+                .is_err()
+        );
+        assert!(!narrowed.allows_full_access());
+        assert_eq!(
+            original.session_environment(),
+            narrowed.session_environment()
+        );
+        let readonly = original.read_only().with_workspace_boundary().unwrap();
+        assert!(
+            readonly
+                .policy()
+                .filesystem
+                .check_write(&workspace, &workspace.join("result.txt"))
+                .is_err()
+        );
+        let unrestricted = ExecutionEnvironment::new(
+            &workspace,
+            &workspace,
+            SandboxPolicy::danger_full_access("unrestricted"),
+            std::env::current_exe().unwrap(),
+            Arc::new(DirectSandbox),
+        )
+        .unwrap();
+        assert!(unrestricted.with_workspace_boundary().is_err());
+    }
 
     #[test]
     fn private_sessions_cannot_inherit_unrestricted_or_shared_filesystem_roots() {

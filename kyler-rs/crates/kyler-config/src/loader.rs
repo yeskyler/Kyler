@@ -151,7 +151,7 @@ fn number<T: FromStr>(values: &HashMap<String, String>, key: &str) -> Result<Opt
 }
 fn apply_environment(config: &mut AppConfig, values: &HashMap<String, String>) -> Result<()> {
     apply_client_environment(config, values);
-    if let Some(v) = values.get("KYLER_SERVER_TOKEN") {
+    if let Some(v) = values.get("KYLER_GATEWAY_TOKEN") {
         config.server.access_token = SecretString::new(v);
     }
     if let Some(v) = values.get("KYLER_SERVER_BIND") {
@@ -203,7 +203,7 @@ fn apply_client_environment(config: &mut AppConfig, values: &HashMap<String, Str
     }
     if let Some(v) = values
         .get("KYLER_CLIENT_TOKEN")
-        .or_else(|| values.get("KYLER_SERVER_TOKEN"))
+        .or_else(|| values.get("KYLER_GATEWAY_TOKEN"))
     {
         config.client.access_token = SecretString::new(v);
     }

@@ -10,6 +10,7 @@ struct Harness {
     root: tempfile::TempDir,
     config: PathBuf,
     url: String,
+    token: String,
 }
 impl Drop for Harness {
     fn drop(&mut self) {
@@ -17,7 +18,7 @@ impl Drop for Harness {
             .arg("--config")
             .arg(&self.config)
             .args(["service", "stop"])
-            .env_remove("KYLER_SERVER_TOKEN")
+            .env_remove("KYLER_GATEWAY_TOKEN")
             .output();
     }
 }
@@ -31,7 +32,28 @@ impl Harness {
         drop(listener);
         let config = directory.join("config.toml");
         std::fs::write(&config,format!("[llm]\nmodel='test'\nbase_url='http://127.0.0.1:1/v1'\napi_key='test-key'\n[session]\nenabled=true\n[server]\nbind='{address}'\naccess_token='service-token'\n")).unwrap();
+        let parsed =
+            kyler_config::loader::load_from_with_env(&config, &Default::default()).unwrap();
+        let security = kyler_gateway::security::Security::open(&parsed.session.directory).unwrap();
+        let token = security
+            .issue(
+                &kyler_protocol::api::gateway::Principal::local(),
+                kyler_protocol::api::gateway::CreateToken {
+                    name: "service-fixture".into(),
+                    role: kyler_protocol::api::gateway::Role::Owner,
+                    scope: Default::default(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap()
+            .secret;
+        let text = std::fs::read_to_string(&config)
+            .unwrap()
+            .replace("service-token", &token);
+        std::fs::write(&config, text).unwrap();
         Self {
+            token,
             root,
             config,
             url: format!("http://{address}"),
@@ -46,7 +68,7 @@ impl Harness {
         for key in [
             "KYLER_CONFIG",
             "KYLER_SERVER_BIND",
-            "KYLER_SERVER_TOKEN",
+            "KYLER_GATEWAY_TOKEN",
             "KYLER_SESSION_ENABLED",
             "KYLER_SESSION_DIR",
             "KYLER_INTERNAL_TOOL_WORKER",
@@ -68,7 +90,7 @@ impl Harness {
     fn client(&self) -> Client {
         Client::new(ClientSettings {
             server_url: self.url.clone(),
-            access_token: SecretString::new("service-token"),
+            access_token: SecretString::new(&self.token),
             ..Default::default()
         })
         .unwrap()
@@ -177,7 +199,7 @@ async fn configure_persists_escaped_credentials_enables_sessions_and_preserves_o
             .contains("tavily")
     );
     assert_eq!(config.context.context_tokens, 64000);
-    assert_eq!(config.server.access_token.expose(), "service-token");
+    assert_eq!(config.server.access_token.expose(), h.token);
     use std::os::unix::fs::PermissionsExt;
 
     assert_eq!(
@@ -584,7 +606,7 @@ async fn network_mode_starts_with_default_workspace_and_displays_connection_addr
     assert!(!display.contains("Interface: utun"));
     assert!(display.contains(&h.url));
     assert!(!display.contains("http://0.0.0.0"));
-    assert!(!display.contains("service-token"));
+    assert!(!display.contains(&h.token));
     assert!(h.client().info().await.is_ok());
 }
 

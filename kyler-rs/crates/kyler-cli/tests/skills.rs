@@ -38,13 +38,29 @@ async fn skills_install_list_show_remove_need_no_session_or_model_request() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let server = Server::from_config(&config).await.unwrap();
+    let token = server
+        .state
+        .runs
+        .security
+        .issue(
+            &kyler_protocol::api::gateway::Principal::local(),
+            kyler_protocol::api::gateway::CreateToken {
+                name: "skills-cli-fixture".into(),
+                role: kyler_protocol::api::gateway::Role::Owner,
+                scope: Default::default(),
+                expires_at: None,
+            },
+        )
+        .await
+        .unwrap()
+        .secret;
     let (stop, stopped) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
     std::fs::write(
         root.path().join("client.toml"),
-        format!("[client]\nserver_url='{url}'\n"),
+        format!("[client]\nserver_url='{url}'\naccess_token='{token}'\n"),
     )
     .unwrap();
     std::fs::create_dir(root.path().join("input")).unwrap();

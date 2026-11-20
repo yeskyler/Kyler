@@ -97,7 +97,7 @@ classification and authoring details.
 | `KYLER_LLM_MODEL` | Single-profile model ID |
 | `KYLER_LLM_BASE_URL` | Single-profile API base URL |
 | `KYLER_LLM_API_KEY` / `OPENAI_API_KEY` | Model key, with the Kyler variable taking precedence |
-| `KYLER_SERVER_BIND` / `KYLER_SERVER_TOKEN` | Backend listen address and token |
+| `KYLER_SERVER_BIND` / `KYLER_GATEWAY_TOKEN` | Backend listen address and token |
 | `KYLER_CLIENT_SERVER_URL` / `KYLER_CLIENT_TOKEN` | Backend client endpoint and token |
 | `KYLER_WEB_BIND` / `KYLER_WEB_TOKEN` / `KYLER_WEB_ENABLED` | Web listen address, access token, and enabled flag |
 | `KYLER_SESSION_DIR` / `KYLER_SESSION_ENABLED` | Session storage |
@@ -361,3 +361,10 @@ content fingerprints regardless of this interval. Package writes clear directory
 caches immediately; enable/disable review records are checked afresh. User and
 built-in guidance is enabled by default unless disabled; project packages require
 review of the exact fingerprint. Script execution uses ordinary tool permissions.
+
+## Gateway access
+
+HTTP access now requires issued gateway tokens for all listeners, including loopback.
+Run `kyler configure` to provision the managed service credential. Old shared tokens
+and the old server-token environment variable are not imported. See [gateway identity
+and authorization](gateway.md) for roles, grants, rotation, audit and upgrade behavior.

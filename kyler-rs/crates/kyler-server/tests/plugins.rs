@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
@@ -20,6 +22,7 @@ async fn plugins_are_managed_without_workspaces_or_sessions() {
     };
     config.server.access_token = SecretString::new("fixture-access");
     let server = Server::from_config(&config).await.unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let (stop, stopped) = tokio::sync::oneshot::channel();
@@ -30,7 +33,7 @@ async fn plugins_are_managed_without_workspaces_or_sessions() {
         .default_headers(
             [(
                 reqwest::header::AUTHORIZATION,
-                "Bearer fixture-access".parse().unwrap(),
+                format!("Bearer {gateway_token}").parse().unwrap(),
             )]
             .into_iter()
             .collect(),

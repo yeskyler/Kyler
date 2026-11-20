@@ -22,10 +22,9 @@ use crate::{error::ApiError, state::AppState};
 
 use axum::{
     Router,
-    extract::{DefaultBodyLimit, Request, State},
+    extract::{DefaultBodyLimit, State},
     http::{HeaderValue, Method, StatusCode, header},
-    middleware::{self, Next},
-    response::{IntoResponse, Response},
+    middleware,
     routing::{get, post},
 };
 use tower_http::cors::CorsLayer;
@@ -56,6 +55,20 @@ pub fn router(state: AppState) -> Router {
             get(|| async { axum::Json(serde_json::json!({"status":"ok"})) }),
         )
         .route("/v1/info", get(info))
+        .route("/v1/gateway/identity", get(crate::gateway::identity))
+        .route(
+            "/v1/gateway/tokens",
+            get(crate::gateway::tokens).post(crate::gateway::issue),
+        )
+        .route(
+            "/v1/gateway/tokens/{id}",
+            axum::routing::delete(crate::gateway::revoke),
+        )
+        .route(
+            "/v1/gateway/tokens/{id}/rotate",
+            post(crate::gateway::rotate),
+        )
+        .route("/v1/gateway/audit", get(crate::gateway::audit))
         .route(
             "/v1/preferences",
             get(preferences::get).put(preferences::update),
@@ -264,64 +277,18 @@ pub fn router(state: AppState) -> Router {
             )
         })
         .layer(DefaultBodyLimit::max(state.runs.settings.max_request_bytes))
-        .layer(middleware::from_fn_with_state(state.clone(), access))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::gateway::access,
+        ))
         .layer(cors)
         .with_state(state)
 }
-async fn access(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    let settings = &state.runs.settings;
-    if let Some(origin) = request.headers().get(header::ORIGIN) {
-        if !origin.to_str().is_ok_and(|origin| {
-            settings
-                .allowed_origins
-                .iter()
-                .any(|allowed| allowed == origin)
-        }) {
-            return ApiError::new(
-                StatusCode::FORBIDDEN,
-                "origin_not_allowed",
-                "This browser origin is not permitted.",
-            )
-            .into_response();
-        }
-    }
-    if request.method() != Method::OPTIONS
-        && request.uri().path() != "/healthz"
-        && !settings.access_token.is_empty()
-    {
-        let expected = format!("Bearer {}", settings.access_token.expose());
-        let supplied = request
-            .headers()
-            .get(header::AUTHORIZATION)
-            .map(|v| v.as_bytes())
-            .unwrap_or_default();
-        if !equal(supplied, expected.as_bytes()) {
-            let mut response = ApiError::new(
-                StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                "A valid bearer token is required.",
-            )
-            .into_response();
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-            return response;
-        }
-    }
-    if *state.runs.stopping.borrow() && request.uri().path() != "/healthz" {
-        return ApiError::stopping().into_response();
-    }
-    next.run(request).await
-}
-fn equal(a: &[u8], b: &[u8]) -> bool {
-    let mut difference = a.len() ^ b.len();
-    for i in 0..a.len().max(b.len()) {
-        difference |= (a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0)) as usize;
-    }
-    difference == 0
-}
 
-async fn info(State(state): State<AppState>) -> axum::Json<ServerInfo> {
+async fn info(
+    State(state): State<AppState>,
+    axum::Extension(principal): axum::Extension<kyler_protocol::api::gateway::Principal>,
+) -> axum::Json<ServerInfo> {
     let agent = &state.runs.agent;
     let environment = agent.workspace_environment();
     let model = agent.model_registry().and_then(|r| r.resolve(None).ok());
@@ -341,12 +308,20 @@ async fn info(State(state): State<AppState>) -> axum::Json<ServerInfo> {
                 .map(|m| m.info.sliding_window_tokens)
                 .unwrap_or_else(|| agent.sliding_window_tokens()),
         ),
-        default_workspace: state
-            .runs
-            .default_workspace
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned()),
-        cwd: environment.map(|e| e.cwd.to_string_lossy().into_owned()),
+        default_workspace: if !principal.role.administrative() {
+            None
+        } else {
+            state
+                .runs
+                .default_workspace
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned())
+        },
+        cwd: if principal.role.administrative() {
+            environment.map(|e| e.cwd.to_string_lossy().into_owned())
+        } else {
+            None
+        },
     })
 }
 

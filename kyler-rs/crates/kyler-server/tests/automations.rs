@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use std::{
     convert::Infallible,
     sync::{
@@ -76,6 +78,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     let server = Server::from_config_with_environment(&config, environment.clone())
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let store = server.state.runs.store.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}/v1", listener.local_addr().unwrap());
@@ -99,7 +102,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     assert_eq!(
         client
             .post(format!("{base}/automations"))
-            .bearer_auth("test-token")
+            .bearer_auth(&gateway_token)
             .json(&full_request)
             .send()
             .await
@@ -112,7 +115,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     assert_eq!(
         client
             .post(format!("{base}/automations"))
-            .bearer_auth("test-token")
+            .bearer_auth(&gateway_token)
             .json(&invalid_root)
             .send()
             .await
@@ -122,7 +125,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     );
     let response = client
         .post(format!("{base}/automations"))
-        .bearer_auth("test-token")
+        .bearer_auth(&gateway_token)
         .json(&request)
         .send()
         .await
@@ -136,7 +139,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     // Re-send the identical creation request; it must return the original task.
     let task: Value = client
         .post(format!("{base}/automations"))
-        .bearer_auth("test-token")
+        .bearer_auth(&gateway_token)
         .json(&request)
         .send()
         .await
@@ -149,7 +152,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     let id = task["id"].as_str().unwrap();
     let list: Value = client
         .get(format!("{base}/automations"))
-        .bearer_auth("test-token")
+        .bearer_auth(&gateway_token)
         .send()
         .await
         .unwrap()
@@ -160,7 +163,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     let preview: Value = client
         .post(format!("{base}/automations/preview"))
-        .bearer_auth("test-token")
+        .bearer_auth(&gateway_token)
         .json(&json!({"cron":"0 9 * * *","timezone":"Asia/Shanghai"}))
         .send()
         .await
@@ -174,7 +177,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     let trigger = json!({"request_id":uuid::Uuid::new_v4().to_string()});
     let run: Value = client
         .post(format!("{base}/automations/{id}/runs"))
-        .bearer_auth("test-token")
+        .bearer_auth(&gateway_token)
         .json(&trigger)
         .send()
         .await
@@ -186,7 +189,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
         .unwrap();
     let again: Value = client
         .post(format!("{base}/automations/{id}/runs"))
-        .bearer_auth("test-token")
+        .bearer_auth(&gateway_token)
         .json(&trigger)
         .send()
         .await
@@ -201,7 +204,7 @@ async fn tasks_use_core_admission_once_and_persist_history() {
         loop {
             let page: Value = client
                 .get(format!("{base}/automations/{id}/runs"))
-                .bearer_auth("test-token")
+                .bearer_auth(&gateway_token)
                 .send()
                 .await
                 .unwrap()

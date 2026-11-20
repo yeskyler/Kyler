@@ -52,6 +52,7 @@ impl ThreadManager {
         let environment = context.agent.execution_environment();
         let handle = ThreadHandle {
             inner: Arc::new(ThreadState {
+                principal: kyler_protocol::api::gateway::Principal::local(),
                 agent: context.agent,
                 environment: RwLock::new(environment),
                 session: RwLock::new(context.session),

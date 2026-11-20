@@ -94,7 +94,8 @@ fn server_remote_binding_and_browser_origins_are_explicit() {
         bind: "0.0.0.0:3000".parse().unwrap(),
         ..Default::default()
     };
-    assert!(server.validate().is_err());
+    // Authentication is enforced by the gateway store at listener startup.
+    server.validate().unwrap();
     server.access_token = SecretString::new("access-token");
     server.validate().unwrap();
     for origin in [
@@ -114,7 +115,7 @@ fn client_load_requires_no_model_configuration_and_obeys_connection_overrides() 
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("kyler.toml");
     std::fs::write(&path, "[client]\nserver_url='http://file:3000'\n").unwrap();
-    std::fs::write(directory.path().join(".env"),"KYLER_CLIENT_SERVER_URL=http://dotenv:3000\nKYLER_SERVER_TOKEN=dotenv-token\nKYLER_SERVER_BIND=invalid\n").unwrap();
+    std::fs::write(directory.path().join(".env"),"KYLER_CLIENT_SERVER_URL=http://dotenv:3000\nKYLER_GATEWAY_TOKEN=dotenv-token\nKYLER_SERVER_BIND=invalid\n").unwrap();
     let environment = HashMap::from([
         (
             "KYLER_CLIENT_SERVER_URL".into(),

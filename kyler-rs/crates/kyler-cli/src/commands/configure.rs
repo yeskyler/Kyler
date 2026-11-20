@@ -239,9 +239,6 @@ pub async fn configure(
         if config.web.enabled && config.web.access_token.is_empty() {
             config.web.access_token = super::access::generate_token()?;
         }
-        if !config.server.bind.ip().is_loopback() && config.server.access_token.is_empty() {
-            config.server.access_token = super::access::generate_token()?;
-        }
         if !interactive && automatic_connection {
             config.client.server_url = kyler_config::web::connect_url(config.server.bind);
         }
@@ -267,9 +264,18 @@ pub async fn configure(
             .validate()
             .map_err(|error| CliError::new(2, format!("Configuration not saved: {error}")))?;
     }
+    super::token::configure(&mut config).await?;
     let root = values
         .as_table_mut()
         .ok_or_else(|| CliError::new(2, "Configuration must be a TOML table"))?;
+    table(root, "server")?.insert(
+        "access_token".into(),
+        config.server.access_token.expose().into(),
+    );
+    table(root, "client")?.insert(
+        "access_token".into(),
+        config.client.access_token.expose().into(),
+    );
     if addresses || enable_web || config.web.enabled {
         table(root, "server")?.insert(
             "bind".into(),

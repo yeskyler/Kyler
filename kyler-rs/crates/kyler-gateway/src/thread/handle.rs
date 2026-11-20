@@ -11,6 +11,12 @@ use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 
 impl ThreadHandle {
+    /// Identity of this trusted in-process host. HTTP caller identity is checked
+    /// separately at admission and retained in gateway resource ownership records.
+    pub fn principal(&self) -> &kyler_protocol::api::gateway::Principal {
+        &self.inner.principal
+    }
+
     pub fn is_closed(&self) -> bool {
         self.inner.ops.is_closed()
     }

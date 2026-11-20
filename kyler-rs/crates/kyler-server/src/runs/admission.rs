@@ -24,8 +24,41 @@ impl RunManager {
         session_id: String,
         request: CreateRunRequest,
     ) -> ApiResult<RunAccepted> {
+        self.start_as(
+            kyler_protocol::api::gateway::Principal::local(),
+            session_id,
+            request,
+        )
+        .await
+    }
+    pub async fn start_as(
+        self: &Arc<Self>,
+        principal: kyler_protocol::api::gateway::Principal,
+        session_id: String,
+        mut request: CreateRunRequest,
+    ) -> ApiResult<RunAccepted> {
+        if !principal.role.executes()
+            || !self
+                .security
+                .active(&principal)
+                .await
+                .map_err(ApiError::storage)?
+        {
+            return Err(crate::gateway::forbidden());
+        }
+        if let Some(key) = &request.client_request_id {
+            if key.is_empty() || key.len() > 128 {
+                return Err(ApiError::bad(
+                    "client_request_id must contain 1 to 128 bytes.",
+                ));
+            }
+            request.client_request_id = Some(format!(
+                "{:x}",
+                Sha256::digest(format!("{}\0{key}", principal.id))
+            ));
+        }
         let manager = self.clone();
-        tokio::spawn(async move { manager.admit(session_id, request).await })
+        tokio::spawn(async move { manager.admit(session_id, request, principal).await })
             .await
             .map_err(|_| ApiError::internal())?
     }
@@ -33,6 +66,7 @@ impl RunManager {
         self: Arc<Self>,
         session_id: String,
         request: CreateRunRequest,
+        principal: kyler_protocol::api::gateway::Principal,
     ) -> ApiResult<RunAccepted> {
         valid_id(&session_id)?;
         if request.input.trim().is_empty()
@@ -147,12 +181,41 @@ impl RunManager {
             }
         }
 
+        let workspace = session.environment.as_ref().map(|environment| {
+            environment
+                .project_root()
+                .cloned()
+                .unwrap_or_else(|| environment.cwd.clone())
+        });
+        if !self
+            .security
+            .session_allowed(&principal, &session_id, workspace.as_deref())
+            .await
+            .map_err(ApiError::storage)?
+        {
+            return Err(crate::gateway::forbidden());
+        }
         self.validate_session_environment(&session)?;
         let selection = self.read_model_selection(&session_id).await?;
-        let agent = self
+        let mut agent = self
             .agent_for_session(&session)?
             .bind_model(selection.profile.as_deref())
             .map_err(|e| ApiError::bad(&e.to_string()))?;
+        if !principal.role.administrative() {
+            if let Some(environment) = agent.execution_environment() {
+                let environment = environment
+                    .with_workspace_boundary()
+                    .map_err(|_| crate::gateway::forbidden())?;
+                agent = agent.with_environment(Arc::new(environment));
+            }
+        }
+        if !principal.scope.models.is_empty()
+            && !agent.model_info().is_some_and(|model| {
+                kyler_gateway::security::Security::model_allowed(&principal, &model.profile)
+            })
+        {
+            return Err(crate::gateway::forbidden());
+        }
         if !images.is_empty() {
             agent.validate_image_input().map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "model_image_unsupported", "The selected model does not support image input. Select a vision-capable model with /model, then resend."))?;
         }
@@ -185,6 +248,16 @@ impl RunManager {
             agent.validate_document_input().map_err(|_|ApiError::new(StatusCode::BAD_REQUEST,"model_tools_unsupported","The selected model cannot read attachments using tools. Select a tool-capable model with /model."))?;
         }
         let run_id = uuid::Uuid::new_v4().to_string();
+        // A scoped caller must never reuse a connector process launched under an
+        // administrator's broader environment, even when sharing the same session.
+        let scoped_mcp = if !principal.role.administrative() {
+            let scope = format!("gateway:{}:{run_id}", principal.id);
+            agent = agent.with_mcp_scope(scope.clone());
+            agent.mcp_manager().cloned().map(|manager| (manager, scope))
+        } else {
+            None
+        };
+
         let permission = if self.approvals.is_some() {
             let policy = self
                 .core_thread(&session)
@@ -198,6 +271,13 @@ impl RunManager {
         } else {
             None
         };
+        if !principal.role.administrative()
+            && permission.as_ref().is_some_and(|permission| {
+                permission.mode == kyler_protocol::api::permissions::PermissionMode::FullAccess
+            })
+        {
+            return Err(crate::gateway::forbidden());
+        }
         self.prune_locked(&mut registry, true).await?;
         if *self.stopping.borrow() {
             return Err(ApiError::stopping());
@@ -216,6 +296,16 @@ impl RunManager {
             usage: None,
             error: None,
         };
+        self.security
+            .store
+            .bind(
+                "run".into(),
+                info.run_id.clone(),
+                principal.id.clone(),
+                chrono::Utc::now().timestamp_millis(),
+            )
+            .await
+            .map_err(ApiError::storage)?;
         if let Some(key) = &request.client_request_id {
             persistence::save_admission(
                 self.root.clone(),
@@ -288,7 +378,11 @@ impl RunManager {
                     tracing::warn!("Unable to join an idle core thread");
                 }
             }
+            drop(registry);
             drop(permit);
+            if let Some((mcp, scope)) = scoped_mcp {
+                mcp.close_session(&scope).await;
+            }
         });
         Ok(accepted(&info))
     }

@@ -330,7 +330,7 @@ async fn client_uses_user_config_and_ignores_project_config_and_dotenv() {
             .env("HOME", &home)
             .env_remove("KYLER_CONFIG")
             .env_remove("KYLER_CLIENT_SERVER_URL")
-            .env_remove("KYLER_SERVER_TOKEN")
+            .env_remove("KYLER_GATEWAY_TOKEN")
             .env_remove("KYLER_CLIENT_TOKEN")
             .current_dir(project)
             .kill_on_drop(true)

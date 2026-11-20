@@ -6,7 +6,7 @@ use crate::{
 use std::collections::HashMap;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
 };
@@ -39,6 +39,7 @@ pub fn summary(session: Session) -> SessionSummary {
 }
 pub async fn create(
     State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
     payload: Result<Option<Json<CreateSessionRequest>>, axum::extract::rejection::JsonRejection>,
 ) -> ApiResult<(StatusCode, Json<SessionSummary>)> {
     let request = payload
@@ -62,6 +63,33 @@ pub async fn create(
             });
         }
     }
+    let workspace = session.environment.as_ref().map(|environment| {
+        environment
+            .project_root()
+            .cloned()
+            .unwrap_or_else(|| environment.cwd.clone())
+    });
+    let inside_project = session.environment.as_ref().is_none_or(|environment| {
+        environment
+            .project_root()
+            .is_none_or(|root| environment.cwd.starts_with(root))
+    });
+    if !principal.role.administrative()
+        && (!inside_project
+            || principal.scope.workspaces.is_empty()
+            || !kyler_gateway::security::Security::workspace_allowed(
+                &principal,
+                workspace.as_deref(),
+            ))
+    {
+        return Err(crate::gateway::forbidden());
+    }
+    state
+        .runs
+        .security
+        .bind_session(&principal, &session.session_id)
+        .await
+        .map_err(ApiError::storage)?;
     let mode = request
         .workspace_mode
         .unwrap_or(kyler_protocol::api::session::WorkspaceMode::Project);
@@ -101,9 +129,38 @@ pub async fn get(
 }
 pub async fn list(
     State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
     query: Result<Query<Pagination>, QueryRejection>,
 ) -> ApiResult<Json<SessionPage>> {
     let (cursor, limit) = page(query)?;
+    if !principal.role.administrative() {
+        let catalog = state.runs.store.catalog();
+        let entries = tokio::task::spawn_blocking(move || catalog.list(true))
+            .await
+            .map_err(|_| ApiError::internal())?
+            .map_err(ApiError::storage)?;
+        let mut visible = Vec::new();
+        for session in entries {
+            if crate::gateway::session_allowed(&state, &principal, &session.session_id).await? {
+                visible.push(session);
+            }
+        }
+        if cursor > visible.len() {
+            return Err(ApiError::bad("Pagination cursor is out of range."));
+        }
+        let total = visible.len();
+        let end = cursor.saturating_add(limit).min(total);
+        let mut sessions = visible
+            .into_iter()
+            .skip(cursor)
+            .take(limit)
+            .collect::<Vec<_>>();
+        apply_run_statuses(&state, &mut sessions).await;
+        return Ok(Json(SessionPage {
+            sessions,
+            next_cursor: (end < total).then_some(end),
+        }));
+    }
     let mut page = state
         .runs
         .store

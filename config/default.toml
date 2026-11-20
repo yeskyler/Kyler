@@ -58,7 +58,8 @@ ansi = false
 # Human approval waits have their own timeout and do not consume active run time.
 approval_timeout_seconds = 300
 bind = "127.0.0.1:30001"
-# Supply KYLER_SERVER_TOKEN when listening on a non-loopback address.
+# Run kyler configure to issue a registered gateway credential for every listener.
+# KYLER_GATEWAY_TOKEN overrides the managed client credential; it never registers a secret.
 allowed_origins = []
 max_concurrent_runs = 8
 max_retained_runs = 128
@@ -72,7 +73,7 @@ shutdown_grace_seconds = 30
 
 [client]
 server_url = "http://127.0.0.1:30001"
-# Supply KYLER_CLIENT_TOKEN (or KYLER_SERVER_TOKEN) for authenticated servers.
+# Supply KYLER_CLIENT_TOKEN (or KYLER_GATEWAY_TOKEN) for authenticated servers.
 connect_timeout_seconds = 10
 request_timeout_seconds = 30
 stream_idle_timeout_seconds = 60
@@ -185,3 +186,7 @@ enabled = true
 max_active_tools = 6
 schema_token_budget = 4000
 explicit_wait_ms = 3000
+
+# HTTP business routes require gateway-issued tokens, even on loopback.
+# Run kyler configure to provision the managed service identity.
+# Manage additional clients with kyler token create/list/rotate/revoke.

@@ -1,7 +1,7 @@
 use crate::{error::ApiError, state::AppState};
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State},
 };
 
@@ -9,8 +9,28 @@ use kyler_protocol::api::models::{
     ModelCatalog, ModelConnectionSettings, ModelConnectionUpdate, ModelSelection, SessionModel,
 };
 
-pub async fn list(State(state): State<AppState>) -> Result<Json<ModelCatalog>, ApiError> {
-    state.runs.model_catalog().map(Json)
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
+) -> Result<Json<ModelCatalog>, ApiError> {
+    let mut catalog = state.runs.model_catalog()?;
+    catalog.models.retain(|model| {
+        kyler_gateway::security::Security::model_allowed(&principal, &model.profile)
+    });
+    catalog.providers.retain(|provider| {
+        catalog
+            .models
+            .iter()
+            .any(|model| model.provider == provider.provider)
+    });
+    if !kyler_gateway::security::Security::model_allowed(&principal, &catalog.default_profile) {
+        catalog.default_profile = catalog
+            .models
+            .first()
+            .map(|model| model.profile.clone())
+            .unwrap_or_default();
+    }
+    Ok(Json(catalog))
 }
 pub async fn reload(State(state): State<AppState>) -> Result<Json<ModelCatalog>, ApiError> {
     state.runs.reload_models().await.map(Json)
@@ -23,9 +43,18 @@ pub async fn get(
 }
 pub async fn select(
     State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
     Path(id): Path<String>,
     Json(selection): Json<ModelSelection>,
 ) -> Result<Json<SessionModel>, ApiError> {
+    let catalog = state.runs.model_catalog()?;
+    let profile = selection
+        .profile
+        .as_deref()
+        .unwrap_or(&catalog.default_profile);
+    if !kyler_gateway::security::Security::model_allowed(&principal, profile) {
+        return Err(crate::gateway::forbidden());
+    }
     state
         .runs
         .session_model(&id, Some(selection))

@@ -135,7 +135,7 @@ pub struct Harness {
     model: JoinHandle<()>,
 }
 impl Harness {
-    pub async fn new(settings: ServerSettings) -> Self {
+    pub async fn new(mut settings: ServerSettings) -> Self {
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(SessionStore::new(root.path()).await.unwrap());
         let calls = Arc::new(AtomicUsize::new(0));
@@ -163,6 +163,20 @@ impl Harness {
                 Arc::new(Echo) as Arc<dyn Tool>,
             )])),
         ));
+        let security = kyler_gateway::security::Security::open(store.directory()).unwrap();
+        let issued = security
+            .issue(
+                &kyler_protocol::api::gateway::Principal::local(),
+                kyler_protocol::api::gateway::CreateToken {
+                    name: "fixture-owner".into(),
+                    role: kyler_protocol::api::gateway::Role::Owner,
+                    scope: Default::default(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+        settings.access_token = kyler_config::SecretString::new(issued.secret);
         let mut headers = reqwest::header::HeaderMap::new();
         if !settings.access_token.is_empty() {
             headers.insert(

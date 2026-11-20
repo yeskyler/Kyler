@@ -480,10 +480,15 @@ else:
         version = subprocess.check_output([str(binary), "--version"], env=self.env, text=True)
         self.assertTrue(version.startswith("kyler "))
         environment = self.env.copy()
-        for key in ("KYLER_CONFIG", "KYLER_SESSION_DIR", "KYLER_SESSION_ENABLED", "KYLER_SERVER_TOKEN", "KYLER_INTERNAL_TOOL_WORKER"):
+        for key in ("KYLER_CONFIG", "KYLER_SESSION_DIR", "KYLER_SESSION_ENABLED", "KYLER_GATEWAY_TOKEN", "KYLER_INTERNAL_TOOL_WORKER"):
             environment.pop(key, None)
         environment["KYLER_SERVER_BIND"] = "127.0.0.1:0"
         environment["KYLER_WEB_ENABLED"] = "false"
+        provision = subprocess.run(
+            [str(binary), "token", "create", "--name", "installer-test", "--role", "owner"],
+            cwd=self.root, env=environment, capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(provision.returncode, 0, provision.stderr)
         process = subprocess.Popen(
             [str(binary), "serve", "--model", "installer-test", "--base-url", "http://127.0.0.1:1/v1", "--api-key", "installer-test"],
             cwd=self.root, env=environment, stdin=subprocess.DEVNULL,
@@ -549,7 +554,14 @@ else:
                     self.assertNotEqual(record["instance_id"], first_instance)
                 first_instance = record["instance_id"]
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                with opener.open(record["url"] + "/v1/info", timeout=5) as response:
+                saved = (self.home / ".kyler/config.toml").read_text()
+                server = saved.split("[server]\n", 1)[1].split("\n[", 1)[0]
+                token = json.loads(next(line.split("=", 1)[1].strip()
+                                        for line in server.splitlines()
+                                        if line.startswith("access_token =")))
+                request = urllib.request.Request(record["url"] + "/v1/info",
+                                                 headers={"Authorization": "Bearer " + token})
+                with opener.open(request, timeout=5) as response:
                     info = json.load(response)
                 self.assertEqual(info["instance_id"], first_instance)
                 self.assertEqual(info["model"], "installer-model")

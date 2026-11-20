@@ -43,7 +43,7 @@ export async function serverSettings() {
       ["127.0.0.1", "[::1]"].includes(local.hostname));
   const token =
     process.env.KYLER_CLIENT_TOKEN ??
-    process.env.KYLER_SERVER_TOKEN ??
+    process.env.KYLER_GATEWAY_TOKEN ??
     (client?.access_token || (sameBackend ? server?.access_token : ""));
   return {
     url,
@@ -259,9 +259,31 @@ export async function proxyRequest(request: Request, path: string[]) {
       cache: "no-store",
       redirect: "error",
     });
+    if (response.status === 401) {
+      await response.body?.cancel().catch(() => {});
+      return Response.json(
+        {
+          code: "gateway_authentication_failed",
+          message:
+            "The Web backend could not authenticate with the Kyler gateway. Run kyler configure or update its issued gateway token.",
+        },
+        {
+          status: 502,
+          headers: {
+            "cache-control": "no-store",
+            ...(response.headers.get("x-request-id")
+              ? { "x-request-id": response.headers.get("x-request-id")! }
+              : {}),
+          },
+        },
+      );
+    }
     return new Response(response.body, {
       status: response.status,
       headers: {
+        ...(response.headers.get("x-request-id")
+          ? { "x-request-id": response.headers.get("x-request-id")! }
+          : {}),
         "content-type": response.headers.get("content-type") ?? "application/json",
         "cache-control": "no-store, no-transform",
         ...(response.headers.has("content-disposition")

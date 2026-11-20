@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use std::{
     convert::Infallible,
     sync::{
@@ -174,6 +176,7 @@ async fn approval_gates_side_effects_and_permissions_update_during_run() {
     let server = Server::from_config_with_environment(&config, environment)
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let store = server.state.runs.store.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -181,7 +184,7 @@ async fn approval_gates_side_effects_and_permissions_update_during_run() {
     let task = tokio::spawn(server.serve(listener, async {
         let _ = done.await;
     }));
-    let http = reqwest::Client::new();
+    let http = gateway_auth::client(&gateway_token);
     let session: SessionSummary = http
         .post(format!("{base}/v1/sessions"))
         .send()
@@ -524,13 +527,14 @@ async fn configured_workspace_full_access_selection_survives_restart() {
         let server = Server::from_config_with_workspaces(&config, Arc::new(factory))
             .await
             .unwrap();
+        let gateway_token = gateway_auth::issue(&server).await;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let (stop, done) = oneshot::channel();
         let task = tokio::spawn(server.serve(listener, async {
             let _ = done.await;
         }));
-        let http = reqwest::Client::new();
+        let http = gateway_auth::client(&gateway_token);
         if id.is_none() {
             let session: SessionSummary = http
                 .post(format!("{base}/v1/sessions"))

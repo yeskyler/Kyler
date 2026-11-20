@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -37,6 +39,7 @@ async fn default_workspace_is_server_owned_without_authorizing_its_config_parent
     let server = Server::from_config_with_workspaces(&config, Arc::new(factory))
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let default = root.path().join("workspace").canonicalize().unwrap();
     let snapshot = server
         .state
@@ -92,7 +95,7 @@ async fn default_workspace_is_server_owned_without_authorizing_its_config_parent
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
-    let http = reqwest::Client::new();
+    let http = gateway_auth::client(&gateway_token);
     let info: Value = http
         .get(format!("{base}/v1/info"))
         .send()
@@ -248,6 +251,7 @@ async fn managed_directories_require_the_saved_owner_and_are_the_only_deleted_wo
     let server = Server::from_config_with_workspaces(&config, Arc::new(factory))
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let store = server.state.runs.store.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -255,7 +259,7 @@ async fn managed_directories_require_the_saved_owner_and_are_the_only_deleted_wo
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
-    let client = reqwest::Client::new();
+    let client = gateway_auth::client(&gateway_token);
     let mut created = Vec::new();
     for _ in 0..2 {
         let value: Value = client

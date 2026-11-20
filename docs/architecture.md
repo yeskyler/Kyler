@@ -44,7 +44,7 @@ and artifacts through their respective views.
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
 | `kyler-acp` | Official Agent Client Protocol v1 SDK transport, session routing, updates and permission requests |
 | `kyler-provider` | Provider adapters, model discovery, capability rules, request projection, stream decoding and error classification |
-| `kyler-gateway` | Channel-independent thread operations, turn admission, cancellation, preferences and event projection |
+| `kyler-gateway` | Issued identities, resource authorization, token lifecycle, audit coordination, thread operations, cancellation and event projection |
 | `kyler-core` | Agent runtime, tools, sessions, context, memory, sandbox, integration policy |
 | `kyler-store` | Shared SQLite infrastructure, scoped session/run indexes and UI preference persistence |
 | `kyler-skills` | Skill discovery, package validation, reviewed versions, caches, resources and package storage |
@@ -504,3 +504,11 @@ The local `learning` CLI and authenticated session-bound Memory/Skills APIs prov
 explicit review. Web integrates review into its Memory page and Skills library; neither the memory
 tool nor a background task can invoke its review operation. This release adds no
 SQLite tables and no automatic model requests. See [reviewed learning](learning.md).
+
+## Gateway authorization
+
+`kyler-gateway::security` owns issued identities, scoped resource checks and token
+lifecycle. `kyler-store::gateway` owns durable digests, ownership and audit records.
+Server middleware adapts matched HTTP operations to gateway authority and propagates
+the principal into session creation and admission. Core receives a narrowed execution
+workspace for member runs; it never authenticates HTTP credentials. See [gateway](gateway.md).

@@ -177,15 +177,18 @@ async fn review_is_delegated_collected_and_persisted_through_the_server() {
         .environment
         .unwrap()
         .cwd;
-    assert!(
-        Command::new("git")
-            .args(["clone", "--quiet", "--no-hardlinks", "--local"])
-            .arg(&root)
-            .arg(&private)
-            .status()
-            .unwrap()
-            .success()
-    );
+    // A project-bound session already executes in the seeded repository.
+    if private.canonicalize().unwrap() != root.canonicalize().unwrap() {
+        assert!(
+            Command::new("git")
+                .args(["clone", "--quiet", "--no-hardlinks", "--local"])
+                .arg(&root)
+                .arg(&private)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
     std::fs::write(private.join("code.rs"), "pub fn value() -> u32 { 2 }\n").unwrap();
     let run = harness
         .run(&session, "Review the current code change", "review")

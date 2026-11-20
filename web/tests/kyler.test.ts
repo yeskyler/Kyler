@@ -17,6 +17,31 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+test("gateway credential rejection is a backend error rather than a browser login failure", async (t) => {
+  const previous = { ...process.env };
+  t.after(() => {
+    process.env = previous;
+  });
+  process.env.KYLER_CONFIG = join(tmpdir(), `kyler-missing-${crypto.randomUUID()}.toml`);
+  process.env.KYLER_CLIENT_SERVER_URL = "http://127.0.0.1:30001";
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response("PRIVATE_GATEWAY_DIAGNOSTIC", {
+        status: 401,
+        headers: { "x-request-id": "fixture-request" },
+      }),
+  );
+  const response = await proxyRequest(new Request("http://localhost/api/kyler/info"), ["info"]);
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.get("x-request-id"), "fixture-request");
+  const body = await response.json();
+  assert.equal(body.code, "gateway_authentication_failed");
+  assert.match(body.message, /kyler configure/);
+  assert.ok(!JSON.stringify(body).includes("PRIVATE_GATEWAY_DIAGNOSTIC"));
+});
+
 function stream(events: object[], chunkSize = 7) {
   const bytes = new TextEncoder().encode(
     events.map((event) => `data: ${JSON.stringify(event)}\r\n\r\n`).join(""),
@@ -145,7 +170,7 @@ test("proxy reuses installed TOML endpoint and token with explicit workspace", a
   delete process.env.KYLER_CLIENT_SERVER_URL;
   delete process.env.KYLER_SERVER_URL;
   delete process.env.KYLER_CLIENT_TOKEN;
-  delete process.env.KYLER_SERVER_TOKEN;
+  delete process.env.KYLER_GATEWAY_TOKEN;
   process.env.KYLER_CONFIG = file;
   process.env.KYLER_WORKSPACE = root;
   const settings = await serverSettings();
@@ -167,7 +192,7 @@ test("custom upstreams do not inherit the local backend token", async (t) => {
     "KYLER_CLIENT_SERVER_URL",
     "KYLER_SERVER_URL",
     "KYLER_CLIENT_TOKEN",
-    "KYLER_SERVER_TOKEN",
+    "KYLER_GATEWAY_TOKEN",
   ])
     delete process.env[name];
   const file = join(root, "config.toml");

@@ -32,6 +32,7 @@ pub struct NewThread {
 pub use hosted::HostedThread;
 pub use protocol::{HostedTurn, ThreadEvent, ThreadNotification, ThreadOp};
 pub(crate) struct ThreadState {
+    pub(super) principal: kyler_protocol::api::gateway::Principal,
     pub agent: Agent,
     pub environment: RwLock<Option<Arc<kyler_core::ExecutionEnvironment>>>,
     pub session: RwLock<Session>,

@@ -161,6 +161,7 @@ impl ThreadManager {
         let (events, receive_events) = mpsc::channel(128);
         let handle = ThreadHandle {
             inner: Arc::new(ThreadState {
+                principal: kyler_protocol::api::gateway::Principal::local(),
                 agent,
                 environment: RwLock::new(Some(environment)),
                 session: RwLock::new(session.clone()),

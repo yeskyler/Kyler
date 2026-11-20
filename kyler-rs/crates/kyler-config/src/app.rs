@@ -193,6 +193,7 @@ pub struct ServerSettings {
     pub background_command_timeout_ms: u32,
     pub approval_timeout_seconds: u64,
     pub bind: SocketAddr,
+    /// Credential used by managed service clients; authentication uses the gateway database.
     pub access_token: SecretString,
     pub allowed_origins: Vec<String>,
     pub max_concurrent_runs: usize,
@@ -236,10 +237,6 @@ impl ServerSettings {
         anyhow::ensure!(
             (1..=86400).contains(&self.approval_timeout_seconds),
             "server.approval_timeout_seconds must be in 1..=86400"
-        );
-        ensure!(
-            self.bind.ip().is_loopback() || !self.access_token.is_empty(),
-            "non-loopback server binding requires server.access_token"
         );
         ensure!(
             self.access_token

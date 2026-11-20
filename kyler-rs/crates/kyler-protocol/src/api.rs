@@ -3,6 +3,7 @@ pub mod attachments;
 pub mod automations;
 pub mod compaction;
 pub mod event;
+pub mod gateway;
 pub mod history;
 pub mod images;
 pub mod inspection;

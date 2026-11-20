@@ -1,4 +1,4 @@
-//! Safe public model failures, with the original cause retained for local diagnostics.
+//! Safe model diagnostics. Provider bodies are discarded after classification.
 use std::fmt::{Display, Formatter};
 
 use async_openai::error::OpenAIError;
@@ -15,11 +15,19 @@ enum Kind {
 #[derive(Debug)]
 pub struct ModelError {
     kind: Kind,
-    source: anyhow::Error,
     details: ModelFailureDetails,
 }
 impl ModelError {
     pub fn wrap(source: anyhow::Error) -> Self {
+        if let Some(existing) = source
+            .chain()
+            .find_map(|error| error.downcast_ref::<Self>())
+        {
+            return Self {
+                kind: existing.kind,
+                details: existing.details.clone(),
+            };
+        }
         let kind = source
             .chain()
             .find_map(|error| {
@@ -38,21 +46,78 @@ impl ModelError {
                 kyler_provider::error::FailureKind::InvalidResponse,
             ));
         let mut details = ModelFailureDetails::default();
-        fn identifier(value: Option<&str>) -> Option<String> {
+        // Codes and parameters are also provider-controlled strings. Publish only
+        // known codes and request-field roots, never arbitrary identifier-shaped data.
+        fn code(value: Option<&str>) -> Option<String> {
             value
-                .filter(|v| {
-                    v.len() <= 128
-                        && v.bytes()
-                            .all(|c| c.is_ascii_alphanumeric() || b"_.-[]".contains(&c))
+                .filter(|code| {
+                    matches!(
+                        *code,
+                        "invalid_request_error"
+                            | "unsupported_parameter"
+                            | "unsupported_value"
+                            | "invalid_parameter"
+                            | "model_not_found"
+                            | "invalid_api_key"
+                            | "authentication_error"
+                            | "permission_denied"
+                            | "rate_limit_exceeded"
+                            | "rate_limit_error"
+                            | "insufficient_quota"
+                            | "context_length_exceeded"
+                            | "server_error"
+                            | "service_unavailable"
+                            | "invalid_prompt"
+                            | "content_policy_violation"
+                            | "invalid_value"
+                            | "invalid_model"
+                            | "request_timeout"
+                    )
                 })
                 .map(str::to_owned)
+        }
+        fn parameter(value: Option<&str>) -> Option<String> {
+            let root = value?.split(['.', '[']).next()?;
+            matches!(
+                root,
+                "model"
+                    | "messages"
+                    | "tools"
+                    | "tool_choice"
+                    | "parallel_tool_calls"
+                    | "functions"
+                    | "function_call"
+                    | "temperature"
+                    | "top_p"
+                    | "max_tokens"
+                    | "max_completion_tokens"
+                    | "max_output_tokens"
+                    | "reasoning"
+                    | "reasoning_effort"
+                    | "enable_thinking"
+                    | "stream"
+                    | "stream_options"
+                    | "response_format"
+                    | "input"
+                    | "instructions"
+                    | "include"
+                    | "store"
+                    | "text"
+                    | "metadata"
+                    | "stop"
+                    | "seed"
+                    | "n"
+                    | "presence_penalty"
+                    | "frequency_penalty"
+            )
+            .then(|| root.to_owned())
         }
         if let Some(OpenAIError::ApiError(response)) =
             source.chain().find_map(|e| e.downcast_ref::<OpenAIError>())
         {
             details.http_status = Some(response.status_code.as_u16());
-            details.provider_code = identifier(response.api_error.code.as_deref());
-            details.parameter = identifier(response.api_error.param.as_deref());
+            details.provider_code = code(response.api_error.code.as_deref());
+            details.parameter = parameter(response.api_error.param.as_deref());
         }
         let body = source
             .chain()
@@ -71,8 +136,8 @@ impl ModelError {
                         .get("error")
                         .filter(|v| v.is_object())
                         .unwrap_or(&value);
-                    details.provider_code = identifier(error["code"].as_str());
-                    details.parameter = identifier(error["param"].as_str());
+                    details.provider_code = code(error["code"].as_str());
+                    details.parameter = parameter(error["param"].as_str());
                 }
             }
         }
@@ -84,11 +149,7 @@ impl ModelError {
                     | kyler_provider::error::FailureKind::Unavailable
             )
         );
-        Self {
-            kind,
-            source,
-            details,
-        }
+        Self { kind, details }
     }
     pub fn with_model(mut self, model: &str, protocol: WireProtocol) -> Self {
         self.details.model = Some(model.into());
@@ -182,11 +243,7 @@ impl Display for ModelError {
         f.write_str(&self.public_error().message)
     }
 }
-impl std::error::Error for ModelError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.source.as_ref())
-    }
-}
+impl std::error::Error for ModelError {}
 
 #[cfg(test)]
 mod tests {
@@ -219,6 +276,20 @@ mod tests {
         assert!(details.suggestion.as_ref().unwrap().contains("responses"));
     }
     #[test]
+    fn identifier_shaped_provider_values_are_not_a_secret_exfiltration_channel() {
+        let private = "PRIVATE_IDENTIFIER_VALUE";
+        let raw = serde_json::json!({"error":{"code":private,"param":private,"message":private}})
+            .to_string();
+        let failure = ModelError::wrap(
+            OpenAIError::StreamError(Box::new(async_openai::error::StreamError::EventStream(raw)))
+                .into(),
+        );
+        let public = failure.public_error();
+        assert!(!serde_json::to_string(&public).unwrap().contains(private));
+        let details = public.details.unwrap();
+        assert!(details.provider_code.is_none() && details.parameter.is_none());
+    }
+    #[test]
     fn flat_provider_vision_errors_are_classified_without_exposing_raw_details() {
         let parse_error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
         let raw = r#"{"code":20041,"message":"The model is not a VLM (Vision Language Model). Please use text-only prompts. PRIVATE_KEY data:image/png;base64,PRIVATE_IMAGE","data":null}"#;
@@ -228,7 +299,7 @@ mod tests {
         assert_eq!(public.code, "model_image_unsupported");
         assert!(public.message.contains("/model"));
         assert!(!format!("{public:?}").contains("PRIVATE"));
-        assert!(format!("{:#}", anyhow::Error::new(failure)).contains("PRIVATE_KEY"));
+        assert!(!format!("{:#}", anyhow::Error::new(failure)).contains("PRIVATE_KEY"));
     }
     #[test]
     fn structured_provider_errors_have_safe_actionable_messages() {
@@ -242,7 +313,6 @@ mod tests {
             let kind = classify(code, "PRIVATE_PROVIDER_TEXT", Some(status));
             let public = ModelError {
                 kind: Kind::Provider(kind),
-                source: anyhow::anyhow!("PRIVATE"),
                 details: Default::default(),
             }
             .public_error();

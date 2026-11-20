@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use std::{path::PathBuf, sync::Arc};
 
 use serde_json::{Value, json};
@@ -37,6 +39,7 @@ async fn sessions_share_only_project_identity_and_commands_cannot_escape_their_p
     let server = Server::from_config_with_workspaces(&config, factory.clone())
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let store = server.state.runs.store.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -44,7 +47,7 @@ async fn sessions_share_only_project_identity_and_commands_cannot_escape_their_p
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
-    let client = reqwest::Client::new();
+    let client = gateway_auth::client(&gateway_token);
     async fn create(
         client: &reqwest::Client,
         base: &str,
@@ -254,6 +257,7 @@ async fn project_sessions_execute_in_project_with_independent_history_and_host_b
     let server = Server::from_config_with_workspaces(&config, factory.clone())
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let store = server.state.runs.store.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -261,7 +265,7 @@ async fn project_sessions_execute_in_project_with_independent_history_and_host_b
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
-    let client = reqwest::Client::new();
+    let client = gateway_auth::client(&gateway_token);
     let mut sessions = Vec::new();
     for index in 0..2 {
         let summary: SessionSummary = client

@@ -489,14 +489,28 @@ async fn sse_subscriptions_are_limited_and_released_on_disconnect() {
 }
 
 #[tokio::test]
-async fn actual_listener_cannot_bypass_loopback_authentication_requirement() {
+async fn actual_listener_requires_an_active_gateway_administrator() {
     let mut h = Harness::new(ServerSettings::default()).await;
     h.close().await;
     let server = Server::with_agent(h.settings.clone(), h.agent.clone(), h.store.clone())
         .await
         .unwrap();
+    for token in server.state.runs.security.store.list().await.unwrap() {
+        server
+            .state
+            .runs
+            .security
+            .revoke(&kyler_protocol::api::gateway::Principal::local(), &token.id)
+            .await
+            .unwrap();
+    }
     let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
-    let result = server.serve(listener, std::future::pending()).await;
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        server.serve(listener, std::future::pending()),
+    )
+    .await
+    .expect("Unauthenticated startup must fail promptly");
     assert!(result.is_err());
 }
 
@@ -677,7 +691,7 @@ async fn provider_image_rejection_has_safe_matching_manifest_and_stream_errors()
     assert!(!public.contains("PRIVATE_PROVIDER_VALUE") && !public.contains("PRIVATE_IMAGE"));
     let saved = h.store.load(&session).await.unwrap();
     assert!(
-        saved
+        !saved
             .execution
             .unwrap()
             .error

@@ -1,3 +1,5 @@
+#[path = "support/auth.rs"]
+mod gateway_auth;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -59,6 +61,7 @@ async fn skill_api_requires_current_reviewed_fingerprint_and_preserves_workspace
     let server = Server::from_config_with_environment(&config, environment)
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let (stop, stopped) = tokio::sync::oneshot::channel();
@@ -69,7 +72,7 @@ async fn skill_api_requires_current_reviewed_fingerprint_and_preserves_workspace
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::AUTHORIZATION,
-        "Bearer server-key".parse().unwrap(),
+        format!("Bearer {gateway_token}").parse().unwrap(),
     );
     let http = reqwest::Client::builder()
         .default_headers(headers)
@@ -487,6 +490,7 @@ async fn structured_skill_selection_is_versioned_and_part_of_admission_identity(
     let server = Server::from_config_with_environment(&config, environment)
         .await
         .unwrap();
+    let gateway_token = gateway_auth::issue(&server).await;
     let store = server.state.runs.store.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -494,7 +498,7 @@ async fn structured_skill_selection_is_versioned_and_part_of_admission_identity(
     let task = tokio::spawn(server.serve(listener, async {
         let _ = stopped.await;
     }));
-    let http = reqwest::Client::new();
+    let http = gateway_auth::client(&gateway_token);
     let session: SessionSummary = http
         .post(format!("{base}/v1/sessions"))
         .send()

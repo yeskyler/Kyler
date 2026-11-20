@@ -50,7 +50,7 @@ async fn fresh_clients_restore_preferences_and_observe_runs_without_admitting_ag
     let fresh = reqwest::Client::new();
     let active: Value = fresh
         .get(format!("{}/v1/sessions/{session}/active-run", h.url))
-        .bearer_auth("catalog-test")
+        .bearer_auth(h.settings.access_token.expose())
         .send()
         .await
         .unwrap()
@@ -63,7 +63,7 @@ async fn fresh_clients_restore_preferences_and_observe_runs_without_admitting_ag
     assert_eq!(active["input"], "wait-before-reply");
     let preferences: Value = fresh
         .get(format!("{}/v1/preferences", h.url))
-        .bearer_auth("catalog-test")
+        .bearer_auth(h.settings.access_token.expose())
         .send()
         .await
         .unwrap()
@@ -73,7 +73,7 @@ async fn fresh_clients_restore_preferences_and_observe_runs_without_admitting_ag
     assert!(preferences["sidebar_collapsed"].as_bool().unwrap());
     let patched: Value = fresh
         .put(format!("{}/v1/preferences", h.url))
-        .bearer_auth("catalog-test")
+        .bearer_auth(h.settings.access_token.expose())
         .json(&json!({"sidebar_collapsed":false}))
         .send()
         .await
@@ -88,7 +88,7 @@ async fn fresh_clients_restore_preferences_and_observe_runs_without_admitting_ag
     assert_eq!(h.calls.load(Ordering::SeqCst), 1);
     let active: Value = fresh
         .get(format!("{}/v1/sessions/{session}/active-run", h.url))
-        .bearer_auth("catalog-test")
+        .bearer_auth(h.settings.access_token.expose())
         .send()
         .await
         .unwrap()
@@ -112,7 +112,7 @@ async fn fresh_clients_restore_preferences_and_observe_runs_without_admitting_ag
     assert_eq!(
         fresh
             .put(format!("{}/v1/preferences", h.url))
-            .bearer_auth("catalog-test")
+            .bearer_auth(h.settings.access_token.expose())
             .json(&json!({"last_session_id":uuid::Uuid::new_v4().to_string()}))
             .send()
             .await

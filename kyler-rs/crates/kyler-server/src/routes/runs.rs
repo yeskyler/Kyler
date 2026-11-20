@@ -4,7 +4,7 @@ use crate::{
 };
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State, rejection::JsonRejection},
     http::StatusCode,
 };
@@ -13,6 +13,7 @@ use kyler_protocol::api::run::{CreateRunRequest, RunAccepted, RunInfo};
 
 pub async fn create(
     State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
     Path(id): Path<String>,
     body: Result<Json<CreateRunRequest>, JsonRejection>,
 ) -> ApiResult<(StatusCode, Json<RunAccepted>)> {
@@ -29,7 +30,7 @@ pub async fn create(
     })?;
     Ok((
         StatusCode::ACCEPTED,
-        Json(state.runs.start(id, request).await?),
+        Json(state.runs.start_as(principal, id, request).await?),
     ))
 }
 pub async fn get(
