@@ -316,7 +316,11 @@ thread operations, cancellation, or channel event projection. Provider tests and
 the core Responses fixture cover protocol routing and complete tool continuations
 without credentials or paid model calls. Local fixture tests need loopback sockets.
 
-The installer uses a pinned local `inquire` patch under `kyler-rs/vendor/inquire`.
-Its opt-in `compact-options` feature removes the Select gutter for empty prefixes;
-selection uses terminal foreground colors, with a plain-terminal `Selected:` fallback.
-Keep the upstream license and patch notes when updating this dependency.
+The installer and configuration wizard use the upstream `cliclack` crate with a
+shared foreground-only theme, grouped review/connection notes and searchable model
+selection. `indicatif` renders installation progress; prompts and progress never
+render concurrently. Escape and Ctrl+C cancel a prompt, while explicit Back items
+navigate selection pages. Noninteractive installation uses plain status lines.
+Secret input uses a bracketed-paste reader with the same Clack theme; this
+prevents pasted newlines from submitting a key prefix into subsequent prompts.
+Dependencies come from crates.io; no local terminal-library patch is maintained.

@@ -29,7 +29,7 @@ checks, native sandbox checks, activation and configuration UI run in Rust. The
 bootstrap uses one brief preparation line. Installation groups its checks into
 **Prepare package**, **Check environment**, and **Install Kyler**, then opens
 configuration and launch. All stages share inline `indicatif` progress and
-`inquire` setup controls. Diagnostics are saved to
+`cliclack` setup controls. Diagnostics are saved to
 private installation logs; failures show a concise reason and the log path.
 
 Packages also provide `kyler-installer-vVERSION-TARGET`, covered by the release's
@@ -180,16 +180,16 @@ OpenAI and SiliconFlow use their official API URLs without an address prompt. On
 Custom（OpenAI Completion） asks for a base URL; use it for local servers and compatible gateways.
 Existing custom endpoints default to Custom（OpenAI Completion）.
 
-Setup is an inline terminal wizard built with Rust `inquire`. It keeps normal
+Setup is an inline terminal wizard built with Rust `cliclack`. It keeps normal
 terminal history, uses arrow-key selection, and filters lists as you type. Completed
-questions collapse to one-line answers; API keys are never echoed. Enter continues,
-Esc returns to the previous step, and Ctrl+C cancels. At the first step Esc cancels.
+questions collapse to answers beneath their labels; API keys are never echoed. Enter
+continues, explicit **Back** items revisit selection steps, and Esc or Ctrl+C cancels.
 It does not switch to a full-screen alternate terminal buffer.
 
 Setup fetches model metadata, never a generation request. Loading has a progress
 indicator and supports Esc/Ctrl+C. If discovery fails or times out, choose **Retry
-discovery**, **Use cached models**, or **Enter model ID manually**. These actions
-remain visible even when a search has no model matches. Back-navigation keeps draft
+discovery**, **Use cached models**, or **Enter model ID manually**. Clear the search to see these actions if no model
+matches. Back-navigation keeps draft
 values and avoids refetching an unchanged connection's directory.
 
 For multiple configured providers, first select the connection to configure; other

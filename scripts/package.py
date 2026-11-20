@@ -226,9 +226,6 @@ def main():
         shutil.copy2(binary, bundle / "bin/kyler")
         shutil.copy2(node, bundle / "runtime/node")
         (bundle / "licenses").mkdir()
-        inquire_license = ROOT / "kyler-rs/vendor/inquire/LICENSE"
-        if inquire_license.is_file():
-            shutil.copy2(inquire_license, bundle / "licenses/INQUIRE-LICENSE")
         runtime_tools = {"ripgrep": prepare_ripgrep(bundle / "runtime/tools/rg", bundle / "licenses/ripgrep", temporary, node_os, arch, args.ripgrep_binary)}
         if node_os == "linux":
             runtime_tools["sandbox"] = prepare_linux_sandbox(bundle / "runtime/sandbox", args.sandbox_dist)

@@ -243,10 +243,6 @@ impl Wizard {
                 Step::Model => {
                     if !self.directory_matches() {
                         if let Err(e) = self.load_directory(prompts).await {
-                            if e.code == super::input::BACK {
-                                self.step = Step::Key;
-                                continue;
-                            }
                             return Err(e);
                         }
                     }
@@ -255,6 +251,9 @@ impl Wizard {
                         &self.models,
                         !self.cached.is_empty(),
                     ) {
+                        Ok(ModelChoice::Back) => {
+                            Err(CliError::new(super::input::BACK, "Return to credentials"))
+                        }
                         Ok(ModelChoice::Selected(id)) => {
                             self.choose(id);
                             if advanced {
@@ -394,23 +393,22 @@ fn window_policy(config: &AppConfig) -> (ContextPolicy, bool) {
         (policy, config.context.auto_model_window)
     }
 }
-pub(super) fn review(config: &AppConfig, advanced: bool) -> Result<()> {
+pub(super) fn review(config: &AppConfig, advanced: bool, access: Option<&str>) -> Result<()> {
     let settings = config.effective_models();
     let profile = settings
         .profiles
         .get(&settings.default)
         .ok_or_else(|| CliError::new(2, "Select a model before saving"))?;
     let provider = &settings.providers[&profile.provider];
-    eprintln!("Review setup");
-    ui::field(
-        "Provider",
+    let mut details = vec![format!(
+        "Provider  {}",
         match Adapter::resolve(provider.adapter, &provider.base_url).0 {
             AdapterKind::Openai => "OpenAI",
             AdapterKind::Siliconflow => "SiliconFlow",
             _ => "Custom（OpenAI Completion）",
-        },
-    );
-    summary(
+        }
+    )];
+    details.push(summary(
         Adapter::resolve(provider.adapter, &provider.base_url),
         &profile.model,
         &profile.capabilities,
@@ -418,8 +416,13 @@ pub(super) fn review(config: &AppConfig, advanced: bool) -> Result<()> {
         &window_policy(config).0,
         window_policy(config).1,
         advanced,
-    )
+    )?);
+    if let Some(access) = access {
+        details.push(format!("Access    {access}"));
+    }
+    ui::note("Review setup", &details.join("\n")).map_err(CliError::io)
 }
+
 fn wizard_adapter(provider: &ProviderSettings) -> AdapterKind {
     let inferred = Adapter::resolve(AdapterKind::Auto, &provider.base_url).0;
     if provider.adapter == AdapterKind::Generic || inferred == AdapterKind::Generic {
@@ -452,7 +455,7 @@ fn summary(
     policy: &ContextPolicy,
     automatic: bool,
     advanced: bool,
-) -> Result<()> {
+) -> Result<String> {
     let inferred = adapter.capabilities(model, effort);
     let capacity = overrides.max_context_tokens.or(inferred.max_context_tokens);
     let mut effective = policy.clone();
@@ -465,40 +468,53 @@ fn summary(
             format!("Invalid context budget: {e}. Use configure --advanced to adjust it."),
         )
     })?;
-    ui::field("Model", model);
-    if !advanced {
-        return Ok(());
-    }
-    match capacity {
-        Some(tokens) => eprintln!("Model context capacity: {tokens} tokens (capability metadata)."),
-        None => eprintln!("Model context capacity: unknown."),
-    }
-    eprintln!(
-        "Context budget: {} tokens ({}).",
-        effective.context_tokens,
-        if !automatic {
-            "explicit override; preserved"
-        } else if capacity.is_some() {
-            "automatic"
-        } else {
-            "fallback budget; not a verified model capacity"
-        }
-    );
     let reasoning = overrides.reasoning.as_ref().or(inferred.reasoning.as_ref());
-    if let Some(r) = reasoning.filter(|r| !r.levels.is_empty()) {
-        eprintln!(
-            "Thinking levels: {}. Default: {}.",
-            r.levels
-                .iter()
-                .map(|l| l.reasoning_effort())
-                .collect::<Vec<_>>()
-                .join(", "),
-            r.default.reasoning_effort()
-        );
-    } else {
-        eprintln!("Thinking level selection: unavailable or not yet known.");
+    let level = effort
+        .or_else(|| reasoning.map(|r| r.default))
+        .unwrap_or(kyler_protocol::api::models::ThinkingLevel::Off);
+    let mut details = vec![
+        format!("Model     {model}"),
+        format!(
+            "Thinking  {}",
+            match level {
+                kyler_protocol::api::models::ThinkingLevel::Off => "Off",
+                kyler_protocol::api::models::ThinkingLevel::Low => "Low",
+                kyler_protocol::api::models::ThinkingLevel::Medium => "Medium",
+                kyler_protocol::api::models::ThinkingLevel::High => "High",
+                kyler_protocol::api::models::ThinkingLevel::Xhigh => "Extra high",
+                kyler_protocol::api::models::ThinkingLevel::Max => "Max",
+            }
+        ),
+    ];
+    if advanced {
+        details.push(match capacity {
+            Some(tokens) => format!("Capacity  {tokens} tokens"),
+            None => "Capacity  Unknown".into(),
+        });
+        details.push(format!(
+            "Context   {} tokens ({})",
+            effective.context_tokens,
+            if !automatic {
+                "explicit override; preserved"
+            } else if capacity.is_some() {
+                "automatic"
+            } else {
+                "fallback budget; not a verified model capacity"
+            }
+        ));
+        if let Some(reasoning) = reasoning.filter(|r| !r.levels.is_empty()) {
+            details.push(format!(
+                "Levels    {}",
+                reasoning
+                    .levels
+                    .iter()
+                    .map(|level| level.reasoning_effort())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
     }
-    Ok(())
+    Ok(details.join("\n"))
 }
 
 pub(super) fn write_window(

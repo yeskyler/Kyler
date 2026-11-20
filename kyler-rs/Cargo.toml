@@ -1,6 +1,5 @@
 [workspace]
 resolver = "3"
-exclude = ["vendor/inquire"]
 members = [
     "crates/kyler-protocol",
     "crates/kyler-core",
@@ -50,7 +49,8 @@ kyler-scheduler = { path = "crates/kyler-scheduler" }
 kyler-evals = { path = "crates/kyler-evals" }
 
 # external crates
-inquire = { version = "=0.9.4", default-features = false, features = ["compact-options"] }
+cliclack = "=0.5.7"
+console = "0.16"
 indicatif = "=0.18.6"
 rmcp = { version = "2.2.0", features = ["client","server","macros","transport-child-process","transport-io","transport-streamable-http-client-reqwest",]}
 async-openai = {version = "0.41.0", features = ["chat-completion","embedding","responses","byot"]}
@@ -97,6 +97,3 @@ croner = "4"
 # Installer validation hashes complete release bundles, including debug binaries.
 [profile.dev.package.sha2]
 opt-level = 3
-
-[patch.crates-io]
-inquire = { path = "vendor/inquire" }

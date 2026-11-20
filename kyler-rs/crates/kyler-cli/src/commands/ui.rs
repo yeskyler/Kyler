@@ -1,51 +1,145 @@
-//! Shared inline progress and prompt styling for installation and configuration.
+//! Shared Clack theme and progress rendering for installation and setup.
 use std::{io::IsTerminal, time::Duration};
 
+use cliclack::{Theme, ThemeState};
+use console::Style;
 use indicatif::{ProgressBar, ProgressStyle};
-use inquire::ui::{Attributes, Color, IndexPrefix, RenderConfig, StyleSheet, Styled};
 
 pub(super) const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-#[derive(Clone, Copy)]
-pub(super) enum Tone {
-    Active,
-    Success,
-    Warning,
-    Error,
-}
-fn color_mode(terminal: bool, term: Option<&str>, no_color: bool) -> bool {
-    terminal && term != Some("dumb") && !no_color
-}
 pub(super) fn terminal_controls() -> bool {
     std::io::stderr().is_terminal() && std::env::var("TERM").as_deref() != Ok("dumb")
 }
-pub(super) fn colors_enabled() -> bool {
-    color_mode(
-        std::io::stderr().is_terminal(),
-        std::env::var("TERM").ok().as_deref(),
-        std::env::var_os("NO_COLOR").is_some(),
+fn colors_enabled() -> bool {
+    terminal_controls() && std::env::var_os("NO_COLOR").is_none()
+}
+pub(super) fn initialize() {
+    console::set_colors_enabled(colors_enabled());
+    console::set_colors_enabled_stderr(colors_enabled());
+    cliclack::set_theme(KylerTheme);
+}
+struct KylerTheme;
+impl Theme for KylerTheme {
+    fn bar_color(&self, state: &ThemeState) -> Style {
+        match state {
+            ThemeState::Active => Style::new().for_stderr().cyan(),
+            ThemeState::Cancel => Style::new().for_stderr().red(),
+            ThemeState::Error(_) => Style::new().for_stderr().yellow(),
+            ThemeState::Submit => Style::new().for_stderr().dim(),
+        }
+    }
+    fn input_style(&self, state: &ThemeState) -> Style {
+        match state {
+            ThemeState::Cancel => Style::new().for_stderr().dim(),
+            _ => Style::new().for_stderr(),
+        }
+    }
+    fn radio_symbol(&self, state: &ThemeState, selected: bool) -> String {
+        match state {
+            ThemeState::Active | ThemeState::Error(_) if selected => {
+                Style::new().for_stderr().cyan().apply_to("●").to_string()
+            }
+            ThemeState::Active | ThemeState::Error(_) => {
+                Style::new().for_stderr().dim().apply_to("○").to_string()
+            }
+            _ => String::new(),
+        }
+    }
+    fn radio_item(&self, state: &ThemeState, selected: bool, label: &str, hint: &str) -> String {
+        if matches!(state, ThemeState::Submit | ThemeState::Cancel) {
+            return if selected {
+                label.into()
+            } else {
+                String::new()
+            };
+        }
+        let label = if selected {
+            Style::new()
+                .for_stderr()
+                .cyan()
+                .bold()
+                .apply_to(label)
+                .to_string()
+        } else {
+            label.into()
+        };
+        let hint = if selected && !hint.is_empty() {
+            format!(
+                " {}",
+                Style::new()
+                    .for_stderr()
+                    .dim()
+                    .apply_to(format!("({hint})"))
+            )
+        } else {
+            String::new()
+        };
+        format!("{} {label}{hint}", self.radio_symbol(state, selected))
+    }
+    fn format_scroll_indicator(&self, _: &ThemeState, _: bool, _: bool) -> String {
+        String::new()
+    }
+}
+pub(super) fn credential_frame(label: &str, hint: &str) -> String {
+    format!(
+        "{}│  {hint}\n{}",
+        KylerTheme.format_header(&ThemeState::Active, label),
+        KylerTheme.format_footer(&ThemeState::Active)
     )
 }
-pub(super) fn paint(value: &str, tone: Tone) -> String {
-    if !colors_enabled() {
-        return value.into();
-    }
-    let code = match tone {
-        Tone::Active => "1;36",
-        Tone::Success => "32",
-        Tone::Warning => "33",
-        Tone::Error => "31",
-    };
-    format!("\x1b[{code}m{value}\x1b[0m")
+pub(super) fn answer(label: &str, value: &str) {
+    eprint!(
+        "{}│  {value}\n│\n",
+        KylerTheme.format_header(&ThemeState::Submit, label)
+    );
 }
 pub(super) fn field(label: &str, value: &str) {
-    eprintln!("{label}:{value}");
+    if terminal_controls() {
+        let _ = cliclack::log::remark(format!("{label}: {value}"));
+    } else {
+        eprintln!("{label}: {value}");
+    }
+}
+pub(super) fn note(title: &str, content: &str) -> std::io::Result<()> {
+    initialize();
+    if terminal_controls() {
+        cliclack::note(title, content)
+    } else {
+        eprintln!("{title}\n{content}");
+        Ok(())
+    }
+}
+pub(super) fn connection(content: &str) -> std::io::Result<()> {
+    initialize();
+    if terminal_controls() {
+        cliclack::outro_note("Connection", content)
+    } else {
+        eprintln!("{content}");
+        Ok(())
+    }
 }
 pub(super) fn warning(message: &str) {
-    eprintln!("{} {message}", paint("□", Tone::Warning));
+    if terminal_controls() {
+        let _ = cliclack::log::warning(message);
+    } else {
+        eprintln!("Warning: {message}");
+    }
 }
 pub(super) fn error(message: &str) {
-    eprintln!("{} {message}", paint("■", Tone::Error));
+    if terminal_controls() {
+        let _ = cliclack::log::error(message);
+    } else {
+        eprintln!("Error: {message}");
+    }
+}
+pub(super) fn step(label: &str, state: ThemeState) {
+    initialize();
+    if terminal_controls() {
+        eprint!("{}", KylerTheme.format_header(&state, label));
+        eprintln!("{}", KylerTheme.bar_color(&state).apply_to("│"));
+    } else {
+        eprintln!("{}  {label}", KylerTheme.state_symbol(&state));
+    }
 }
 
 pub(super) struct Progress {
@@ -55,10 +149,7 @@ pub(super) struct Progress {
 }
 impl Progress {
     pub fn new() -> Self {
-        // Keep the first frame on the current line, without a reserved header row.
-        if terminal_controls() {
-            eprint!("\r");
-        }
+        initialize();
         Self {
             bar: ProgressBar::hidden(),
             active: None,
@@ -71,9 +162,9 @@ impl Progress {
         self.bar = ProgressBar::new_spinner();
         self.bar.set_style(
             ProgressStyle::with_template(if colors_enabled() {
-                "{spinner:.cyan} {msg}"
+                "{spinner:.cyan}  {msg}"
             } else {
-                "{spinner} {msg}"
+                "{spinner}  {msg}"
             })
             .unwrap()
             .tick_strings(&FRAMES),
@@ -86,7 +177,7 @@ impl Progress {
     }
     pub fn detail(&self, detail: &str) {
         if let Some(label) = self.active {
-            self.bar.set_message(format!("{label} ({detail})"));
+            self.bar.set_message(format!("{label} · {detail}"));
         }
     }
     pub fn pause(&self) {
@@ -94,108 +185,30 @@ impl Progress {
         self.bar.finish_and_clear();
     }
     pub fn dismiss(&mut self) {
-        self.bar.finish_and_clear();
+        self.pause();
         self.active = None;
     }
     pub fn skipped(&mut self, reason: &str) {
-        self.bar.finish_and_clear();
+        self.pause();
         if let Some(label) = self.active.take() {
-            eprintln!("{} {label}:{reason}", paint("□", Tone::Warning));
+            warning(&format!("{label}: {reason}"));
         }
     }
     pub fn complete(&mut self) {
-        self.bar.disable_steady_tick();
-        self.bar.finish_and_clear();
+        self.pause();
         if let Some(label) = self.active.take() {
-            eprintln!("{} {label}", paint("■", Tone::Success));
+            step(label, ThemeState::Submit);
         }
     }
     pub fn fail(&mut self) {
-        self.bar.disable_steady_tick();
-        self.bar.finish_and_clear();
+        self.pause();
         if let Some(label) = self.active.take() {
-            eprintln!("{} {label}", paint("▧", Tone::Error));
+            step(label, ThemeState::Error("Failed".into()));
         }
     }
 }
 impl Drop for Progress {
     fn drop(&mut self) {
         self.bar.finish_and_clear();
-    }
-}
-
-pub(super) fn theme() -> RenderConfig<'static> {
-    theme_for(colors_enabled())
-}
-pub(super) fn model_list_theme() -> RenderConfig<'static> {
-    let mut config = theme();
-    config.option_index_prefix = IndexPrefix::Simple;
-    config.scroll_up_prefix = Styled::new("");
-    config.scroll_down_prefix = Styled::new("");
-    config
-}
-
-fn theme_for(colored: bool) -> RenderConfig<'static> {
-    let mut config = RenderConfig::empty();
-    config.prompt_prefix = Styled::new("▣");
-    config.answered_prompt_prefix = Styled::new("■");
-    config.highlighted_option_prefix = Styled::new("");
-    config.scroll_up_prefix = Styled::new("");
-    config.scroll_down_prefix = Styled::new("");
-    config.unhighlighted_option_prefix = Styled::new("");
-    config.canceled_prompt_indicator = Styled::new("Back");
-    config.error_message.prefix = Styled::new("■");
-    if colored {
-        config.prompt_prefix = config
-            .prompt_prefix
-            .with_fg(Color::DarkCyan)
-            .with_attr(Attributes::BOLD);
-        config.answered_prompt_prefix = config.answered_prompt_prefix.with_fg(Color::DarkGreen);
-        config.highlighted_option_prefix = config
-            .highlighted_option_prefix
-            .with_fg(Color::DarkCyan)
-            .with_attr(Attributes::BOLD);
-        config.selected_option = Some(
-            StyleSheet::empty()
-                .with_fg(Color::DarkCyan)
-                .with_attr(Attributes::BOLD),
-        );
-        config.canceled_prompt_indicator =
-            config.canceled_prompt_indicator.with_fg(Color::DarkYellow);
-        config.error_message.prefix = config.error_message.prefix.with_fg(Color::DarkRed);
-        config.error_message.message = StyleSheet::empty().with_fg(Color::DarkRed);
-    }
-    config
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn themes_inherit_terminal_background_and_default_text() {
-        for colored in [true, false] {
-            let config = theme_for(colored);
-            assert!(config.prompt.bg.is_none() && config.prompt.fg.is_none());
-            for style in [
-                config.prompt_prefix.style,
-                config.answered_prompt_prefix.style,
-                config.highlighted_option_prefix.style,
-                config.option,
-                config.answer,
-                config.help_message,
-                config.placeholder,
-                config.error_message.message,
-                config.selected_option.unwrap_or_default(),
-            ] {
-                assert!(style.bg.is_none());
-                if !colored {
-                    assert!(style.is_empty());
-                }
-            }
-        }
-        assert!(!color_mode(false, Some("xterm"), false));
-        assert!(!color_mode(true, Some("dumb"), false));
-        assert!(!color_mode(true, Some("xterm"), true));
-        assert!(color_mode(true, Some("xterm"), false));
     }
 }

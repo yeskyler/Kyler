@@ -109,14 +109,22 @@ pub async fn configure(
         let mut prompts = Prompts::new().await?;
         if install_setup && can_start && !advanced && !text.is_empty() && config.validate().is_ok()
         {
-            match prompts.select(
-                "Configuration",
-                vec![
-                    "Keep current configuration and start".into(),
-                    "Edit configuration".into(),
-                ],
-                0,
-            )? {
+            match prompts
+                .select(
+                    "Configuration",
+                    vec![
+                        "Keep current configuration and start".into(),
+                        "Edit configuration".into(),
+                    ],
+                    0,
+                )
+                .map_err(|error| {
+                    if error.code == input::BACK {
+                        input::cancelled()
+                    } else {
+                        error
+                    }
+                })? {
                 0 => {
                     ui::field("Configuration", "Saved settings kept");
                     let mut progress = Progress::new();
@@ -186,17 +194,15 @@ pub async fn configure(
                     page = Page::Review;
                 }
                 Page::Review => {
-                    models::review(&config, advanced)?;
-                    if scope {
-                        eprintln!(
-                            "Access:{}",
-                            if lan {
-                                "Local network"
-                            } else {
-                                "This machine only"
-                            }
-                        );
-                    }
+                    models::review(
+                        &config,
+                        advanced,
+                        scope.then_some(if lan {
+                            "Local network"
+                        } else {
+                            "This machine only"
+                        }),
+                    )?;
                     let mut choices = vec![
                         if can_start {
                             "Save and start".into()
@@ -483,7 +489,11 @@ async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
     let saved = loader::load_for_setup(Some(path)).ok();
     let config = saved.as_ref().unwrap_or(config);
     let primary = super::service::addresses::primary_connection();
-    eprintln!();
+    let mut details = Vec::new();
+    details.push(match &primary {
+        Some((name, address)) => format!("Interface  {name} · {address}"),
+        None => "Interface  Primary network connection unavailable".into(),
+    });
     if config.web.enabled {
         let url = match &primary {
             Some((_, address))
@@ -493,20 +503,20 @@ async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
             }
             _ => kyler_config::web::connect_url(config.web.bind),
         };
-        eprintln!("Web: {url}");
-        if config.web.access_token.is_empty() {
-            eprintln!("Token: Run kyler service token");
-        } else {
-            eprintln!("Token: {}", config.web.access_token.expose());
-        }
-    }
-    match primary {
-        Some((name, address)) => eprintln!("Interface: {name} ({address})"),
-        None => eprintln!("Interface: Primary network connection unavailable"),
+        details.push(format!("Web        {url}"));
+        details.push(format!(
+            "Token      {}",
+            if config.web.access_token.is_empty() {
+                "Run kyler service token"
+            } else {
+                config.web.access_token.expose()
+            }
+        ));
     }
     if config.web.enabled && config.web.bind.ip().is_loopback() {
-        eprintln!("Access: This machine only");
+        details.push("Access     This machine only".into());
     }
+    ui::connection(&details.join("\n")).map_err(CliError::io)?;
     Ok(())
 }
 

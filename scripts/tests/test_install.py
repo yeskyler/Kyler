@@ -170,7 +170,7 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(any("kyler-installer-" in url for url in urls))
         self.assertEqual(sum(url.endswith("SHA256SUMS") for url in urls), 2)
-        self.assertEqual((result.stdout + result.stderr).count("■ Prepare package"), 1)
+        self.assertEqual((result.stdout + result.stderr).count("◇  Prepare package"), 1)
         self.assertTrue((self.home / ".local/bin/kyler").exists())
 
     def test_offline_archive_bootstraps_from_verified_adjacent_installer(self):
@@ -188,7 +188,7 @@ else:
         command = ["sh", str(INSTALLER), "--bundle", str(archive), "--no-start", "--no-configure"]
         result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((result.stdout+result.stderr).count("■ Prepare package"), 1)
+        self.assertEqual((result.stdout+result.stderr).count("◇  Prepare package"), 1)
         before = (self.home / ".kyler/config.toml").read_bytes()
         installer.write_bytes(b"invalid installer")
         result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=20)
@@ -232,7 +232,7 @@ else:
         self.assertIn("--silent", requests[1])
         output = result.stdout + result.stderr
         for label in ("Prepare package", "Check environment", "Install Kyler"):
-            self.assertIn("■ " + label, output)
+            self.assertIn("◇  " + label, output)
         self.assertNotIn("Download order:", output)
         self.assertNotIn("Platform:", output)
         self.assertNotIn("sh install.sh --bundle", output)
@@ -249,7 +249,7 @@ else:
         result = subprocess.run([str(KYLER_BINARY), "install", "--bundle", str(bundle), "--no-configure", "--no-start"], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("(bundled)", (self.home / ".kyler/logs/install.log").read_text())
-        self.assertIn("■ Check environment", result.stdout + result.stderr)
+        self.assertIn("◇  Check environment", result.stdout + result.stderr)
         installed = self.home / ".local/bin/kyler"
         doctor = subprocess.run([str(installed), "--json", "doctor"], env=self.env, capture_output=True, text=True, timeout=30)
         self.assertEqual(doctor.returncode, 0, doctor.stderr)
@@ -261,7 +261,7 @@ else:
         command = [str(KYLER_BINARY), "install", "--bundle", str(bundle), "--no-start", "--no-configure"]
         result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("■ Install Kyler", result.stdout + result.stderr)
+        self.assertIn("◇  Install Kyler", result.stdout + result.stderr)
         self.assertNotIn("[2/2]", result.stdout)
         config = self.home / ".kyler/config.toml"
         binary = self.home / ".local/bin/kyler"
@@ -305,7 +305,7 @@ else:
             process.send_signal(signal.SIGTERM)
             stdout, stderr = process.communicate(timeout=20)
             self.assertEqual(process.returncode, 143, stderr)
-            self.assertIn("■ Restore previous installation", stderr)
+            self.assertIn("◇  Restore previous installation", stderr)
             self.assertEqual(startup.read_text(), "# user shell content\n")
             self.assertFalse((self.home / ".local/bin/kyler").is_symlink())
             self.assertFalse((self.home / ".local/share/kyler/current").is_symlink())
@@ -610,11 +610,11 @@ else:
                         answer=b"\r"
                         searching=False
                     elif value:
-                        converted.append(("▣ Model".encode(),b"Enter model ID manually\r"))
+                        converted.append(("◆  Model".encode(),b"Enter model ID manually\r"))
                         field=b"Model ID"
                 if answer==b"\x1b":
-                    answer=b"\x03"  # Cancellation scenarios use Ctrl+C; Esc now navigates back.
-                converted.append(("▣ ".encode()+field,answer))
+                    answer=b"\x03"  # Both Escape and Ctrl+C cancel the upstream prompt sequence.
+                converted.append(("◆  ".encode()+field,answer))
             replies=converted
         addresses = []
         if expected == 0 or native:
@@ -625,13 +625,13 @@ else:
                         addresses.append("127.0.0.1:" + str(listener.getsockname()[1]))
             if complete and expected == 0:
                 answer={"1":b"This machine only\r","2":b"Local network\r","":b"\r"}[access_scope]
-                replies += [("▣ Access scope".encode(), answer),("▣ Finish setup".encode(),b"\r")]
+                replies += [("◆  Access scope".encode(), answer),("◆  Finish setup".encode(),b"\r")]
 
         if after_install and not keep_config:
             import re
             config = self.home / ".kyler/config.toml"
             if config.exists() and re.search(r'^\s*api_key\s*=\s*"[^"\n]+"', config.read_text(), re.M):
-                replies.insert(0, ("▣ Configuration".encode(), b"Edit configuration\r"))
+                replies.insert(0, ("◆  Configuration".encode(), b"Edit configuration\r"))
 
         import pty
         import re
@@ -704,13 +704,16 @@ else:
         try:
             for marker, answer in replies:
                 deadline = time.monotonic() + 15
-                while marker not in (re.sub(rb"\x1b\[[0-9;]*m", b"", output[cursor:]) if colored else output[cursor:]):
+                def prompt_view():
+                    plain = re.sub(rb"\x1b\[[0-9;]*m", b"", output[cursor:])
+                    return plain.replace("▲  ".encode(), "◆  ".encode())
+                while marker not in prompt_view():
                     if process.poll() is not None or time.monotonic() > deadline:
                         Path("/tmp/kyler-inline-last-terminal.log").write_bytes(output)
                         self.fail("Installer did not show prompt " + repr(marker))
                     if select.select([master], [], [], 0.1)[0]:
                         output += os.read(master, 65536)
-                cursor = len(output) if colored else output.index(marker, cursor) + len(marker)
+                cursor = len(output)
                 if answer == b"__SIGNAL_INTERRUPT__":
                     import re, signal
                     child=int(re.search(rb"__WIZARD_CHILD_PID__:(\d+)",output).group(1))
@@ -778,15 +781,15 @@ else:
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
     def test_cancelled_first_install_does_not_publish_default_configuration(self):
         self.interactive_install([
-            ("▣ Provider".encode(), "Custom（OpenAI Completion）\r".encode()),
-            ("▣ API URL".encode(), b"http://127.0.0.1:1/v1\r"),
-            ("▣ API key".encode(), b"\x03"),
+            ("◆  Provider".encode(), "Custom（OpenAI Completion）\r".encode()),
+            ("◆  API URL".encode(), b"http://127.0.0.1:1/v1\r"),
+            ("◆  API key".encode(), b"\x03"),
         ], native=True, complete=False, expected=130)
         self.assertFalse((self.home / ".kyler/config.toml").exists())
         self.assertFalse((self.home / ".local/bin/kyler").exists())
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
-    def test_official_providers_skip_url_and_back_returns_to_provider(self):
+    def test_official_providers_skip_url(self):
         self.install()
         config = self.home / ".kyler/config.toml"
         for label, adapter, url in [
@@ -796,15 +799,13 @@ else:
             with self.subTest(provider=adapter):
                 config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="fixture"\nbase_url="http://127.0.0.1:1/v1"\napi_key="OFFICIAL_FIXTURE_KEY"\n')
                 output = self.interactive_install([
-                    ("▣ Provider".encode(), label+b"\r"),
-                    ("▣ API key".encode(), b"\x1b"),
-                    ("▣ Provider".encode(), b"\r"),
-                    ("▣ API key".encode(), b"\r"),
-                    ("▣ Model".encode(), b"\r"),
-                    ("▣ Access scope".encode(), b"\r"),
-                    ("▣ Finish setup".encode(), b"\r"),
+                    ("◆  Provider".encode(), label+b"\r"),
+                    ("◆  API key".encode(), b"\r"),
+                    ("◆  Model".encode(), b"\r"),
+                    ("◆  Access scope".encode(), b"\r"),
+                    ("◆  Finish setup".encode(), b"\r"),
                 ], native=True, direct=True, complete=False)
-                self.assertNotIn("▣ API URL".encode(), output)
+                self.assertNotIn("◆  API URL".encode(), output)
                 self.assertNotIn(b"Auto-detect provider", output)
                 self.assertNotIn(b"OFFICIAL_FIXTURE_KEY", output)
                 saved=config.read_text()
@@ -817,19 +818,17 @@ else:
         config = self.home / ".kyler/config.toml"
         config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="original"\nbase_url="http://127.0.0.1:1/v1"\napi_key="KEPT_WIZARD_KEY"\n[context]\ncontext_tokens=64000\n')
         output = self.interactive_install([
-            ("▣ Provider".encode(), b"\r"),
-            ("▣ API URL".encode(), b"http://127.0.0.1:2/v1\r"),
-            ("▣ API key".encode(), b"\x1b"),
-            ("▣ API URL".encode(), b"http://127.0.0.1:3/v1\r"),
-            ("▣ API key".encode(), b"\r"),
-            ("▣ Model".encode(), b"Enter model ID manually\r"),
-            ("▣ Model ID".encode(), b"\x1b"),
-            ("▣ Model".encode(), b"Enter model ID manually\r"),
-            ("▣ Model ID".encode(), b"changed-model\r"),
-            ("▣ Access scope".encode(), b"\x1b[B\r"),
-            ("▣ Finish setup".encode(), b"\x1b"),
-            ("▣ Access scope".encode(), b"\x1b[A\r"),
-            ("▣ Finish setup".encode(), b"\r"),
+            ("◆  Provider".encode(), b"\r"),
+            ("◆  API URL".encode(), b"http://127.0.0.1:3/v1\r"),
+            ("◆  API key".encode(), b"\r"),
+            ("◆  Model".encode(), b"Back\r"),
+            ("◆  API key".encode(), b"\r"),
+            ("◆  Model".encode(), b"Enter model ID manually\r"),
+            ("◆  Model ID".encode(), b"changed-model\r"),
+            ("◆  Access scope".encode(), b"\x1b[B\r"),
+            ("◆  Finish setup".encode(), b"Back\r"),
+            ("◆  Access scope".encode(), b"\x1b[A\r"),
+            ("◆  Finish setup".encode(), b"\r"),
         ], native=True, direct=True, complete=False)
         saved=config.read_text()
         self.assertIn('model = "changed-model"', saved)
@@ -847,12 +846,12 @@ else:
         config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="original"\nbase_url="http://127.0.0.1:1/v1"\napi_key="CANCEL_WIZARD_KEY"\n')
         before=config.read_bytes()
         output=self.interactive_install([
-            ("▣ Provider".encode(),b"\r"),
-            ("▣ API URL".encode(),b"\r"),
-            ("▣ API key".encode(),b"\r"),
-            ("▣ Model".encode(),b"\r"),
-            ("▣ Access scope".encode(),b"\r"),
-            ("▣ Finish setup".encode(),b"\x03"),
+            ("◆  Provider".encode(),b"\r"),
+            ("◆  API URL".encode(),b"\r"),
+            ("◆  API key".encode(),b"\r"),
+            ("◆  Model".encode(),b"\r"),
+            ("◆  Access scope".encode(),b"\r"),
+            ("◆  Finish setup".encode(),b"\x03"),
         ], native=True, direct=True, complete=False, expected=130)
         self.assertEqual(config.read_bytes(),before)
         self.assertNotIn(b"CANCEL_WIZARD_KEY",output)
@@ -878,9 +877,9 @@ else:
             for interrupt in (b"\x03",b"__SIGNAL_INTERRUPT__"):
                 with self.subTest(interrupt=interrupt):
                     output=self.interactive_install([
-                        ("▣ Provider".encode(),b"\r"),
-                        ("▣ API URL".encode(),b"\r"),
-                        ("▣ API key".encode(),b"\r"),
+                        ("◆  Provider".encode(),b"\r"),
+                        ("◆  API URL".encode(),b"\r"),
+                        ("◆  API key".encode(),b"\r"),
                         ("Fetching model directory".encode(),interrupt),
                     ],native=True,direct=True,complete=False,expected=130)
                     self.assertEqual(config.read_bytes(),before)
@@ -904,24 +903,23 @@ else:
         config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="original"\nbase_url="http://127.0.0.1:%s/v1"\napi_key="RETRY_WIZARD_KEY"\n' % server.server_port)
         try:
             output=self.interactive_install([
-                ("▣ Provider".encode(),b"\r"),
-                ("▣ API URL".encode(),b"\r"),
-                ("▣ API key".encode(),b"\r"),
-                ("▣ Model".encode(),b"Retry discovery\r"),
-                ("▣ Model".encode(),b"\x1b[B"*8+b"retry-model\r"),
+                ("◆  Provider".encode(),b"\r"),
+                ("◆  API URL".encode(),b"\r"),
+                ("◆  API key".encode(),b"\r"),
+                ("◆  Model".encode(),b"Retry discovery\r"),
+                ("◆  Model".encode(),b"\x1b[B"*8+b"retry-model"+b"\x1b[A"*20+b"\r"),
             ],native=True,direct=True,colored=True)
             self.assertEqual(requests,["/v1/models"])
-            self.assertIn(b"Models:10 available", output)
+            self.assertIn(b"Models: 10 available", output)
             self.assertIn('model = "retry-model"',config.read_text())
             self.assertIn('discover_models = false',config.read_text())
             self.assertNotIn(b"RETRY_WIZARD_KEY",output)
             import re
             plain = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", output)
-            self.assertRegex(plain, rb"[0-9]+\) retry-model")
+            self.assertRegex(plain, rb"[0-9]+\. retry-model")
             self.assertNotRegex(plain, rb"(?:^|[\r\n])[ \t]*[\^v] [0-9]+\)")
-            self.assertNotRegex(plain, rb"(?:^|[\r\n])[ \t]+[0-9]+\)")
-            self.assertRegex(plain, rb"(?:^|[\r\n])OpenAI")
-            self.assertNotRegex(plain, rb"(?:^|[\r\n])[ \t>]+OpenAI")
+            self.assertIn("│".encode(), plain)
+            self.assertIn("○ OpenAI".encode(), plain)
         finally:
             server.shutdown();server.server_close();thread.join(timeout=2)
 
@@ -977,7 +975,7 @@ else:
             self.assertNotIn("DISCOVERY_TEST_KEY", cache.read_text())
             mode["failed"] = True
             cached = self.interactive_install(replies, direct=True)
-            self.assertIn(b"Models:2 cached", cached)
+            self.assertIn(b"Models: 2 cached", cached)
             self.assertNotIn(b"fallback budget", cached.lower())
             self.assertNotIn(b"DISCOVERY_TEST_KEY", cached)
             self.assertEqual(len(requests), 3)
@@ -1167,7 +1165,7 @@ output_tokens = 8192
             (b"[4] Model [", b"\n"),
         ])
         self.assertIn(b"Saved key is invalid", output)
-        self.assertEqual(output.count("▣ API key".encode()), 2)
+        self.assertEqual(output.count("◆  API key".encode()), 2)
         self.assertNotIn(b"Backend URL", output)
         self.assertNotIn(b"invalid saved key", output)
         self.assertNotIn(b"REPLACEMENT_TEST_KEY", output)
@@ -1204,7 +1202,7 @@ output_tokens = 8192
         result = self.install(success=False)
         self.assertIn("Sandbox verification failed", result.stderr)
         self.assertEqual(before, (installed.resolve(), current.resolve(), config.read_bytes()))
-        self.assertNotIn("■ Install Kyler", result.stdout + result.stderr)
+        self.assertNotIn("◇  Install Kyler", result.stdout + result.stderr)
 
     def test_failed_doctor_on_first_install_does_not_create_configuration(self):
         self.source.write_text('#!/bin/sh\nif [ "$1" = doctor ]; then exit 1; fi\nprintf "kyler 0.1.0\\n"\n')
@@ -1322,7 +1320,7 @@ class BundleTests(unittest.TestCase):
         # A changed address is captured in the candidate, then reverted on failure.
         self.env["KYLER_WEB_BIND"] = self.free_address()
         result = self.install(self.bundle("broken", broken=True), success=False)
-        self.assertIn("■ Restore previous installation", result.stderr)
+        self.assertIn("◇  Restore previous installation", result.stderr)
         self.assertEqual(config.read_bytes(), before)
         self.assertEqual(current.resolve(), version)
         self.env.pop("KYLER_WEB_BIND")
@@ -1416,14 +1414,14 @@ class BundleTests(unittest.TestCase):
         self.assertTrue(self.status("status")["running"])
         self.status("stop")
         output = InstallTests.interactive_install(self, [
-            ("▣ Provider".encode(), b"\r"),
-            ("▣ API URL".encode(), b"\r"),
-            ("▣ API key".encode(), b"\r"),
-            ("▣ Model".encode(), b"\r"),
-            ("▣ Access scope".encode(), b"\r"),
-            ("▣ Finish setup".encode(), b"Save without starting\r"),
+            ("◆  Provider".encode(), b"\r"),
+            ("◆  API URL".encode(), b"\r"),
+            ("◆  API key".encode(), b"\r"),
+            ("◆  Model".encode(), b"\r"),
+            ("◆  Access scope".encode(), b"\r"),
+            ("◆  Finish setup".encode(), b"Save without starting\r"),
         ], native=True, complete=False, direct=True, configure_binary=self.binary)
-        self.assertIn("■ Configure Kyler".encode(), output)
+        self.assertIn("◇  Configure Kyler".encode(), output)
         self.assertFalse(self.status("status")["running"])
 
     @unittest.skipUnless(os.name == "posix", "requires PTY")
@@ -1435,10 +1433,10 @@ class BundleTests(unittest.TestCase):
             (b"[3] API key", b"FINAL_STEP_TEST_KEY\r"),
             (b"[4] Model", b"\r"),
         ], bundle=self.bundle("final-configuration"), after_install=True)
-        labels = ["■ Prepare package", "■ Check environment", "■ Install Kyler", "▣ Configure Kyler"]
+        labels = ["◇  Prepare package", "◇  Check environment", "◇  Install Kyler", "◆  Configure Kyler"]
         positions = [output.index(label.encode()) for label in labels]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("■ Configure Kyler".encode(), output)
+        self.assertIn("◇  Configure Kyler".encode(), output)
         self.assertNotIn(b"Kyler Installer", output)
         self.assertNotIn(b"Installation complete", output)
         self.assertNotIn(b"FINAL_STEP_TEST_KEY", output)
@@ -1451,7 +1449,7 @@ class BundleTests(unittest.TestCase):
             (b"[3] API key", b"\x03"),
         ], bundle=self.bundle("cancel-final-configuration"), after_install=True, complete=False)
         self.assertTrue(self.binary.exists())
-        self.assertIn("□ Configure Kyler".encode(), output)
+        self.assertIn(b"Configure Kyler: skipped", output)
         self.assertIn(b"run kyler configure", output)
         self.assertFalse((self.home / ".kyler/server.json").exists())
 
@@ -1464,9 +1462,9 @@ class BundleTests(unittest.TestCase):
             (b"[2] API URL", b"\r"),
             (b"[3] API key", b"\x03"),
         ], bundle=bundle, after_install=True, complete=False)
-        self.assertIn("▣ Configure Kyler".encode(), output)
+        self.assertIn("◆  Configure Kyler".encode(), output)
         self.assertTrue(any(frame.encode() in output for frame in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"))
-        self.assertIn("□ Configure Kyler".encode(), output)
+        self.assertIn(b"Configure Kyler: skipped", output)
         self.assertEqual((self.home / ".kyler/config.toml").read_bytes(), before)
 
     @unittest.skipUnless(os.name == "posix", "requires PTY")
@@ -1479,7 +1477,7 @@ class BundleTests(unittest.TestCase):
             (b"[2] API URL", b"\r"),
             (b"[3] API key", b"\x03"),
         ], bundle=bundle, after_install=True, complete=False)
-        self.assertLess(output.index("▣ Configure Kyler".encode()), output.index("■ Restore services".encode()))
+        self.assertLess(output.index("◆  Configure Kyler".encode()), output.index("◇  Restore services".encode()))
         self.assertTrue(self.status("status")["running"])
 
     @unittest.skipUnless(os.name == "posix", "requires PTY")
@@ -1491,15 +1489,15 @@ class BundleTests(unittest.TestCase):
         config = self.home / ".kyler/config.toml"
         before = config.read_bytes()
         output = InstallTests.interactive_install(self, [
-            ("▣ Configuration".encode(), b"\r"),
+            ("◆  Configuration".encode(), b"\r"),
         ], native=True, complete=False, keep_config=True, after_install=True,
            preserve_addresses=True, bundle=bundle)
         self.assertEqual(config.read_bytes(), before)
-        self.assertNotIn("▣ Provider".encode(), output)
+        self.assertNotIn("◆  Provider".encode(), output)
         self.assertNotIn(b"Web token:", output)
-        self.assertIn(b"Interface:", output)
-        self.assertRegex(output, rb"Token: [A-Za-z0-9_-]+")
-        self.assertLess(output.index("■ Configure Kyler".encode()), output.index("■ Launch".encode()))
+        self.assertIn(b"Interface  ", output)
+        self.assertRegex(output, rb"Token\s+[A-Za-z0-9_-]+")
+        self.assertLess(output.index("◇  Configure Kyler".encode()), output.index("◇  Launch".encode()))
         self.assertTrue(self.status("status")["running"])
 
     @unittest.skipUnless(os.name == "posix", "requires PTY")
@@ -1512,15 +1510,15 @@ class BundleTests(unittest.TestCase):
         self.env.pop("KYLER_SERVER_BIND")
         self.env.pop("KYLER_WEB_BIND")
         output = InstallTests.interactive_install(self, [
-            ("▣ Configuration".encode(), b"\r"),
+            ("◆  Configuration".encode(), b"\r"),
         ], native=True, complete=False, keep_config=True, after_install=True,
            preserve_addresses=True, bundle=bundle)
-        interface = re.search(rb"Interface:[^\r\n]+ \(([0-9.]+)\)", output)
+        interface = re.search(rb"Interface\s+[^\r\n]+ \xc2\xb7 ([0-9.]+)", output)
         if interface:
-            self.assertIn(b"Web: http://" + interface.group(1) + b":" + port.encode(), output)
+            self.assertIn(b"Web        http://" + interface.group(1) + b":" + port.encode(), output)
         else:
-            self.assertIn(b"Interface: Primary network connection unavailable", output)
-        self.assertRegex(output, rb"Token: [A-Za-z0-9_-]+")
+            self.assertIn(b"Interface  Primary network connection unavailable", output)
+        self.assertRegex(output, rb"Token\s+[A-Za-z0-9_-]+")
         self.assertTrue(self.status("status")["web"]["running"])
 
     def test_corrupt_bundle_is_rejected_before_installation(self):

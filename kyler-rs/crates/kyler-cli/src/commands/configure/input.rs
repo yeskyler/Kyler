@@ -1,5 +1,5 @@
-//! Inline setup controls with typed navigation and credential-safe terminal input.
-use super::super::ui::{self, theme};
+//! Clack setup controls with validated values and cancellable model discovery.
+use super::super::ui;
 use crate::{CliError, Result};
 
 use std::{
@@ -7,14 +7,13 @@ use std::{
     io::{self, Write},
     pin::Pin,
     task::Poll,
-    time::Duration,
 };
 
+use cliclack::{Input, Select, ThemeState};
 use crossterm::{
     event::{DisableBracketedPaste, EnableBracketedPaste},
     execute, terminal,
 };
-use inquire::{Select, Text, error::InquireError};
 
 use kyler_config::{SecretString, models::ProviderSettings};
 use kyler_core::context::ContextPolicy;
@@ -26,42 +25,27 @@ fn back() -> CliError {
 pub(super) fn cancelled() -> CliError {
     CliError::new(130, "Configuration cancelled.")
 }
-fn prompt_error(error: InquireError) -> CliError {
-    match error {
-        InquireError::OperationCanceled => back(),
-        InquireError::OperationInterrupted => cancelled(),
-        InquireError::IO(e) if e.kind() == io::ErrorKind::Interrupted => cancelled(),
-        InquireError::IO(e) => CliError::io(e),
-        _ => CliError::new(
-            2,
-            "Could not open the terminal wizard. Use --non-interactive for unattended setup.",
-        ),
+fn prompt_error(error: io::Error) -> CliError {
+    if error.kind() == io::ErrorKind::Interrupted {
+        cancelled()
+    } else {
+        CliError::io(error)
     }
 }
-const HELP: &str = "↑↓ Select · Type to search · Enter Continue · Esc Back · Ctrl+C Cancel";
 pub(super) struct Prompts {
     cancel: Pin<Box<dyn Future<Output = io::Result<()>> + Send>>,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum ModelChoice {
     Selected(String),
     Manual,
     Retry,
     Cached,
-}
-#[derive(Clone)]
-struct ModelOption {
-    label: String,
-    choice: ModelChoice,
-}
-impl std::fmt::Display for ModelOption {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.label)
-    }
+    Back,
 }
 impl Prompts {
     pub async fn new() -> Result<Self> {
-        // Register cancellation before a directory fetch can run in canonical terminal mode.
+        ui::initialize();
         let mut cancel: Pin<Box<dyn Future<Output = io::Result<()>> + Send>> =
             Box::pin(tokio::signal::ctrl_c());
         poll_fn(|cx| {
@@ -75,14 +59,19 @@ impl Prompts {
         Ok(Self { cancel })
     }
     pub fn select(&mut self, label: &str, options: Vec<String>, current: usize) -> Result<usize> {
-        Select::new(label, options)
-            .with_starting_cursor(current)
-            .with_page_size(7)
-            .with_help_message(HELP)
-            .with_render_config(theme())
-            .raw_prompt()
-            .map(|v| v.index)
-            .map_err(prompt_error)
+        let count = options.len();
+        let mut prompt = Select::new(label)
+            .filter_mode()
+            .max_rows(7)
+            .initial_value(current);
+        for (index, option) in options.into_iter().enumerate() {
+            prompt = prompt.item(index, option, "");
+        }
+        prompt = prompt.item(count, "Back", "Return to the previous step");
+        match prompt.interact().map_err(prompt_error)? {
+            index if index == count => Err(back()),
+            index => Ok(index),
+        }
     }
     pub fn provider(
         &mut self,
@@ -103,12 +92,12 @@ impl Prompts {
         Ok(kinds[index])
     }
     pub fn connection(&mut self, names: &[String], default: &str) -> Result<String> {
-        let n = self.select(
+        let index = self.select(
             "Provider connection",
             names.to_vec(),
             names.iter().position(|n| n == default).unwrap_or(0),
         )?;
-        Ok(names[n].clone())
+        Ok(names[index].clone())
     }
     pub fn model_choice(
         &mut self,
@@ -116,79 +105,47 @@ impl Prompts {
         models: &[kyler_provider::discovery::DiscoveredModel],
         cached: bool,
     ) -> Result<ModelChoice> {
-        let mut options = models
-            .iter()
-            .map(|m| ModelOption {
-                label: m.id.clone(),
-                choice: ModelChoice::Selected(m.id.clone()),
-            })
-            .collect::<Vec<_>>();
+        let mut prompt = Select::new("Model")
+            .filter_mode()
+            .max_rows(7)
+            .initial_value(ModelChoice::Selected(default.into()));
         if !default.is_empty() && !models.iter().any(|m| m.id == default) {
-            options.insert(
-                0,
-                ModelOption {
-                    label: format!("Keep current model · {default}"),
-                    choice: ModelChoice::Selected(default.into()),
-                },
+            prompt = prompt.item(
+                ModelChoice::Selected(default.into()),
+                default,
+                "Current model",
             );
         }
-        options.push(ModelOption {
-            label: "Enter model ID manually…".into(),
-            choice: ModelChoice::Manual,
-        });
-        options.push(ModelOption {
-            label: "Retry discovery".into(),
-            choice: ModelChoice::Retry,
-        });
-        if cached {
-            options.push(ModelOption {
-                label: "Use cached models".into(),
-                choice: ModelChoice::Cached,
-            });
+        for (index, model) in models.iter().enumerate() {
+            prompt = prompt.item(
+                ModelChoice::Selected(model.id.clone()),
+                format!("{}. {}", index + 1, model.id),
+                "",
+            );
         }
-        let current = options
-            .iter()
-            .position(|o| matches!(&o.choice,ModelChoice::Selected(id) if id==default))
-            .unwrap_or(0);
-        let scorer = |query: &str, option: &ModelOption, label: &str, _: usize| {
-            if !matches!(option.choice, ModelChoice::Selected(_)) {
-                return Some(if label.to_lowercase().contains(&query.to_lowercase()) {
-                    0
-                } else {
-                    -1
-                });
-            }
-            label
-                .to_lowercase()
-                .contains(&query.to_lowercase())
-                .then_some(1)
-        };
-        Select::new("Model", options)
-            .with_starting_cursor(current)
-            .with_scorer(&scorer)
-            .with_page_size(7)
-            .with_help_message(HELP)
-            .with_render_config(ui::model_list_theme())
-            .prompt()
-            .map(|o| o.choice)
+        prompt = prompt
+            .item(ModelChoice::Manual, "Enter model ID manually…", "")
+            .item(ModelChoice::Retry, "Retry discovery", "");
+        if cached {
+            prompt = prompt.item(ModelChoice::Cached, "Use cached models", "");
+        }
+        prompt
+            .item(ModelChoice::Back, "Back", "Edit credentials")
+            .interact()
             .map_err(prompt_error)
     }
     pub fn manual_model(&mut self, default: &str) -> Result<String> {
-        Text::new("Model ID")
-            .with_default(default)
-            .with_help_message("Enter a model ID · Esc Back · Ctrl+C Cancel")
-            .with_validator(|v: &str| {
-                Ok(if valid_model_id(v.trim()) {
-                    inquire::validator::Validation::Valid
+        Input::new("Model ID")
+            .default_input(default)
+            .validate(|value: &String| {
+                if valid_model_id(value.trim()) {
+                    Ok(())
                 } else {
-                    inquire::validator::Validation::Invalid(
-                        "Enter a model ID with at most 256 characters.".into(),
-                    )
-                })
+                    Err("Enter a model ID with at most 256 characters.")
+                }
             })
-            .with_render_config(theme())
-            .prompt()
-            .map(|id| id.trim().to_owned())
+            .interact::<String>()
+            .map(|value| value.trim().to_owned())
             .map_err(prompt_error)
     }
     pub fn context_window(
@@ -198,45 +155,33 @@ impl Prompts {
         policy: &ContextPolicy,
     ) -> Result<Option<usize>> {
         let default = default.map_or_else(|| "auto".into(), |n| n.to_string());
-        let value = Text::new(label)
-            .with_default(&default)
-            .with_help_message("auto follows verified model capacity · Esc Back")
-            .with_validator(|v: &str| {
-                let v = v.trim();
-                Ok(if v.eq_ignore_ascii_case("auto") {
-                    inquire::validator::Validation::Valid
+        let policy = policy.clone();
+        let validation = policy.clone();
+        let value: String = Input::new(label)
+            .default_input(&default)
+            .validate(move |value: &String| {
+                if value.trim().eq_ignore_ascii_case("auto") {
+                    Ok(())
                 } else {
-                    match parse_context_window(v, policy) {
-                        Ok(_) => inquire::validator::Validation::Valid,
-                        Err(e) => inquire::validator::Validation::Invalid(e.into()),
-                    }
-                })
+                    parse_context_window(value, &validation).map(|_| ())
+                }
             })
-            .with_render_config(theme())
-            .prompt()
+            .interact()
             .map_err(prompt_error)?;
-        let value = value.trim();
-        if value.eq_ignore_ascii_case("auto") {
+        if value.trim().eq_ignore_ascii_case("auto") {
             Ok(None)
         } else {
-            parse_context_window(&value, policy)
+            parse_context_window(&value, &policy)
                 .map(Some)
                 .map_err(|e| CliError::new(2, e))
         }
     }
     pub fn api_url(&mut self, label: &str, default: &str) -> Result<String> {
-        Text::new(label)
-            .with_default(default)
-            .with_help_message("API base URL · Enter keeps current · Esc Back")
-            .with_validator(|v: &str| {
-                Ok(match validate_url(v.trim()) {
-                    Ok(()) => inquire::validator::Validation::Valid,
-                    Err(e) => inquire::validator::Validation::Invalid(e.into()),
-                })
-            })
-            .with_render_config(theme())
-            .prompt()
-            .map(|s| s.trim().trim_end_matches('/').into())
+        Input::new(label)
+            .default_input(default)
+            .validate(|value: &String| validate_url(value.trim()))
+            .interact::<String>()
+            .map(|value| value.trim().trim_end_matches('/').into())
             .map_err(prompt_error)
     }
     pub fn access_scope(&mut self, lan: bool) -> Result<bool> {
@@ -256,7 +201,39 @@ impl Prompts {
         existing: &SecretString,
         optional: bool,
     ) -> Result<SecretString> {
-        key(label, existing, optional)
+        let hint = if !existing.is_empty() {
+            "Hidden · Enter keeps the saved key"
+        } else if optional {
+            "Hidden · Enter skips this field"
+        } else {
+            "Hidden · API key required"
+        };
+        loop {
+            let value = read_credential(label, hint)?;
+            let key = match normalize_key(&value) {
+                Ok("") if !existing.is_empty() => normalize_key(existing.expose())
+                    .map(SecretString::new)
+                    .map_err(|_| "Saved key is invalid. Paste a replacement."),
+                Ok("") if optional => Ok(SecretString::default()),
+                Ok("") => Err("An API key is required."),
+                Ok(value) => Ok(SecretString::new(value)),
+                Err(error) => Err(error),
+            };
+            match key {
+                Ok(key) => {
+                    ui::answer(
+                        label,
+                        if key.is_empty() {
+                            "Skipped"
+                        } else {
+                            "Configured"
+                        },
+                    );
+                    return Ok(key);
+                }
+                Err(message) => ui::error(message),
+            }
+        }
     }
     pub async fn loading<T>(&mut self, label: &str, future: impl Future<Output = T>) -> Result<T> {
         use std::sync::{
@@ -268,31 +245,29 @@ impl Prompts {
             fn drop(&mut self) {
                 self.0.store(true, Ordering::Relaxed);
                 let _ = terminal::disable_raw_mode();
-                eprint!("\r\x1b[2K");
-                let _ = io::stderr().flush();
             }
         }
         terminal::enable_raw_mode().map_err(CliError::io)?;
         let stop = Arc::new(AtomicBool::new(false));
-        let _guard = LoadingGuard(stop.clone());
+        let guard = LoadingGuard(stop.clone());
         let key_stop = stop.clone();
         let mut keyboard = tokio::task::spawn_blocking(move || loading_key(key_stop));
         tokio::pin!(future);
-        let mut ticks = tokio::time::interval(Duration::from_millis(100));
-        let mut frame = 0;
+        let mut progress = ui::Progress::new();
+        progress.begin("Fetch models");
+        progress.detail(label);
         let mut key_finished = false;
-        let result = loop {
-            tokio::select! {
-                value=&mut future=>break Ok(value),
-                _=&mut self.cancel=>break Err(cancelled()),
-                exit=&mut keyboard=>{key_finished=true;break Err(exit.unwrap_or_else(|_|CliError::new(3,"Terminal input stopped")));},
-                _=ticks.tick()=>{let frames=ui::FRAMES;eprint!("\r\x1b[2K{} {label} · Esc Back · Ctrl+C Cancel",ui::paint(frames[frame%frames.len()], ui::Tone::Active));if let Err(e)=io::stderr().flush(){break Err(CliError::io(e));}frame+=1;}
-            }
+        let result = tokio::select! {
+            value=&mut future=>Ok(value),
+            _=&mut self.cancel=>Err(cancelled()),
+            exit=&mut keyboard=>{key_finished=true;Err(exit.unwrap_or_else(|_|CliError::new(3,"Terminal input stopped")))},
         };
         stop.store(true, Ordering::Relaxed);
         if !key_finished {
             let _ = keyboard.await;
         }
+        progress.dismiss();
+        drop(guard);
         result
     }
 }
@@ -380,7 +355,7 @@ fn loading_key_from_file(
             match byte[0] {
                 27 => {
                     match input_ready(input.as_raw_fd(), 80) {
-                        Ok(false) => return back(),
+                        Ok(false) => return cancelled(),
                         Err(_) => return cancelled(),
                         Ok(true) => {}
                     }
@@ -413,9 +388,9 @@ fn loading_key(stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> CliError 
     use crossterm::event::{self, Event, KeyCode, KeyModifiers};
     use std::sync::atomic::Ordering;
     while !stop.load(Ordering::Relaxed) {
-        match event::poll(Duration::from_millis(100)) {
+        match event::poll(std::time::Duration::from_millis(100)) {
             Ok(true) => match event::read() {
-                Ok(Event::Key(k)) if k.code == KeyCode::Esc => return back(),
+                Ok(Event::Key(k)) if k.code == KeyCode::Esc => return cancelled(),
                 Ok(Event::Key(k))
                     if matches!(k.code, KeyCode::Char('c' | 'd'))
                         && k.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -486,65 +461,36 @@ fn normalize_key(value: &str) -> std::result::Result<&str, &'static str> {
     Ok(value)
 }
 
-fn key(label: &str, existing: &SecretString, optional: bool) -> Result<SecretString> {
-    let hint = if !existing.is_empty() {
-        "configured; hidden; Enter keeps"
-    } else if optional {
-        "hidden; Enter skips"
-    } else {
-        "hidden; required"
-    };
-    loop {
-        let value = password(label, hint)?;
-        match normalize_key(&value) {
-            Ok("") if !existing.is_empty() => match normalize_key(existing.expose()) {
-                Ok(value) if !value.is_empty() => {
-                    key_done(label);
-                    return Ok(SecretString::new(value));
-                }
-                _ => ui::error("Saved key is invalid. Paste a replacement."),
-            },
-            Ok("") if optional => {
-                key_done(label);
-                return Ok(SecretString::default());
-            }
-            Ok("") => ui::error("An API key is required. Paste it, or press Esc to go back."),
-            Ok(value) => {
-                key_done(label);
-                return Ok(SecretString::new(value));
-            }
-            Err(message) => ui::error(message),
-        }
-    }
-}
-
-fn key_done(label: &str) {
-    eprint!(
-        "\x1b[1A\r\x1b[2K{} {label}:Configured\n",
-        ui::paint("■", ui::Tone::Success)
-    );
-    let _ = io::stderr().flush();
-}
-
-fn password(label: &str, hint: &str) -> Result<String> {
+// The upstream console key reader does not expose bracketed paste as one event.
+// Keep secret input behind a byte boundary so pasted newlines never submit a prefix
+// or expose the remaining key in the next prompt. Rendering uses the shared theme.
+fn read_credential(label: &str, hint: &str) -> Result<String> {
+    let frame = ui::credential_frame(label, hint);
+    eprint!("{frame}");
+    io::stderr().flush().map_err(CliError::io)?;
     struct Guard;
     impl Drop for Guard {
         fn drop(&mut self) {
             let _ = execute!(io::stderr(), DisableBracketedPaste);
             let _ = terminal::disable_raw_mode();
-            eprintln!();
         }
     }
     terminal::enable_raw_mode().map_err(CliError::io)?;
-    let _guard = Guard;
+    let guard = Guard;
     execute!(io::stderr(), EnableBracketedPaste).map_err(CliError::io)?;
-    eprint!("{} {label}:[{hint}]", ui::paint("▣", ui::Tone::Active));
-    io::stderr().flush().map_err(CliError::io)?;
-    read_password()
+    let result = read_credential_bytes();
+    drop(guard);
+    console::Term::stderr()
+        .clear_last_lines(frame.lines().count())
+        .map_err(CliError::io)?;
+    if result.is_err() {
+        ui::step(label, ThemeState::Cancel);
+    }
+    result
 }
 
 #[cfg(unix)]
-fn read_password() -> Result<String> {
+fn read_credential_bytes() -> Result<String> {
     use std::{
         fs::File,
         io::Read,
@@ -557,7 +503,7 @@ fn read_password() -> Result<String> {
             .try_clone_to_owned()
             .map_err(CliError::io)?,
     );
-    collect_password(|timeout| {
+    collect_credential(|timeout| {
         if let Some(timeout) = timeout {
             loop {
                 match input_ready(input.as_raw_fd(), timeout) {
@@ -578,7 +524,7 @@ fn read_password() -> Result<String> {
 }
 
 #[cfg(any(unix, test))]
-fn collect_password(mut next: impl FnMut(Option<i32>) -> Result<Option<u8>>) -> Result<String> {
+fn collect_credential(mut next: impl FnMut(Option<i32>) -> Result<Option<u8>>) -> Result<String> {
     let mut value = Vec::new();
     let mut paste = false;
     loop {
@@ -608,7 +554,7 @@ fn collect_password(mut next: impl FnMut(Option<i32>) -> Result<Option<u8>>) -> 
             }
             27 => {
                 let Some(first) = next(Some(100))? else {
-                    return Err(back());
+                    return Err(cancelled());
                 };
                 if first != b'[' && first != b'O' {
                     continue;
@@ -635,7 +581,7 @@ fn collect_password(mut next: impl FnMut(Option<i32>) -> Result<Option<u8>>) -> 
 }
 
 #[cfg(not(unix))]
-fn read_password() -> Result<String> {
+fn read_credential_bytes() -> Result<String> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
     let mut value = String::new();
@@ -643,7 +589,7 @@ fn read_password() -> Result<String> {
         match event::read().map_err(CliError::io)? {
             Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
                 KeyCode::Enter => return Ok(value),
-                KeyCode::Esc => return Err(back()),
+                KeyCode::Esc => return Err(cancelled()),
                 KeyCode::Char('c' | 'd') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Err(CliError::new(130, "Configuration cancelled."));
                 }
@@ -665,7 +611,6 @@ fn read_password() -> Result<String> {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::{normalize_key, validate_url};
@@ -678,10 +623,7 @@ mod tests {
             os::{fd::OwnedFd, unix::net::UnixStream},
             sync::{Arc, atomic::AtomicBool},
         };
-        for (bytes, expected) in [
-            (b"\x1b[B\x03".as_slice(), 130),
-            (b"\x1b".as_slice(), super::BACK),
-        ] {
+        for (bytes, expected) in [(b"\x1b[B\x03".as_slice(), 130), (b"\x1b".as_slice(), 130)] {
             let (reader, mut writer) = UnixStream::pair().unwrap();
             writer.write_all(bytes).unwrap();
             let fd: OwnedFd = reader.into();
@@ -731,10 +673,10 @@ mod tests {
     }
 
     #[test]
-    fn hidden_input_preserves_paste_and_handles_editing_without_an_event_reader() {
+    fn credential_transport_keeps_paste_atomic_and_handles_editing() {
         let collect = |bytes: &[u8]| {
             let mut bytes = bytes.iter().copied();
-            super::collect_password(|_| Ok(bytes.next()))
+            super::collect_credential(|_| Ok(bytes.next()))
         };
         assert_eq!(collect(b"secret-x\x7fy\r").unwrap(), "secret-y");
         assert_eq!(collect(b"secret\x1b[D\r").unwrap(), "secret");
@@ -743,7 +685,7 @@ mod tests {
             "first\nsecond"
         );
         assert_eq!(collect("ab\u{00e9}\u{7f}c\r".as_bytes()).unwrap(), "abc");
-        assert_eq!(collect(b"\x1b").unwrap_err().code, super::BACK);
+        assert_eq!(collect(b"\x1b").unwrap_err().code, 130);
         for cancelled in [b"\x03".as_slice(), b"\x04", b""] {
             assert_eq!(collect(cancelled).unwrap_err().code, 130);
         }

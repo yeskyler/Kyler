@@ -360,7 +360,7 @@ pub async fn execute(
             progress.begin("Configure Kyler");
             if options.interactive_setup() {
                 progress.pause();
-                eprintln!("{} Configure Kyler", ui::paint("▣", ui::Tone::Active));
+                ui::step("Configure Kyler", cliclack::ThemeState::Active);
                 let binary = std::env::var_os("HOME")
                     .map(PathBuf::from)
                     .unwrap()
