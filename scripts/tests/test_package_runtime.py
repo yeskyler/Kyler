@@ -119,6 +119,16 @@ class RuntimePackagingTests(unittest.TestCase):
             runtime.copy_library(second, destination)
         self.assertEqual(destination.read_text(), "one")
 
+    def test_dpkg_license_lookup_includes_only_verified_usr_merge_aliases(self):
+        for same_file in (True, False):
+            with patch.object(runtime.shutil, "which", side_effect=lambda name: name if name == "dpkg-query" else None), patch.object(Path, "is_file", return_value=True), patch.object(Path, "samefile", return_value=same_file), patch.object(runtime.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")) as run:
+                with self.assertRaisesRegex(ValueError, "license metadata"):
+                    runtime.collect_license(Path("/usr/bin/ip"), self.root / "licenses")
+            expected = ["dpkg-query", "-S", "/usr/bin/ip"]
+            if same_file:
+                expected.append("/bin/ip")
+            self.assertEqual(run.call_args.args[0], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

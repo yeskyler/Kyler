@@ -168,7 +168,15 @@ def copy_library(source, destination):
 def collect_license(path, destination):
     """Native distro attribution must be present before redistributing a host binary."""
     if shutil.which("dpkg-query"):
-        query = subprocess.run(["dpkg-query", "-S", str(path)], text=True, capture_output=True, timeout=15)
+        # usr-merge resolves executables into /usr, while dpkg can retain /bin
+        # or /lib ownership records. Only query aliases of the exact same file.
+        candidates = [Path(path)]
+        relative = Path(path).parts
+        if len(relative) > 2 and relative[1] == "usr" and relative[2] in ("bin", "sbin", "lib", "lib64"):
+            alias = Path("/").joinpath(*relative[2:])
+            if alias.is_file() and alias.samefile(path):
+                candidates.append(alias)
+        query = subprocess.run(["dpkg-query", "-S", *map(str, candidates)], text=True, capture_output=True, timeout=15)
         for line in query.stdout.splitlines():
             package = line.split(": ", 1)[0]
             license_path = Path("/usr/share/doc") / package.split(":", 1)[0] / "copyright"
