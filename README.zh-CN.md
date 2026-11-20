@@ -3,7 +3,7 @@
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
     <img src="docs/assets/logo-light.svg" width="328" height="104" alt="Kyler">
   </picture>
-  <h3>面向编码、研究与文档工作的 AI 助手。</h3>
+  <h3>面向编码、研究与日常工作的 AI 助手。</h3>
   <p>
     <a href="https://github.com/yeskyler/Kyler/releases"><img src="https://img.shields.io/github/v/release/yeskyler/Kyler?style=flat-square&amp;color=3b82f6" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/yeskyler/Kyler?style=flat-square&amp;color=22c55e" alt="License"></a>
@@ -20,7 +20,7 @@
   <p><a href="#安装">安装</a> · <a href="#演示">演示</a> · <a href="#架构">架构</a> · <a href="#文档导航">文档导航</a></p>
 </div>
 
-Kyler 是一个面向编码、研究与文档工作的 AI 助手。支持 Web、终端界面（TUI）和 CLI。
+Kyler 是一个面向编码、研究与日常工作的 AI 助手。支持 Web、终端界面（TUI）和 CLI。
 
 ## 演示
 

@@ -3,7 +3,7 @@
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
     <img src="docs/assets/logo-light.svg" width="328" height="104" alt="Kyler">
   </picture>
-  <h3>An AI assistant for coding, research, and document work.</h3>
+  <h3>An AI assistant for coding, research, and everyday work.</h3>
   <p>
     <a href="https://github.com/yeskyler/Kyler/releases"><img src="https://img.shields.io/github/v/release/yeskyler/Kyler?style=flat-square&amp;color=3b82f6" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/yeskyler/Kyler?style=flat-square&amp;color=22c55e" alt="License"></a>
@@ -20,7 +20,7 @@
   <p><a href="#installation">Install</a> · <a href="#demo">Demo</a> · <a href="#architecture">Architecture</a> · <a href="#documentation">Documentation</a></p>
 </div>
 
-Kyler is an AI assistant for coding, research, and document work.
+Kyler is an AI assistant for coding, research, and everyday work.
 Use it through Web, TUI, or CLI.
 
 ## Demo
