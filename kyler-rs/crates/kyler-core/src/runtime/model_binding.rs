@@ -27,20 +27,27 @@ impl Agent {
         }
         Ok(agent)
     }
-    /// A bound model can accept an explicit user preference; provider compatibility
-    /// is validated by the provider, not guessed from a local model-name allowlist.
+    /// Explicit effort settings opt custom models in; known non-reasoning OpenAI
+    /// models must not receive an automatically injected reasoning parameter.
     pub fn thinking_supported(&self) -> bool {
-        self.model_snapshot.is_some()
+        !self.thinking_levels().is_empty()
+    }
+    pub fn default_thinking_level(&self) -> kyler_protocol::api::models::ThinkingLevel {
+        use kyler_protocol::api::models::ThinkingLevel;
+        self.model_snapshot
+            .as_ref()
+            .and_then(|s| s.info.capabilities.reasoning.as_ref())
+            .map_or(ThinkingLevel::Off, |r| r.default)
     }
     pub fn thinking_enabled(&self) -> bool {
-        self.thinking_mode().unwrap_or(false)
+        self.reasoning_effort()
+            .is_some_and(kyler_protocol::api::models::ThinkingLevel::enabled)
     }
     pub fn thinking_levels(&self) -> Vec<kyler_protocol::api::models::ThinkingLevel> {
-        use kyler_protocol::api::models::ThinkingLevel::{High, Low, Max, Off};
-        if !self.thinking_supported() {
-            return Vec::new();
-        }
-        vec![Off, Low, High, Max]
+        self.model_snapshot
+            .as_ref()
+            .and_then(|s| s.info.capabilities.reasoning.as_ref())
+            .map_or_else(Vec::new, |r| r.levels.clone())
     }
     pub fn with_thinking(self, enabled: bool) -> Result<Self> {
         self.with_thinking_level(kyler_protocol::api::models::ThinkingLevel::from_enabled(
@@ -52,7 +59,7 @@ impl Agent {
         level: kyler_protocol::api::models::ThinkingLevel,
     ) -> Result<Self> {
         anyhow::ensure!(
-            self.thinking_supported(),
+            self.thinking_levels().contains(&level),
             "Thinking level is not supported for this model/provider"
         );
         let snapshot = self
@@ -60,8 +67,7 @@ impl Agent {
             .as_mut()
             .context("a bound model is required for thinking control")?;
         let snapshot = Arc::make_mut(snapshot);
-        snapshot.enable_thinking = Some(level.enabled());
-        snapshot.thinking_level = Some(level);
+        snapshot.reasoning_effort = Some(level);
         Ok(self)
     }
     pub(super) fn provider_request(
@@ -69,33 +75,54 @@ impl Agent {
         request: async_openai::types::chat::CreateChatCompletionRequest,
         session: &crate::Session,
     ) -> Result<serde_json::Value> {
-        use kyler_protocol::api::models::ThinkingLevel;
-        let mut value = crate::models::provider_request(request, session, self.thinking_mode())?;
-        let explicit_level = self
+        let mut value = serde_json::to_value(request)?;
+        let adapter = self
             .model_snapshot
             .as_ref()
-            .and_then(|snapshot| snapshot.thinking_level);
-        let known_default =
-            crate::models::thinking_mode(&self.base_url, &self.model, None).is_some();
-        if self.thinking_mode() == Some(true) && (explicit_level.is_some() || known_default) {
-            value["reasoning_effort"] =
-                serde_json::to_value(explicit_level.unwrap_or(ThinkingLevel::High))?;
-        } else if self.thinking_mode() == Some(false) {
-            value.as_object_mut().unwrap().remove("reasoning_effort");
+            .map(|s| s.adapter)
+            .unwrap_or_else(|| {
+                kyler_provider::Adapter::resolve(kyler_provider::AdapterKind::Auto, &self.base_url)
+            });
+        let inferred = adapter.reasoning(&self.model, self.reasoning_effort());
+        let capabilities = self
+            .model_snapshot
+            .as_ref()
+            .and_then(|s| s.info.capabilities.reasoning.as_ref())
+            .or(inferred.as_ref());
+        adapter.project(
+            &mut value,
+            &self.model,
+            self.output_token_parameter(),
+            self.reasoning_effort(),
+            capabilities,
+        )?;
+        if self.carries_reasoning() && self.thinking_enabled() {
+            crate::models::attach_reasoning(&mut value["messages"], session);
         }
         Ok(value)
     }
+
     pub(super) fn output_token_parameter(&self) -> OutputTokenParameter {
         self.model_snapshot
             .as_ref()
             .map(|m| m.output_token_parameter)
             .unwrap_or(OutputTokenParameter::MaxTokens)
     }
-    pub(super) fn thinking_mode(&self) -> Option<bool> {
+    pub(super) fn reasoning_effort(&self) -> Option<kyler_protocol::api::models::ThinkingLevel> {
         self.model_snapshot
             .as_ref()
-            .map(|m| m.enable_thinking)
-            .unwrap_or_else(|| crate::models::thinking_mode(&self.base_url, &self.model, None))
+            .map(|m| m.reasoning_effort)
+            .unwrap_or_else(|| {
+                crate::models::default_reasoning_effort(&self.base_url, &self.model, None)
+            })
+    }
+    fn carries_reasoning(&self) -> bool {
+        self.model_snapshot.as_ref().is_some_and(|s| {
+            s.info
+                .capabilities
+                .reasoning_content
+                .unwrap_or_else(|| s.adapter.carries_reasoning())
+        })
     }
     pub(super) fn request_messages(
         &self,
@@ -103,7 +130,7 @@ impl Agent {
         session: &crate::Session,
     ) -> Result<serde_json::Value> {
         let mut value = serde_json::to_value(messages)?;
-        if self.thinking_mode() == Some(true) {
+        if self.thinking_enabled() && self.carries_reasoning() {
             crate::models::attach_reasoning(&mut value, session);
         }
         Ok(value)
@@ -155,65 +182,33 @@ mod thinking_level_tests {
     use kyler_protocol::api::models::ThinkingLevel;
 
     #[test]
-    fn explicit_levels_work_for_unrecognized_model_names_without_changing_defaults() {
+    fn unknown_models_require_explicit_capability_configuration() {
         let mut config = AppConfig::default();
-        config.llm.base_url = "https://api.siliconflow.cn/v1".into();
-        config.llm.model = "deepseek-ai/DeepSeek-V4.1-Flash".into();
-        config.llm.api_key = SecretString::new("fixture-only");
+        config.llm.base_url = "http://localhost:1234/v1".into();
+        config.llm.model = "unknown".into();
+        config.llm.api_key = SecretString::new("fixture");
         let mut agent = Agent::new(
             config.llm.base_url.clone(),
             "fixture".into(),
-            &config.llm.model,
+            "unknown",
             None::<String>,
             Arc::new(crate::tools::ToolBox::new()),
         );
         agent.model_registry = Some(Arc::new(ModelRegistry::new(&config).unwrap()));
         let bound = agent.bind_model(None).unwrap();
-        assert_eq!(
-            bound.thinking_levels(),
-            vec![
-                ThinkingLevel::Off,
-                ThinkingLevel::Low,
-                ThinkingLevel::High,
-                ThinkingLevel::Max
-            ]
-        );
-        let request = CreateChatCompletionRequestArgs::default()
-            .model(&config.llm.model)
-            .messages(vec![
-                ChatCompletionRequestUserMessageArgs::default()
-                    .content("hello")
-                    .build()
-                    .unwrap()
-                    .into(),
-            ])
-            .build()
-            .unwrap();
-        let default = bound
-            .provider_request(request.clone(), &crate::Session::new())
-            .unwrap();
-        assert!(default.get("enable_thinking").is_none());
-        assert!(default.get("reasoning_effort").is_none());
-        for (level, effort) in [
-            (ThinkingLevel::Off, None),
-            (ThinkingLevel::Low, Some("low")),
-            (ThinkingLevel::High, Some("high")),
-            (ThinkingLevel::Max, Some("max")),
-        ] {
-            let value = bound
+        assert!(bound.thinking_levels().is_empty());
+        assert!(bound.with_thinking_level(ThinkingLevel::High).is_err());
+        config.llm.reasoning_effort = Some(ThinkingLevel::High);
+        agent.model_registry = Some(Arc::new(ModelRegistry::new(&config).unwrap()));
+        let bound = agent.bind_model(None).unwrap();
+        assert_eq!(bound.thinking_levels(), vec![ThinkingLevel::High]);
+        assert!(
+            bound
                 .clone()
-                .with_thinking_level(level)
-                .unwrap()
-                .provider_request(request.clone(), &crate::Session::new())
-                .unwrap();
-            assert_eq!(value["enable_thinking"], level.enabled());
-            assert_eq!(
-                value
-                    .get("reasoning_effort")
-                    .and_then(|value| value.as_str()),
-                effort
-            );
-        }
+                .with_thinking_level(ThinkingLevel::Low)
+                .is_err()
+        );
+        assert!(bound.with_thinking_level(ThinkingLevel::High).is_ok());
     }
 
     #[test]
@@ -242,35 +237,82 @@ mod thinking_level_tests {
             ])
             .build()
             .unwrap();
-        for (level, effort) in [
-            (ThinkingLevel::Off, None),
-            (ThinkingLevel::Low, Some("low")),
-            (ThinkingLevel::High, Some("high")),
-            (ThinkingLevel::Max, Some("max")),
-        ] {
+        assert_eq!(
+            bound.thinking_levels(),
+            vec![ThinkingLevel::Off, ThinkingLevel::High, ThinkingLevel::Max]
+        );
+        assert!(
+            bound
+                .clone()
+                .with_thinking_level(ThinkingLevel::Low)
+                .is_err()
+        );
+        for level in bound.thinking_levels() {
             let selected = bound.clone().with_thinking_level(level).unwrap();
             let value = selected
                 .provider_request(request.clone(), &crate::Session::new())
                 .unwrap();
             assert_eq!(value["enable_thinking"], level.enabled());
-            if level == ThinkingLevel::Off {
+            if level.enabled() {
+                assert_eq!(value["reasoning_effort"], level.reasoning_effort());
+            } else {
                 assert!(value.get("reasoning_effort").is_none());
             }
-            assert_eq!(
-                value
-                    .get("reasoning_effort")
-                    .and_then(|value| value.as_str()),
-                effort
-            );
         }
         assert!(bound.thinking_enabled());
-        assert!(
-            bound
-                .model_snapshot
-                .as_ref()
-                .unwrap()
-                .thinking_level
-                .is_none()
-        );
+        assert_eq!(bound.reasoning_effort(), Some(ThinkingLevel::High));
+    }
+    #[test]
+    fn openai_gpt4_omits_effort_and_gpt5_projects_native_effort_only() {
+        for model in ["gpt-4.1-mini", "gpt-5.6-sol"] {
+            let mut config = AppConfig::default();
+            config.llm.base_url = "https://api.openai.com/v1".into();
+            config.llm.model = model.into();
+            config.llm.api_key = SecretString::new("fixture");
+            let mut agent = Agent::new(
+                config.llm.base_url.clone(),
+                "fixture".into(),
+                model,
+                None::<String>,
+                Arc::new(crate::tools::ToolBox::new()),
+            );
+            agent.model_registry = Some(Arc::new(ModelRegistry::new(&config).unwrap()));
+            let bound = agent.bind_model(None).unwrap();
+            let request = CreateChatCompletionRequestArgs::default()
+                .model(model)
+                .messages(vec![
+                    ChatCompletionRequestUserMessageArgs::default()
+                        .content("hello")
+                        .build()
+                        .unwrap()
+                        .into(),
+                ])
+                .build()
+                .unwrap();
+            if model == "gpt-4.1-mini" {
+                assert!(!bound.thinking_supported());
+                let value = bound
+                    .provider_request(request, &crate::Session::new())
+                    .unwrap();
+                assert!(value.get("reasoning_effort").is_none());
+                assert!(value.get("enable_thinking").is_none());
+            } else {
+                for (level, effort) in [
+                    (ThinkingLevel::Off, "none"),
+                    (ThinkingLevel::Low, "low"),
+                    (ThinkingLevel::Medium, "medium"),
+                    (ThinkingLevel::High, "high"),
+                    (ThinkingLevel::Xhigh, "xhigh"),
+                    (ThinkingLevel::Max, "max"),
+                ] {
+                    let selected = bound.clone().with_thinking_level(level).unwrap();
+                    let value = selected
+                        .provider_request(request.clone(), &crate::Session::new())
+                        .unwrap();
+                    assert_eq!(value["reasoning_effort"], effort);
+                    assert!(value.get("enable_thinking").is_none());
+                }
+            }
+        }
     }
 }

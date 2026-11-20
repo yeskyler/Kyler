@@ -41,6 +41,7 @@ and artifacts through their respective views.
 | `kyler-tui` | Terminal interaction and in-process core operation/event adaptation |
 | `kyler-client` | Rust HTTP/SSE transport and typed client operations |
 | `kyler-acp` | Official Agent Client Protocol v1 SDK transport, session routing, updates and permission requests |
+| `kyler-provider` | Provider adapters, model discovery, capability rules, request projection, stream decoding and error classification |
 | `kyler-core` | Agent threads, runtime, tools, sessions, context, memory, sandbox, integration policy |
 | `kyler-store` | Shared SQLite infrastructure, scoped session/run indexes and UI preference persistence |
 | `kyler-skills` | Skill discovery, package validation, reviewed versions, caches, resources and package storage |
@@ -421,43 +422,26 @@ with a timeout and protection against older results replacing newer plans. The
 model's parallel-call hint is independent of runtime concurrency limits; scheduling
 does not infer data dependencies or prevent cross-session file conflicts.
 
-## Session thinking preference
+## Provider boundary and session thinking
 
-`GET/PUT /v1/sessions/{id}/thinking` exposes credential-free thinking state and available `high/max` levels.
-Updates use the thread operation queue and an atomic session-owned preference
-sidecar, separate from active execution checkpoints. The preference survives restart
-and is applied to a copied model snapshot at the next turn admission; an active
-execution keeps its existing setting. Sessions default to High. Old Off/false preferences resolve to High without being
-rewritten on read; new Off selections are rejected. Low-level Off serialization
-remains for compatibility with embedded callers.
-SiliconFlow DeepSeek-V4-Flash maps High/Max to distinct `reasoning_effort` values;
-Off disables thinking and omits effort. Explicit levels are independent of model-name recognition.
-Model-name recognition chooses automatic defaults only. Any bound model can save
-an explicit thinking selection; provider parameter compatibility is validated by
-the provider. The menu remains visible rather than silently disappearing for an
-unrecognized model name.
+`kyler-core` and `kyler-config` depend on `kyler-provider`; the provider crate depends
+only on shared protocol types and transport libraries, never on core. It receives
+projected requests and host-injected credentials, not sessions, tool permissions,
+or user configuration paths. The current adapters share Chat Completions transport;
+this does not introduce a Responses API backend.
 
-Provider parameter reference: [SiliconFlow Chat Completions](https://docs.siliconflow.cn/docs/api/chat-completions-post).
+Core owns model selection, immutable execution snapshots, context budgets, discovery
+scheduling and persistence. Providers discover IDs and resolve documented capabilities.
+Configured profiles and cached IDs are available without waiting for network refresh.
+Discovery publishes atomically; a configuration change discards an in-flight result.
+Running agents retain their old snapshot across discovery, reload and model selection.
 
-### Patch change statistics
-
-Successful `apply_patch` output is a structured `patch_result` containing
-workspace-relative file paths, operation labels, previous paths for renames, and
-added/removed line counts. Update counts exclude context; additions count written
-lines and deletions count original lines, including a final unterminated line.
-Repeated operations aggregate per file, and pure renames report zero changed lines.
-Preflight failures report no successful changes. Commit I/O failures return an
-error/partial result containing only confirmed operations and an inspection warning
-for the failing file; runtime dispatch records these as tool errors, not success.
-The files are not updated transactionally.
-
-Durable tool output retains the report. Both tool-finished events and history
-projection include optional patch metadata, independent of textual preview
-truncation. Older events/output remain valid and show no guessed statistics.
-Web uses green additions, red deletions, blue modifications, neutral renames and
-amber partial-application notices, with symbols and labels in both themes. TUI
-shows matching colored totals and file details; text and symbols remain useful
-without color. No tool arguments are parsed to estimate completed changes.
+`GET/PUT /v1/sessions/{id}/thinking` returns supported levels for the selected model.
+`use_default: true` clears the explicit preference. Preferences are persisted per
+provider/model identity and apply to the next run. Unknown models do not advertise
+arbitrary levels. Adapter projection selects the output-limit field, reasoning fields,
+and whether tool continuations carry reasoning; clients consume the shared capability
+contract rather than inferring behavior from model names.
 
 ## Subagent task tools
 

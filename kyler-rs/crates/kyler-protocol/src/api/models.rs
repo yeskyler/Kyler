@@ -9,6 +9,17 @@ pub struct ModelCapabilities {
     pub tools: Option<bool>,
     pub structured_output: Option<bool>,
     pub tokenizer: Tokenizer,
+    pub reasoning: Option<ReasoningCapabilities>,
+    pub reasoning_content: Option<bool>,
+    pub max_context_tokens: Option<usize>,
+    pub max_output_tokens: Option<u32>,
+}
+/// Explicitly supported levels; None on ModelCapabilities means unknown.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReasoningCapabilities {
+    pub levels: Vec<ThinkingLevel>,
+    pub default: ThinkingLevel,
+    pub source: String,
 }
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +47,14 @@ pub struct ModelCatalog {
     pub revision: u64,
     pub default_profile: String,
     pub models: Vec<ModelInfo>,
+    #[serde(default)]
+    pub providers: Vec<ProviderDiscoveryState>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderDiscoveryState {
+    pub provider: String,
+    pub status: String,
+    pub error: Option<String>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,12 +91,27 @@ pub struct ModelConnectionUpdate {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingLevel {
+    #[serde(alias = "none")]
     Off,
     Low,
+    Medium,
     High,
+    Xhigh,
     Max,
 }
 impl ThinkingLevel {
+    /// Provider spelling differs from the UI's historical "off" preference.
+    pub fn reasoning_effort(self) -> &'static str {
+        match self {
+            Self::Off => "none",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+
     pub fn from_enabled(enabled: bool) -> Self {
         if enabled { Self::High } else { Self::Off }
     }
@@ -87,6 +121,8 @@ impl ThinkingLevel {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThinkingState {
+    #[serde(default)]
+    pub follows_default: bool,
     pub enabled: bool,
     pub supported: bool,
     pub level: ThinkingLevel,
@@ -96,16 +132,19 @@ pub struct ThinkingState {
 #[serde(deny_unknown_fields)]
 pub struct ThinkingSelection {
     #[serde(default)]
+    pub use_default: bool,
+    #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
     pub level: Option<ThinkingLevel>,
 }
 impl ThinkingSelection {
-    pub fn selected_level(&self) -> Result<ThinkingLevel, &'static str> {
-        match (self.level, self.enabled) {
-            (Some(level), None) => Ok(level),
-            (None, Some(enabled)) => Ok(ThinkingLevel::from_enabled(enabled)),
-            _ => Err("Provide exactly one thinking level or legacy enabled flag"),
+    pub fn selected_level(&self) -> Result<Option<ThinkingLevel>, &'static str> {
+        match (self.use_default, self.level, self.enabled) {
+            (true, None, None) => Ok(None),
+            (false, Some(level), None) => Ok(Some(level)),
+            (false, None, Some(enabled)) => Ok(Some(ThinkingLevel::from_enabled(enabled))),
+            _ => Err("Provide exactly one thinking level, use_default, or legacy enabled flag"),
         }
     }
 }

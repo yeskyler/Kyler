@@ -383,19 +383,27 @@ fn local_agent_ignores_service_and_client_transport_settings() {
 }
 
 #[test]
-fn thinking_flags_parse_for_legacy_and_named_models_without_forcing_other_providers() {
-    let config = loader::parse(VALID).unwrap();
+fn reasoning_effort_parses_for_legacy_and_named_models() {
+    use kyler_protocol::api::models::ThinkingLevel;
     assert_eq!(
-        config.effective_models().profiles["default"].enable_thinking,
+        loader::parse(VALID).unwrap().effective_models().profiles["default"].reasoning_effort,
         None
     );
-    for enabled in [true, false] {
-        let config = loader::parse(&format!("{VALID}\nenable_thinking={enabled}\n")).unwrap();
+    for (effort, level) in [
+        ("none", ThinkingLevel::Off),
+        ("low", ThinkingLevel::Low),
+        ("medium", ThinkingLevel::Medium),
+        ("high", ThinkingLevel::High),
+        ("xhigh", ThinkingLevel::Xhigh),
+        ("max", ThinkingLevel::Max),
+    ] {
+        let config = loader::parse(&format!("{VALID}\nreasoning_effort=\"{effort}\"\n")).unwrap();
         assert_eq!(
-            config.effective_models().profiles["default"].enable_thinking,
-            Some(enabled)
+            config.effective_models().profiles["default"].reasoning_effort,
+            Some(level)
         );
     }
+    assert!(loader::parse(&format!("{VALID}\nreasoning_effort=\"invalid\"\n")).is_err());
     let config = loader::parse(
         r#"
 [models]
@@ -408,14 +416,14 @@ provider="fixture"
 model="fixture"
 context_tokens=64000
 output_tokens=2048
-enable_thinking=false
+reasoning_effort="none"
 "#,
     )
     .unwrap();
     config.validate().unwrap();
     assert_eq!(
-        config.effective_models().profiles["fast"].enable_thinking,
-        Some(false)
+        config.effective_models().profiles["fast"].reasoning_effort,
+        Some(ThinkingLevel::Off)
     );
 }
 

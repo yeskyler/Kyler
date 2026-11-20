@@ -62,12 +62,14 @@ default = "fast"
 [models.providers.fixture]
 base_url = "{url}"
 api_key = "PRIVATE_MODEL_KEY"
+discover_models = false
 [models.profiles.fast]
 # Keep this 32k fixture independent of system-prompt byte growth.
-capabilities = {{ tokenizer = "cl100k_base" }}
+capabilities = {{ tokenizer = "cl100k_base", reasoning = {{ levels = ["off", "low", "medium", "high", "xhigh", "max"], default = "high", source = "fixture" }} }}
 provider = "fixture"
 model = "fast-v1"
-enable_thinking = true
+reasoning_effort = "high"
+output_token_parameter = "max_completion_tokens"
 context_tokens = 32000
 output_tokens = 1024
 [models.profiles.slow]
@@ -201,7 +203,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .unwrap();
     assert_eq!(
         thinking,
-        json!({"enabled":false,"supported":true,"level":"off","levels":["off","low","high","max"]})
+        json!({"follows_default":false,"enabled":false,"supported":true,"level":"off","levels":["off","low","medium","high","xhigh","max"]})
     );
     assert_eq!(
         client
@@ -265,6 +267,63 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .await
         .unwrap();
     assert_eq!(saved["level"], "low");
+    client
+        .put(&selection)
+        .json(&json!({"profile":"slow"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let other_model: Value = client
+        .get(&thinking_url)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(other_model["supported"], false);
+    client
+        .put(&selection)
+        .json(&json!({"profile":"fast"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let restored: Value = client
+        .get(&thinking_url)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(restored["level"], "low");
+    assert_eq!(restored["follows_default"], false);
+    let default: Value = client
+        .put(&thinking_url)
+        .json(&json!({"use_default":true}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(default["follows_default"], true);
+    assert_eq!(default["level"], "high");
+    client
+        .put(&thinking_url)
+        .json(&json!({"level":"low"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
     assert_eq!(
         client
             .put(&thinking_url)
@@ -323,7 +382,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
             .await
             .unwrap()
             .status(),
-        200
+        400
     );
     assert_eq!(
         client
@@ -488,9 +547,9 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
     assert_eq!(requests[0]["max_tokens"], 2048);
     assert!(requests[0].get("max_completion_tokens").is_none());
     assert_eq!(requests[1]["max_completion_tokens"], 1024);
-    assert_eq!(requests[1]["enable_thinking"], true);
-    assert_eq!(requests[1]["reasoning_effort"], "low");
-    assert_eq!(requests[2]["enable_thinking"], true);
+    assert!(requests[1].get("enable_thinking").is_none());
+    assert_eq!(requests[1]["reasoning_effort"], "high"); // A different model starts with its own default.
+    assert!(requests[2].get("enable_thinking").is_none());
     assert_eq!(requests[2]["reasoning_effort"], "high");
     assert!(requests[1].get("max_tokens").is_none());
     drop(requests);

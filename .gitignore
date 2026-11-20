@@ -70,3 +70,6 @@ scheduler.sqlite3-shm
 app.sqlite3
 app.sqlite3-wal
 app.sqlite3-shm
+
+# Host-owned provider discovery cache (may use a custom session directory)
+_model-catalog.json

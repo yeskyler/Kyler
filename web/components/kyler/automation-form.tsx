@@ -17,6 +17,7 @@ import { randomUuid } from "@/lib/kyler/random-uuid";
 import { permissionLabels } from "@/lib/kyler/types";
 import {
   scheduleLabel,
+  thinkingForModel,
   taskTime,
   workspaceLabel,
   type Automation,
@@ -36,22 +37,28 @@ export function AutomationForm({
   onClose: () => void;
   onSaved: (task: Automation) => void;
 }) {
-  const [config, setConfig] = useState<TaskConfig>(
-    () =>
-      task?.config ?? {
-        name: "",
-        prompt: "",
-        cwd: options.defaultWorkspace,
-        workspace_mode: "project",
-        cron: "0 9 * * *",
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-        model_profile: options.models.default_profile,
-        thinking: "high",
-        permission: "workspace_access",
-        timeout_seconds: 600,
-        wait_timeout_seconds: 300,
-      },
-  );
+  const [config, setConfig] = useState<TaskConfig>(() => {
+    const initial: TaskConfig = task?.config ?? {
+      name: "",
+      prompt: "",
+      cwd: options.defaultWorkspace,
+      workspace_mode: "project",
+      cron: "0 9 * * *",
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      model_profile: options.models.default_profile,
+      thinking: "high",
+      permission: "workspace_access",
+      timeout_seconds: 600,
+      wait_timeout_seconds: 300,
+    };
+    return {
+      ...initial,
+      thinking: thinkingForModel(options.models, initial.model_profile, task?.config.thinking)
+        .level,
+    };
+  });
+  const thinking = thinkingForModel(options.models, config.model_profile, config.thinking);
+
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -305,7 +312,14 @@ export function AutomationForm({
                   <span>Model</span>
                   <select
                     value={config.model_profile ?? ""}
-                    onChange={(event) => change("model_profile", event.target.value)}
+                    onChange={(event) => {
+                      const profile = event.target.value;
+                      setConfig((current) => ({
+                        ...current,
+                        model_profile: profile,
+                        thinking: thinkingForModel(options.models, profile, current.thinking).level,
+                      }));
+                    }}
                     className={selectClass}
                   >
                     <option value="" disabled>
@@ -322,12 +336,14 @@ export function AutomationForm({
                   <span>Thinking level</span>
                   <select
                     value={config.thinking}
+                    disabled={thinking.levels.length === 0}
                     onChange={(event) =>
                       change("thinking", event.target.value as TaskConfig["thinking"])
                     }
                     className={selectClass}
                   >
-                    {["off", "low", "high", "max"].map((value) => (
+                    {thinking.levels.length === 0 && <option value="off">Unavailable</option>}
+                    {thinking.levels.map((value) => (
                       <option key={value} value={value}>
                         {value[0].toUpperCase() + value.slice(1)}
                       </option>

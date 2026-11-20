@@ -349,7 +349,7 @@ default_directory = "workspace"
 enabled = true
 directory = "sessions"
 [context]
-context_tokens = 128000
+auto_model_window = true
 window_ratio = 0.6
 trigger_ratio = 0.8
 [server]

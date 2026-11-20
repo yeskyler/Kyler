@@ -7,8 +7,20 @@ export type Session = {
   updated_at?: number;
   status?: string | null;
 };
-export type ModelInfo = { profile: string; model: string; provider: string };
-export type ModelCatalog = { models: ModelInfo[]; default_profile: string };
+export type ThinkingLevel = "off" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ModelInfo = {
+  profile: string;
+  model: string;
+  provider: string;
+  capabilities?: {
+    reasoning?: { levels: ThinkingLevel[]; default: ThinkingLevel; source: string } | null;
+  };
+};
+export type ModelCatalog = {
+  models: ModelInfo[];
+  default_profile: string;
+  providers?: { provider: string; status: string; error?: string | null }[];
+};
 export type SessionModel = {
   profile: string | null;
   selected: ModelInfo | null;

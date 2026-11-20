@@ -39,6 +39,7 @@ pub async fn execute(args: Args) -> Result<()> {
         ));
     }
     if let Some(Command::Configure {
+        advanced,
         non_interactive,
         web,
         addresses,
@@ -55,7 +56,9 @@ pub async fn execute(args: Args) -> Result<()> {
             *web,
             *addresses,
             output.as_deref(),
-        );
+            *advanced,
+        )
+        .await;
     }
     if let Some(Command::Learning { command }) = args.command.as_ref() {
         if args.server.is_some() {

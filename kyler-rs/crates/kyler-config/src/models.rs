@@ -6,31 +6,42 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::{Result, ensure};
 use serde::Deserialize;
 
-use kyler_protocol::api::models::ModelCapabilities;
+use kyler_protocol::api::models::{ModelCapabilities, ThinkingLevel};
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputTokenParameter {
-    MaxTokens,
-    #[default]
-    MaxCompletionTokens,
-}
-#[derive(Debug, Clone, Default, Deserialize)]
+pub use kyler_provider::{AdapterKind, OutputTokenParameter};
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProviderSettings {
+    pub adapter: AdapterKind,
+    /// Discover available model IDs without issuing inference requests.
+    pub discover_models: bool,
     pub base_url: String,
     pub api_key: SecretString,
     pub api_key_env: Option<String>,
+}
+impl Default for ProviderSettings {
+    fn default() -> Self {
+        Self {
+            adapter: AdapterKind::Auto,
+            discover_models: true,
+            base_url: String::new(),
+            api_key: SecretString::default(),
+            api_key_env: None,
+        }
+    }
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelProfile {
     #[serde(default)]
-    pub enable_thinking: Option<bool>,
+    pub reasoning_effort: Option<ThinkingLevel>,
     #[serde(default)]
     pub capabilities: ModelCapabilities,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub auto_context_window: bool,
+    #[serde(default = "default_context_tokens")]
     pub context_tokens: usize,
     pub output_tokens: u32,
     #[serde(default)]
@@ -42,6 +53,9 @@ pub struct ModelSettings {
     pub default: String,
     pub providers: BTreeMap<String, ProviderSettings>,
     pub profiles: BTreeMap<String, ModelProfile>,
+}
+fn default_context_tokens() -> usize {
+    crate::ContextSettings::default().context_tokens
 }
 impl ModelSettings {
     pub fn resolve_environment(&mut self, values: &HashMap<String, String>) {
@@ -57,9 +71,13 @@ impl ModelSettings {
     }
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.profiles.contains_key(&self.default),
+            (self.profiles.is_empty() && self.default.is_empty() && !self.providers.is_empty())
+                || self.profiles.contains_key(&self.default),
             "models.default must name an existing profile"
         );
+        for provider in self.providers.values() {
+            validate_provider(provider)?;
+        }
         for (name, profile) in &self.profiles {
             ensure!(
                 !name.is_empty()
@@ -115,19 +133,22 @@ impl AppConfig {
                     base_url: self.llm.base_url.clone(),
                     api_key: self.llm.api_key.clone(),
                     api_key_env: None,
+                    adapter: self.llm.adapter,
+                    discover_models: self.llm.discover_models,
                 },
             )]
             .into(),
             profiles: [(
                 "default".into(),
                 ModelProfile {
-                    enable_thinking: self.llm.enable_thinking,
+                    reasoning_effort: self.llm.reasoning_effort,
                     capabilities: self.llm.capabilities.clone(),
                     provider: "default".into(),
                     model: self.llm.model.clone(),
+                    auto_context_window: self.context.auto_model_window,
                     context_tokens: self.context.context_tokens,
                     output_tokens: self.context.output_tokens,
-                    output_token_parameter: OutputTokenParameter::MaxTokens,
+                    output_token_parameter: self.llm.output_token_parameter,
                 },
             )]
             .into(),

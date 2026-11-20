@@ -4,7 +4,7 @@ use async_openai::types::chat::{
 };
 
 use kyler_config::OutputTokenParameter;
-use kyler_protocol::tool::ToolDefinition;
+use kyler_protocol::{api::models::ThinkingLevel, tool::ToolDefinition};
 
 pub(crate) fn set_output_limit(
     request: &mut CreateChatCompletionRequest,
@@ -20,29 +20,16 @@ pub(crate) fn set_output_limit(
 }
 
 /// Automatically enable only the known SiliconFlow model. Other endpoints opt in explicitly.
-pub(crate) fn thinking_mode(base_url: &str, model: &str, explicit: Option<bool>) -> Option<bool> {
+pub(crate) fn default_reasoning_effort(
+    base_url: &str,
+    model: &str,
+    explicit: Option<ThinkingLevel>,
+) -> Option<ThinkingLevel> {
     explicit.or_else(|| {
-        let url = url::Url::parse(base_url).ok()?;
-        (matches!(
-            url.host_str(),
-            Some("api.siliconflow.cn" | "api.siliconflow.com")
-        ) && model == "deepseek-ai/DeepSeek-V4-Flash")
-            .then_some(true)
+        let adapter = kyler_provider::Adapter::resolve(kyler_provider::AdapterKind::Auto, base_url);
+        let capabilities = adapter.reasoning(model, None)?;
+        (adapter.0 == kyler_provider::AdapterKind::Siliconflow).then_some(capabilities.default)
     })
-}
-pub(crate) fn provider_request(
-    request: CreateChatCompletionRequest,
-    session: &crate::Session,
-    thinking: Option<bool>,
-) -> anyhow::Result<serde_json::Value> {
-    let mut value = serde_json::to_value(request)?;
-    if let Some(enabled) = thinking {
-        value["enable_thinking"] = enabled.into();
-    }
-    if thinking == Some(true) {
-        attach_reasoning(&mut value["messages"], session);
-    }
-    Ok(value)
 }
 /// Only current-turn tool continuations carry provider reasoning back to the model.
 /// Earlier turns and summaries remain reasoning-free.
@@ -120,37 +107,42 @@ mod tests {
 
 #[cfg(test)]
 mod thinking_tests {
-    use super::thinking_mode;
+    use super::default_reasoning_effort;
+    use kyler_protocol::api::models::ThinkingLevel;
     #[test]
     fn defaults_only_apply_to_the_known_siliconflow_model_and_allow_opt_out() {
         let model = "deepseek-ai/DeepSeek-V4-Flash";
         assert_eq!(
-            thinking_mode("https://api.siliconflow.cn/v1", model, None),
-            Some(true)
+            default_reasoning_effort("https://api.siliconflow.cn/v1", model, None),
+            Some(ThinkingLevel::High)
         );
         assert_eq!(
-            thinking_mode("https://api.siliconflow.com/v1", model, None),
-            Some(true)
+            default_reasoning_effort("https://api.siliconflow.com/v1", model, None),
+            Some(ThinkingLevel::High)
         );
         assert_eq!(
-            thinking_mode("https://api.siliconflow.cn/v1", model, Some(false)),
-            Some(false)
+            default_reasoning_effort(
+                "https://api.siliconflow.cn/v1",
+                model,
+                Some(ThinkingLevel::Off)
+            ),
+            Some(ThinkingLevel::Off)
         );
         assert_eq!(
-            thinking_mode("https://api.siliconflow.cn.evil.example/v1", model, None),
+            default_reasoning_effort("https://api.siliconflow.cn.evil.example/v1", model, None),
             None
         );
         assert_eq!(
-            thinking_mode("https://api.openai.com/v1", model, None),
+            default_reasoning_effort("https://api.openai.com/v1", model, None),
             None
         );
         assert_eq!(
-            thinking_mode("https://api.siliconflow.cn/v1", "other-model", None),
+            default_reasoning_effort("https://api.siliconflow.cn/v1", "other-model", None),
             None
         );
         assert_eq!(
-            thinking_mode("http://localhost:1234/v1", model, Some(true)),
-            Some(true)
+            default_reasoning_effort("http://localhost:1234/v1", model, Some(ThinkingLevel::High)),
+            Some(ThinkingLevel::High)
         );
     }
 }

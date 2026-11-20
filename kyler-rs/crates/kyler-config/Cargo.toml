@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+kyler-provider.workspace = true
 kyler-protocol.workspace = true
 kyler-logging.workspace = true
 anyhow.workspace = true

@@ -28,17 +28,17 @@ impl RunManager {
     pub async fn session_thinking_level(
         &self,
         id: &str,
-        level: kyler_protocol::api::models::ThinkingLevel,
+        level: Option<kyler_protocol::api::models::ThinkingLevel>,
     ) -> ApiResult<kyler_protocol::api::models::ThinkingState> {
         valid_id(id)?;
         let _registry = self.registry.lock().await;
         let session = self.store.load(id).await.map_err(ApiError::storage)?;
-        self.core_thread(&session)
-            .await?
-            .handle
-            .thinking_level(Some(level))
-            .await
-            .map_err(|error| ApiError::bad(&error.to_string()))
+        let handle = self.core_thread(&session).await?.handle;
+        match level {
+            Some(level) => handle.thinking_level(Some(level)).await,
+            None => handle.reset_thinking().await,
+        }
+        .map_err(|error| ApiError::bad(&error.to_string()))
     }
     /// Only trusted startup code chooses the reload source, never API input.
     pub fn set_model_source(&self, path: PathBuf, overrides: LlmOverrides) {
@@ -68,8 +68,15 @@ impl RunManager {
         .map_err(|_| {
             ApiError::bad("Invalid model configuration. The previous catalog remains active.")
         })?;
-        self.agent.model_registry().ok_or_else(|| ApiError::bad("Model management is unavailable."))?
-            .reload(&config).map_err(|_| ApiError::bad("Invalid model budgets or provider configuration. The previous catalog remains active."))
+        let models = self
+            .agent
+            .model_registry()
+            .ok_or_else(|| ApiError::bad("Model management is unavailable."))?;
+        models.reload(&config).map_err(|_| ApiError::bad("Invalid model budgets or provider configuration. The previous catalog remains active."))?;
+        models
+            .refresh_discovery()
+            .await
+            .map_err(|_| ApiError::bad("Model discovery could not refresh the catalog."))
     }
     pub(crate) async fn read_model_selection(&self, id: &str) -> ApiResult<ModelSelection> {
         let path = self.root.join(format!("{id}.model"));

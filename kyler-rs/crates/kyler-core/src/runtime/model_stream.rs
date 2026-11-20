@@ -16,32 +16,10 @@ use async_openai::{
     config::OpenAIConfig,
     types::chat::{
         ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls, ChatCompletionStreamOptions,
-        ChatCompletionStreamResponseDelta, CompletionUsage, CreateChatCompletionRequest,
-        FinishReason, FunctionCall,
+        CreateChatCompletionRequest, FinishReason, FunctionCall,
     },
 };
 use futures::StreamExt;
-
-// Preserve provider-returned reasoning separately from answer text.
-#[derive(serde::Deserialize)]
-struct ModelChunk {
-    #[serde(default)]
-    choices: Vec<ModelChoice>,
-    usage: Option<CompletionUsage>,
-}
-#[derive(serde::Deserialize)]
-struct ModelChoice {
-    index: u32,
-    delta: ModelDelta,
-    finish_reason: Option<FinishReason>,
-}
-#[derive(serde::Deserialize)]
-struct ModelDelta {
-    #[serde(flatten)]
-    standard: ChatCompletionStreamResponseDelta,
-    reasoning_content: Option<String>,
-    reasoning: Option<String>,
-}
 
 /// A continuous trickle cannot extend the fixed patch-generation deadline.
 async fn read_model_chunk<S: futures::Stream + Unpin>(
@@ -88,12 +66,12 @@ impl Agent {
             let encoded = serde_json::to_vec(&request)?;
             tracing::info!(target: "kyler_latency", session_id=%session.session_id,
                 request_bytes=encoded.len(), request_sha256=%format!("{:x}", Sha256::digest(&encoded)),
-                enable_thinking=?request.get("enable_thinking").and_then(|v| v.as_bool()), "model request fingerprint");
+                reasoning_effort=?request.get("reasoning_effort").and_then(|v| v.as_str()), "model request fingerprint");
         }
         let request_started = std::time::Instant::now();
         let mut stream = tokio::time::timeout(
             Duration::from_secs(60),
-            client.chat().create_stream_byot::<_, ModelChunk>(request),
+            kyler_provider::transport::stream(client, request),
         )
         .await
         .context("stream connection timed out")??;

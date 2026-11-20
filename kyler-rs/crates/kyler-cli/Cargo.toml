@@ -10,6 +10,7 @@ name = "kyler"
 path = "src/main.rs"
 
 [dependencies]
+kyler-provider.workspace = true
 kyler-acp.workspace = true
 async-trait.workspace = true
 anyhow.workspace = true

@@ -277,13 +277,11 @@ HTML localStorage is virtualized per session/artifact and persisted through a
 validated parent-frame bridge (64 KiB, 256 keys). sessionStorage is scoped to the
 current frame. Neither grants access to application cookies or application storage.
 
-The composer action row keeps the read-only model label on the left beside the
-attachment button. The separate thinking-level menu sits immediately left of the
-send button, inside the input border. Clicking High or Max opens an upward menu; only
-the backend saves explicit selections independently of model-name recognition. The choice is saved per session for subsequent
-turns and disabled during generation. SiliconFlow DeepSeek-V4-Flash sends distinct
-`reasoning_effort: high/max` values. High is the default; Off is not offered. Unknown model names do not hide or disable the menu; the provider remains responsible
-for validating explicitly requested parameters. Older disabled preferences are treated as High without rewriting historical data. Project and permission controls remain outside the input border.
+The composer offers a model and thinking menu. It displays the selected model,
+its supported reasoning levels, and a Model default option. Preferences are saved
+per session and provider/model identity for subsequent turns; generation keeps its
+bound settings. Refresh models updates the discovered directory. Provider adapters
+choose the corresponding request fields.
 
 Composer progress keeps a completed/total `Steps` control on the right while an
 unfinished plan is running. The centered strip shows the latest confirmed live

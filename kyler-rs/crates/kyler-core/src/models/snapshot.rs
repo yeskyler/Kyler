@@ -6,11 +6,13 @@ use kyler_protocol::api::models::{ModelConnectionSettings, ModelInfo};
 
 #[derive(Clone)]
 pub struct ModelSnapshot {
+    pub adapter: kyler_provider::Adapter,
+    pub(crate) adapter_kind: kyler_provider::AdapterKind,
+    pub(crate) discover_models: bool,
     pub info: ModelInfo,
     pub policy: ContextPolicy,
     pub output_token_parameter: OutputTokenParameter,
-    pub enable_thinking: Option<bool>,
-    pub thinking_level: Option<kyler_protocol::api::models::ThinkingLevel>,
+    pub reasoning_effort: Option<kyler_protocol::api::models::ThinkingLevel>,
     pub(crate) base_url: String,
     pub(crate) api_key: SecretString,
 }
@@ -29,6 +31,8 @@ impl ModelSnapshot {
             base_url: self.base_url.clone(),
             api_key: self.api_key.clone(),
             api_key_env: None,
+            adapter: self.adapter_kind,
+            discover_models: self.discover_models,
         }
     }
 }

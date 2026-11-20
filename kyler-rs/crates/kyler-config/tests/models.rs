@@ -36,7 +36,7 @@ fn profiles_resolve_credentials_without_requiring_legacy_llm_settings() {
     );
     assert_eq!(
         config.models.profiles["fast"].output_token_parameter,
-        OutputTokenParameter::MaxCompletionTokens
+        OutputTokenParameter::Auto
     );
     assert!(!format!("{config:?}").contains("PROCESS_SECRET"));
     let overrides = loader::LlmOverrides {
@@ -69,7 +69,7 @@ api_key = "fixture"
     let models = config.effective_models();
     assert_eq!(
         models.profiles["default"].output_token_parameter,
-        OutputTokenParameter::MaxTokens
+        OutputTokenParameter::Auto
     );
     let valid = CONFIG.replace(
         "api_key_env = \"FIXTURE_MODEL_KEY\"",
@@ -82,4 +82,31 @@ api_key = "fixture"
     ] {
         assert!(loader::parse(&invalid).unwrap().validate().is_err());
     }
+}
+
+#[test]
+fn providers_can_discover_models_without_manual_profiles() {
+    let config = loader::parse(
+        r#"[models.providers.openai]
+adapter="openai"
+base_url="https://api.openai.com/v1"
+api_key="fixture"
+"#,
+    )
+    .unwrap();
+    config.validate().unwrap();
+    assert!(config.effective_models().profiles.is_empty());
+    let config = loader::parse(
+        r#"[llm]
+base_url="https://api.openai.com/v1"
+model="gpt-5.6-sol"
+api_key="fixture"
+output_token_parameter="max_completion_tokens"
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        config.effective_models().profiles["default"].output_token_parameter,
+        OutputTokenParameter::MaxCompletionTokens
+    );
 }

@@ -17,6 +17,11 @@ use kyler_core::context::ContextPolicy;
 pub(super) struct Prompts {
     completed: usize,
 }
+pub(super) enum ModelChoice {
+    Selected(String),
+    Retry,
+    Cached,
+}
 impl Prompts {
     pub fn section(&mut self, title: &str) {
         self.completed = 0;
@@ -28,20 +33,116 @@ impl Prompts {
         self.completed += 1;
         Ok(value)
     }
-    pub fn model(&mut self, default: &str) -> Result<String> {
-        self.step("Model", |label| model(label, default))
+    pub fn provider(
+        &mut self,
+        label: &str,
+        default: kyler_provider::AdapterKind,
+    ) -> Result<kyler_provider::AdapterKind> {
+        self.step(label,|label| {
+            eprintln!("Providers: auto, openai, siliconflow, generic (1=OpenAI, 2=SiliconFlow, 3=Generic).");
+            let default=serde_json::to_value(default).map_err(|_|CliError::new(2,"Invalid adapter"))?;
+            loop {let value=prompt(label,default.as_str().unwrap_or("auto"))?;
+                match value.to_ascii_lowercase().as_str() {
+                    "auto"=>return Ok(kyler_provider::AdapterKind::Auto),
+                    "1"|"openai"=>return Ok(kyler_provider::AdapterKind::Openai),
+                    "2"|"siliconflow"=>return Ok(kyler_provider::AdapterKind::Siliconflow),
+                    "3"|"generic"=>return Ok(kyler_provider::AdapterKind::Generic),
+                    _=>eprintln!("Choose auto, openai, siliconflow, or generic."),
+                }
+            }
+        })
+    }
+    pub fn connection(&mut self, names: &[String], default: &str) -> Result<String> {
+        self.step("Provider connection", |label| {
+            eprintln!("Connections: {}", names.join(", "));
+            loop {
+                let value = prompt(label, default)?;
+                if names.contains(&value) {
+                    return Ok(value);
+                }
+                eprintln!("Choose one of the configured provider names.");
+            }
+        })
+    }
+    pub fn model_choice(
+        &mut self,
+        default: &str,
+        models: &[kyler_provider::discovery::DiscoveredModel],
+        cached: bool,
+    ) -> Result<ModelChoice> {
+        let label = format!("[{}] Model", self.completed + 1);
+        let mut query = String::new();
+        let mut offset = 0;
+        loop {
+            let filtered = models
+                .iter()
+                .filter(|m| m.id.to_lowercase().contains(&query))
+                .collect::<Vec<_>>();
+            for (i, m) in filtered.iter().enumerate().skip(offset).take(20) {
+                eprintln!("  {}. {}", i + 1, m.id);
+            }
+            eprintln!(
+                "Enter an ID or number; /text searches, n/p pages, m enters an ID, r retries{}.",
+                if cached { ", c uses cached models" } else { "" }
+            );
+            let value = prompt(&label, default)?;
+            match value.as_str() {
+                "r" => return Ok(ModelChoice::Retry),
+                "c" if cached => return Ok(ModelChoice::Cached),
+                "n" => {
+                    if offset + 20 < filtered.len() {
+                        offset += 20;
+                    }
+                    continue;
+                }
+                "p" => {
+                    offset = offset.saturating_sub(20);
+                    continue;
+                }
+                "m" => {
+                    let value = model("Model ID", default)?;
+                    self.completed += 1;
+                    return Ok(ModelChoice::Selected(value));
+                }
+                _ => {}
+            }
+            if let Some(search) = value.strip_prefix('/') {
+                query = search.to_lowercase();
+                offset = 0;
+                continue;
+            }
+            if let Ok(number) = value.parse::<usize>() {
+                if let Some(m) = number.checked_sub(1).and_then(|n| filtered.get(n)) {
+                    self.completed += 1;
+                    return Ok(ModelChoice::Selected(m.id.clone()));
+                }
+                eprintln!("Model number is outside the displayed directory.");
+                continue;
+            }
+            if valid_model_id(&value) {
+                self.completed += 1;
+                return Ok(ModelChoice::Selected(value));
+            }
+            eprintln!("Enter a model ID, or m for manual entry.");
+        }
     }
     pub fn context_window(
         &mut self,
         label: &str,
-        default: usize,
+        default: Option<usize>,
         policy: &ContextPolicy,
-    ) -> Result<usize> {
+    ) -> Result<Option<usize>> {
         self.step(label, |label| {
             loop {
-                let value = prompt(label, &default.to_string())?;
+                let value = prompt(
+                    label,
+                    &default.map_or_else(|| "auto".into(), |n| n.to_string()),
+                )?;
+                if value.eq_ignore_ascii_case("auto") {
+                    return Ok(None);
+                }
                 match parse_context_window(&value, policy) {
-                    Ok(tokens) => return Ok(tokens),
+                    Ok(tokens) => return Ok(Some(tokens)),
                     Err(message) => eprintln!("{message} Try again, or press Esc to cancel."),
                 }
             }
@@ -90,10 +191,14 @@ fn prompt(label: &str, default: &str) -> Result<String> {
     })
 }
 
+fn valid_model_id(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
+}
+
 fn model(label: &str, default: &str) -> Result<String> {
     loop {
         let value = prompt(label, default)?;
-        if !value.is_empty() && !value.chars().any(char::is_control) {
+        if valid_model_id(&value) {
             return Ok(value);
         }
         eprintln!("Enter a model ID, such as deepseek-ai/DeepSeek-V4-Flash.");

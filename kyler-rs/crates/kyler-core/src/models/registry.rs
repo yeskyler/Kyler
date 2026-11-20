@@ -1,4 +1,6 @@
 //! Atomic model catalog replacement and immutable execution snapshots.
+mod discovery;
+
 use super::snapshot::ModelSnapshot;
 use crate::context::ContextPolicy;
 
@@ -13,34 +15,106 @@ use kyler_config::AppConfig;
 use kyler_protocol::api::models::{ModelCatalog, ModelInfo};
 
 struct Catalog {
+    config: AppConfig,
+    discovered: discovery::Cache,
+    statuses: Vec<kyler_protocol::api::models::ProviderDiscoveryState>,
     revision: u64,
     default: String,
     models: BTreeMap<String, Arc<ModelSnapshot>>,
 }
 pub struct ModelRegistry {
     current: RwLock<Catalog>,
+    refresh: tokio::sync::Mutex<()>,
 }
 impl ModelRegistry {
     pub fn new(config: &AppConfig) -> Result<Self> {
         Ok(Self {
             current: RwLock::new(Self::build(config, 1)?),
+            refresh: tokio::sync::Mutex::new(()),
         })
     }
     fn build(config: &AppConfig, revision: u64) -> Result<Catalog> {
-        let settings = config.effective_models();
+        Self::build_discovered(config, revision, discovery::read_cache(config), Vec::new())
+    }
+    fn build_discovered(
+        config: &AppConfig,
+        revision: u64,
+        discovered: discovery::Cache,
+        mut statuses: Vec<kyler_protocol::api::models::ProviderDiscoveryState>,
+    ) -> Result<Catalog> {
+        let mut settings = config.effective_models();
+        discovery::extend_profiles(&mut settings, config, &discovered);
         settings.validate()?;
+        if statuses.is_empty() {
+            statuses = settings
+                .providers
+                .iter()
+                .map(
+                    |(name, p)| kyler_protocol::api::models::ProviderDiscoveryState {
+                        provider: name.clone(),
+                        status: if p.discover_models {
+                            "pending"
+                        } else {
+                            "disabled"
+                        }
+                        .into(),
+                        error: None,
+                    },
+                )
+                .collect();
+        }
         let mut models = BTreeMap::new();
         for (name, profile) in settings.profiles {
             let provider = &settings.providers[&profile.provider];
+            let adapter = kyler_provider::Adapter::resolve(provider.adapter, &provider.base_url);
+            let mut capabilities = profile.capabilities.clone();
+            let inferred = adapter.capabilities(&profile.model, profile.reasoning_effort);
+            capabilities.reasoning = capabilities.reasoning.or(inferred.reasoning);
+            capabilities.images = capabilities.images.or(inferred.images);
+            capabilities.tools = capabilities.tools.or(inferred.tools);
+            capabilities.structured_output = capabilities
+                .structured_output
+                .or(inferred.structured_output);
+            capabilities.max_context_tokens = capabilities
+                .max_context_tokens
+                .or(inferred.max_context_tokens);
+            capabilities.max_output_tokens = capabilities
+                .max_output_tokens
+                .or(inferred.max_output_tokens);
+            if let Some(reasoning) = &mut capabilities.reasoning {
+                ensure!(
+                    reasoning.levels.is_empty() || reasoning.levels.contains(&reasoning.default),
+                    "Default thinking level must be supported"
+                );
+                ensure!(
+                    profile
+                        .reasoning_effort
+                        .is_none_or(|e| reasoning.levels.contains(&e)),
+                    "Configured thinking level is unsupported"
+                );
+                if let Some(effort) = profile.reasoning_effort {
+                    reasoning.default = effort;
+                    reasoning.source = "configuration".into();
+                }
+            }
             let mut policy = ContextPolicy::from(&config.context);
-            policy.context_tokens = profile.context_tokens;
+            policy.context_tokens = if profile.auto_context_window {
+                capabilities
+                    .max_context_tokens
+                    .unwrap_or(profile.context_tokens)
+            } else {
+                profile.context_tokens
+            };
             policy.output_tokens = profile.output_tokens;
             policy.validate()?;
             models.insert(
                 name.clone(),
                 Arc::new(ModelSnapshot {
+                    adapter,
+                    adapter_kind: provider.adapter,
+                    discover_models: provider.discover_models,
                     info: ModelInfo {
-                        capabilities: profile.capabilities.clone(),
+                        capabilities,
                         profile: name,
                         provider: profile.provider,
                         model: profile.model.clone(),
@@ -50,19 +124,22 @@ impl ModelRegistry {
                         output_tokens: policy.output_tokens,
                     },
                     policy,
-                    output_token_parameter: profile.output_token_parameter,
-                    thinking_level: None,
-                    enable_thinking: super::request::thinking_mode(
-                        &provider.base_url,
-                        &profile.model,
-                        profile.enable_thinking,
-                    ),
+                    output_token_parameter: adapter
+                        .output_parameter(&profile.model, profile.output_token_parameter),
+                    reasoning_effort: profile.reasoning_effort.or_else(|| {
+                        (adapter.0 == kyler_provider::AdapterKind::Siliconflow)
+                            .then(|| adapter.reasoning(&profile.model, None).map(|r| r.default))
+                            .flatten()
+                    }),
                     base_url: provider.base_url.clone(),
                     api_key: provider.api_key.clone(),
                 }),
             );
         }
         Ok(Catalog {
+            config: config.clone(),
+            discovered,
+            statuses,
             revision,
             default: settings.default,
             models,
@@ -79,7 +156,15 @@ impl ModelRegistry {
         publish: impl FnOnce() -> Result<()>,
     ) -> Result<ModelCatalog> {
         // Build before taking the write lock; readers keep the last valid generation.
-        let mut candidate = Self::build(config, 0)?;
+        let mut discovered = discovery::read_cache(config);
+        {
+            let current = self
+                .current
+                .read()
+                .map_err(|_| anyhow::anyhow!("model registry unavailable"))?;
+            discovered.0.extend(current.discovered.0.clone());
+        }
+        let mut candidate = Self::build_discovered(config, 0, discovered, Vec::new())?;
         let mut current = self
             .current
             .write()
@@ -100,6 +185,7 @@ impl ModelRegistry {
             revision: catalog.revision,
             default_profile: catalog.default.clone(),
             models: catalog.models.values().map(|m| m.info.clone()).collect(),
+            providers: catalog.statuses.clone(),
         }
     }
     pub fn catalog(&self) -> ModelCatalog {
@@ -226,6 +312,48 @@ mod capability_tests {
     use super::ModelRegistry;
 
     #[test]
+    fn automatic_windows_follow_known_model_limits_and_preserve_manual_budgets() {
+        let mut config = kyler_config::loader::parse(
+            r#"[llm]
+base_url="https://api.openai.com/v1"
+model="gpt-5.6-sol"
+api_key="fixture"
+[context]
+context_tokens=64000
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            ModelRegistry::new(&config)
+                .unwrap()
+                .resolve(None)
+                .unwrap()
+                .policy
+                .context_tokens,
+            64000
+        );
+        config.context.auto_model_window = true;
+        assert_eq!(
+            ModelRegistry::new(&config)
+                .unwrap()
+                .resolve(None)
+                .unwrap()
+                .policy
+                .context_tokens,
+            1_050_000
+        );
+        config.llm.model = "unknown".into();
+        assert_eq!(
+            ModelRegistry::new(&config)
+                .unwrap()
+                .resolve(None)
+                .unwrap()
+                .policy
+                .context_tokens,
+            64000
+        );
+    }
+    #[test]
     fn legacy_profiles_preserve_explicit_capabilities_and_tokenizer() {
         let config = kyler_config::loader::parse(
             r#"
@@ -268,25 +396,34 @@ api_key="fixture"
         .unwrap();
         let registry = ModelRegistry::new(&config).unwrap();
         let old = registry.resolve(None).unwrap();
-        assert_eq!(old.enable_thinking, Some(true));
-        config.llm.enable_thinking = Some(false);
+        assert_eq!(
+            old.reasoning_effort,
+            Some(kyler_protocol::api::models::ThinkingLevel::High)
+        );
+        config.llm.reasoning_effort = Some(kyler_protocol::api::models::ThinkingLevel::Off);
         registry.reload(&config).unwrap();
-        assert_eq!(registry.resolve(None).unwrap().enable_thinking, Some(false));
-        assert_eq!(old.enable_thinking, Some(true));
+        assert_eq!(
+            registry.resolve(None).unwrap().reasoning_effort,
+            Some(kyler_protocol::api::models::ThinkingLevel::Off)
+        );
+        assert_eq!(
+            old.reasoning_effort,
+            Some(kyler_protocol::api::models::ThinkingLevel::High)
+        );
         config.models = config.effective_models();
         config
             .models
             .profiles
             .get_mut("default")
             .unwrap()
-            .enable_thinking = Some(true);
+            .reasoning_effort = Some(kyler_protocol::api::models::ThinkingLevel::High);
         assert_eq!(
             ModelRegistry::new(&config)
                 .unwrap()
                 .resolve(None)
                 .unwrap()
-                .enable_thinking,
-            Some(true)
+                .reasoning_effort,
+            Some(kyler_protocol::api::models::ThinkingLevel::High)
         );
     }
 }

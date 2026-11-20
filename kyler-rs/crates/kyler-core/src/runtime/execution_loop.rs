@@ -14,12 +14,9 @@ use crate::{
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use async_openai::{
-    config::OpenAIConfig,
-    types::chat::{
-        ChatCompletionRequestSystemMessageArgs, CreateChatCompletionRequestArgs,
-        CreateChatCompletionResponse,
-    },
+use async_openai::types::chat::{
+    ChatCompletionRequestSystemMessageArgs, CreateChatCompletionRequestArgs,
+    CreateChatCompletionResponse,
 };
 use backon::{ExponentialBuilder, Retryable};
 
@@ -30,13 +27,15 @@ impl Agent {
         scope: Option<&SubagentScope>,
         stream: Option<&StreamControl>,
     ) -> Result<String> {
-        let config = OpenAIConfig::new()
-            .with_api_base(&self.base_url)
-            .with_api_key(&self.api_key);
         #[cfg(not(test))]
-        let client = async_openai::Client::with_config(config);
+        let client = kyler_provider::transport::client(&self.base_url, &self.api_key);
         #[cfg(test)]
-        let client = super::tests::local_fixture_client(config, &self.base_url)?;
+        let client = super::tests::local_fixture_client(
+            async_openai::config::OpenAIConfig::new()
+                .with_api_base(&self.base_url)
+                .with_api_key(&self.api_key),
+            &self.base_url,
+        )?;
         let mut retrieval = super::mcp_tools::McpRetrieval::default();
         let mut explicit_loaded = false;
         let mut patch_retries = 0;
@@ -208,10 +207,7 @@ impl Agent {
                     Duration::from_secs(60),
                     (|| async {
                         self.observe(super::observation::RuntimeObservation::ModelRequestStarted);
-                        client
-                            .chat()
-                            .create_byot::<_, serde_json::Value>(request.clone())
-                            .await
+                        kyler_provider::transport::complete(&client, request.clone()).await
                     })
                     .retry(ExponentialBuilder::default().with_max_times(3)),
                 )

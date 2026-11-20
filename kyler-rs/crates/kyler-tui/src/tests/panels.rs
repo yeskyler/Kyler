@@ -288,6 +288,7 @@ async fn model_menu_is_local_and_running_model_is_distinct_from_next_selection()
         state.generation,
         Event::Models(
             ModelCatalog {
+                providers: vec![],
                 revision: 2,
                 default_profile: "first".into(),
                 models: vec![current.clone(), next.clone()],
@@ -794,6 +795,7 @@ fn long_lists_keep_selection_visible_and_details_scroll_without_moving_history()
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(16);
     state.model_catalog = Some(ModelCatalog {
+        providers: vec![],
         revision: 1,
         default_profile: "0".into(),
         models: (0..50)

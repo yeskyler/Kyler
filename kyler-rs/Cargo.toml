@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/kyler-protocol",
     "crates/kyler-core",
+    "crates/kyler-provider",
     "crates/kyler-mcp",
     "crates/kyler-skills",
     "crates/kyler-store",
@@ -28,6 +29,7 @@ percent-encoding = "2.3.2"
 # local crates
 kyler-protocol = { path = "crates/kyler-protocol" }
 kyler-core = { path = "crates/kyler-core" }
+kyler-provider = { path = "crates/kyler-provider" }
 kyler-mcp = { path = "crates/kyler-mcp" }
 kyler-skills = { path = "crates/kyler-skills" }
 kyler-store = { path = "crates/kyler-store" }

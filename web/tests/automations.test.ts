@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   mergeRuns,
+  thinkingForModel,
   scheduleLabel,
   taskTime,
   unfinished,
@@ -48,4 +49,33 @@ test("automation proxy exposes only the supported scheduler operations", async (
   }
   assert.equal(permittedPath(`automations/${id}/shell`, "POST"), false);
   assert.equal(permittedPath(`automation-runs/${id}`, "DELETE"), false);
+});
+
+test("automation thinking follows model capabilities and drops unsupported preferences", () => {
+  const catalog = {
+    default_profile: "openai",
+    models: [
+      {
+        profile: "openai",
+        provider: "one",
+        model: "reasoning",
+        capabilities: {
+          reasoning: { levels: ["off", "low", "high", "max"], default: "high", source: "fixture" },
+        },
+      },
+      {
+        profile: "siliconflow",
+        provider: "two",
+        model: "reasoning",
+        capabilities: {
+          reasoning: { levels: ["off", "high", "max"], default: "high", source: "fixture" },
+        },
+      },
+      { profile: "unknown", provider: "three", model: "unknown" },
+    ],
+  } satisfies import("../lib/kyler/types.ts").ModelCatalog;
+  assert.equal(thinkingForModel(catalog, "openai", "low").level, "low");
+  assert.equal(thinkingForModel(catalog, "siliconflow", "low").level, "high");
+  assert.equal(thinkingForModel(catalog, "siliconflow", "max").level, "max");
+  assert.deepEqual(thinkingForModel(catalog, "unknown", "high"), { levels: [], level: "off" });
 });

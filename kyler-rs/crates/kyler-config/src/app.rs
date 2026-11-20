@@ -9,7 +9,10 @@ use std::{
 use anyhow::ensure;
 use serde::Deserialize;
 
-use kyler_protocol::{api::models::ModelCapabilities, approval::ApprovalSettings};
+use kyler_protocol::{
+    api::models::{ModelCapabilities, ThinkingLevel},
+    approval::ApprovalSettings,
+};
 
 pub use kyler_logging::LoggingConfig;
 
@@ -60,8 +63,11 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LlmSettings {
+    pub adapter: kyler_provider::AdapterKind,
+    pub discover_models: bool,
+    pub output_token_parameter: kyler_provider::OutputTokenParameter,
     /// None selects the provider/model default; explicit values override it.
-    pub enable_thinking: Option<bool>,
+    pub reasoning_effort: Option<ThinkingLevel>,
     pub capabilities: ModelCapabilities,
     pub base_url: String,
     pub model: String,
@@ -70,7 +76,10 @@ pub struct LlmSettings {
 impl Default for LlmSettings {
     fn default() -> Self {
         Self {
-            enable_thinking: None,
+            adapter: Default::default(),
+            discover_models: true,
+            output_token_parameter: Default::default(),
+            reasoning_effort: None,
             capabilities: Default::default(),
             base_url: String::new(),
             model: String::new(),
@@ -104,6 +113,8 @@ impl Default for AgentSettings {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ContextSettings {
+    /// Use verified model capacity; context_tokens remains the fallback budget.
+    pub auto_model_window: bool,
     pub context_tokens: usize,
     pub window_ratio: f64,
     pub trigger_ratio: f64,
@@ -114,6 +125,7 @@ pub struct ContextSettings {
 impl Default for ContextSettings {
     fn default() -> Self {
         Self {
+            auto_model_window: false,
             context_tokens: 128_000,
             window_ratio: 0.6,
             trigger_ratio: 0.8,

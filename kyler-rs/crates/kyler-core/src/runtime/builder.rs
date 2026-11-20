@@ -80,12 +80,16 @@ impl Agent {
         agent.max_parallel_calls = config.agent.max_parallel_calls;
         agent.parallel_tool_calls = config.agent.parallel_tool_calls;
         let registry = Arc::new(ModelRegistry::new(config)?);
-        agent.model_registry = Some(registry);
-        let bound = agent.bind_model(None)?;
-        agent.base_url = bound.base_url;
-        agent.api_key = bound.api_key;
-        agent.model = bound.model;
-        agent.context_policy = bound.context_policy;
+        agent.model_registry = Some(registry.clone());
+        if !registry.catalog().models.is_empty() {
+            let bound = agent.bind_model(None)?;
+            agent.base_url = bound.base_url;
+            agent.api_key = bound.api_key;
+            agent.model = bound.model;
+            agent.context_policy = bound.context_policy;
+        }
+        #[cfg(not(test))]
+        registry.start_discovery();
         if config.skills.enabled {
             agent.skills = Some(Arc::new(SkillManager::new(config.skills.clone())?));
         }

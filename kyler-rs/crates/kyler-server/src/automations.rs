@@ -82,11 +82,19 @@ impl AutomationExecutor {
             .model(Some(config.model_profile.clone()))
             .await
             .map_err(|error| ApiError::bad(&error.to_string()))?;
-        thread
+        if thread
             .handle
-            .thinking_level(Some(config.thinking))
+            .thinking(None)
             .await
-            .map_err(|error| ApiError::bad(&error.to_string()))?;
+            .map_err(|error| ApiError::bad(&error.to_string()))?
+            .supported
+        {
+            thread
+                .handle
+                .thinking_level(Some(config.thinking))
+                .await
+                .map_err(|error| ApiError::bad(&error.to_string()))?;
+        }
         thread
             .handle
             .permissions(Some(&PermissionSelection {
@@ -145,7 +153,9 @@ impl ScheduledExecutor for AutomationExecutor {
             .bind_model(config.model_profile.as_deref())
             .map_err(|_| Error::Invalid("The selected model profile is unavailable.".into()))?;
         ensure!(
-            bound.thinking_levels().contains(&config.thinking),
+            bound.thinking_levels().contains(&config.thinking)
+                || (!bound.thinking_supported()
+                    && config.thinking == kyler_protocol::api::models::ThinkingLevel::Off),
             Error::Invalid("The selected thinking level is unavailable.".into())
         );
         config.model_profile = Some(

@@ -8,15 +8,8 @@ use kyler_protocol::api::ApiErrorBody;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
-    ImageUnsupported,
-    Authentication,
-    RateLimit,
-    ContextLimit,
-    Timeout,
-    Unavailable,
-    InvalidResponse,
+    Provider(kyler_provider::error::FailureKind),
     PatchGenerationLimit,
-    Request,
 }
 
 #[derive(Debug)]
@@ -33,77 +26,45 @@ impl ModelError {
                     return Some(Kind::PatchGenerationLimit);
                 }
                 if error.is::<Elapsed>() {
-                    return Some(Kind::Timeout);
+                    return Some(Kind::Provider(kyler_provider::error::FailureKind::Timeout));
                 }
-                let sdk = error.downcast_ref::<OpenAIError>()?;
-                Some(match sdk {
-                    OpenAIError::ApiError(response) => classify(
-                        response.api_error.code.as_deref().unwrap_or_default(),
-                        &response.api_error.message,
-                        Some(response.status_code.as_u16()),
-                    ),
-                    OpenAIError::JSONDeserialize(_, body) => {
-                        // Compatible providers may return a flat {code,message} envelope.
-                        let parsed = (body.len() <= 65536)
-                            .then(|| serde_json::from_str::<serde_json::Value>(body).ok())
-                            .flatten();
-                        match parsed {
-                            Some(value) => {
-                                let value = value
-                                    .get("error")
-                                    .filter(|v| v.is_object())
-                                    .unwrap_or(&value);
-                                let code = value
-                                    .get("code")
-                                    .map(|v| {
-                                        v.as_str()
-                                            .map(str::to_owned)
-                                            .unwrap_or_else(|| v.to_string())
-                                    })
-                                    .unwrap_or_default();
-                                classify(&code, value["message"].as_str().unwrap_or_default(), None)
-                            }
-                            None => Kind::InvalidResponse,
-                        }
-                    }
-                    OpenAIError::Reqwest(error) if error.is_timeout() => Kind::Timeout,
-                    OpenAIError::Reqwest(error) => {
-                        classify("", "", error.status().map(|status| status.as_u16()))
-                    }
-                    OpenAIError::StreamError(_) => Kind::InvalidResponse,
-                    _ => Kind::Request,
-                })
+                error
+                    .downcast_ref::<OpenAIError>()
+                    .map(kyler_provider::error::classify_error)
+                    .map(Kind::Provider)
             })
-            .unwrap_or(Kind::InvalidResponse);
+            .unwrap_or(Kind::Provider(
+                kyler_provider::error::FailureKind::InvalidResponse,
+            ));
         Self { kind, source }
     }
     pub fn public_error(&self) -> ApiErrorBody {
         let (code, message) = match self.kind {
-            Kind::ImageUnsupported => (
+            Kind::Provider(kyler_provider::error::FailureKind::ImageUnsupported) => (
                 "model_image_unsupported",
                 "The selected model does not support image input. Use /model to select a vision-capable model, then resend.",
             ),
-            Kind::Authentication => (
+            Kind::Provider(kyler_provider::error::FailureKind::Authentication) => (
                 "model_authentication_failed",
                 "The model provider rejected authentication. Check the provider API key and access permissions.",
             ),
-            Kind::RateLimit => (
+            Kind::Provider(kyler_provider::error::FailureKind::RateLimit) => (
                 "model_rate_limited",
                 "The model provider rate limit was reached. Wait briefly, then resend.",
             ),
-            Kind::ContextLimit => (
+            Kind::Provider(kyler_provider::error::FailureKind::ContextLimit) => (
                 "model_context_exceeded",
                 "The request exceeds the model's context limit. Use a model with a larger context window or start a new session.",
             ),
-            Kind::Timeout => (
+            Kind::Provider(kyler_provider::error::FailureKind::Timeout) => (
                 "model_timeout",
                 "The model request timed out. Check the connection and retry.",
             ),
-            Kind::Unavailable => (
+            Kind::Provider(kyler_provider::error::FailureKind::Unavailable) => (
                 "model_unavailable",
                 "The model provider is temporarily unavailable. Retry later or select another model with /model.",
             ),
-            Kind::InvalidResponse => (
+            Kind::Provider(kyler_provider::error::FailureKind::InvalidResponse) => (
                 "model_invalid_response",
                 "The model provider returned an invalid or incomplete response. Retry or check the provider's Chat Completions compatibility.",
             ),
@@ -111,7 +72,7 @@ impl ModelError {
                 "model_patch_generation_limit",
                 "Patch generation exceeded the 16 KiB argument or 120-second generation budget. Automatic retries were exhausted. Request smaller, complete file edits.",
             ),
-            Kind::Request => (
+            Kind::Provider(kyler_provider::error::FailureKind::Request) => (
                 "model_request_failed",
                 "The model request failed. Check the selected model and provider configuration.",
             ),
@@ -132,41 +93,11 @@ impl std::error::Error for ModelError {
         Some(self.source.as_ref())
     }
 }
-fn classify(code: &str, message: &str, status: Option<u16>) -> Kind {
-    let message = message.to_ascii_lowercase();
-    let code = code.to_ascii_lowercase();
-    if message.contains("not a vlm")
-        || message.contains("does not support image")
-        || message.contains("image input is not supported")
-        || message.contains("image inputs are not supported")
-        || message.contains("image_url is only supported by certain models")
-    {
-        Kind::ImageUnsupported
-    } else if matches!(status, Some(401 | 403))
-        || matches!(code.as_str(), "invalid_api_key" | "authentication_error")
-    {
-        Kind::Authentication
-    } else if status == Some(429)
-        || matches!(code.as_str(), "rate_limit_exceeded" | "rate_limit_error")
-    {
-        Kind::RateLimit
-    } else if code == "context_length_exceeded"
-        || message.contains("maximum context length")
-        || message.contains("context window exceeded")
-    {
-        Kind::ContextLimit
-    } else if matches!(status, Some(408 | 504)) {
-        Kind::Timeout
-    } else if status.is_some_and(|status| status >= 500) {
-        Kind::Unavailable
-    } else {
-        Kind::Request
-    }
-}
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelError, classify};
+    use super::{Kind, ModelError};
+    use kyler_provider::error::classify;
 
     use async_openai::error::OpenAIError;
 
@@ -193,7 +124,7 @@ mod tests {
         ] {
             let kind = classify(code, "PRIVATE_PROVIDER_TEXT", Some(status));
             let public = ModelError {
-                kind,
+                kind: Kind::Provider(kind),
                 source: anyhow::anyhow!("PRIVATE"),
             }
             .public_error();

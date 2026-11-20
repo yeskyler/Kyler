@@ -59,6 +59,8 @@ async fn tasks_use_core_admission_once_and_persist_history() {
     config.session.directory = workspace.join("sessions");
     config.llm.base_url = upstream;
     config.llm.model = "fixture".into();
+    config.llm.discover_models = false;
+    config.llm.reasoning_effort = Some(kyler_protocol::api::models::ThinkingLevel::High);
     config.llm.api_key = SecretString::new("fixture");
     config.server.access_token = SecretString::new("test-token");
     let environment = Arc::new(

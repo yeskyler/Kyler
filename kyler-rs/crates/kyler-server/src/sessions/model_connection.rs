@@ -113,26 +113,34 @@ impl RunManager {
             let mut values: toml::Value = toml::from_str(&text).map_err(|_| anyhow::anyhow!("The Kyler configuration file is invalid."))?;
             let raw = loader::parse(&text)?;
             let root = values.as_table_mut().context("Configuration must be a TOML table.")?;
-            if raw.models.profiles.is_empty() {
+            if raw.models.providers.is_empty() && raw.models.profiles.is_empty() {
                 let llm = table(root, "llm")?;
                 llm.insert("base_url".into(), provider.base_url.clone().into());
                 llm.insert("model".into(), model.clone().into());
                 llm.insert("api_key".into(), provider.api_key.expose().into());
-                if previous_model != model { llm.remove("capabilities"); }
+                if previous_model != model { llm.remove("capabilities"); llm.remove("reasoning_effort"); llm.remove("output_token_parameter"); }
             } else {
-                let selected = raw.models.profiles.get(&profile).context("The selected profile changed. Reopen model settings.")?;
-                let shared = raw.models.profiles.values().filter(|p| p.provider == selected.provider).count() > 1;
+                let selected_provider=raw.models.profiles.get(&profile).map(|p|p.provider.clone()).unwrap_or_else(||snapshot.info.provider.clone());
+                ensure!(raw.models.providers.contains_key(&selected_provider),"The selected provider changed. Reopen model settings.");
+                let shared = raw.models.profiles.values().filter(|p| p.provider == selected_provider).count() > 1 || !raw.models.profiles.contains_key(&profile);
                 // Editing one model must not redirect another profile's provider.
-                let provider_name = if shared { format!("web_{}", uuid::Uuid::new_v4().simple()) } else { selected.provider.clone() };
+                let provider_name = if shared { format!("web_{}", uuid::Uuid::new_v4().simple()) } else { selected_provider.clone() };
                 let settings = table(root, "models")?;
                 let profile_table = table(table(settings, "profiles")?, &profile)?;
+                if !raw.models.profiles.contains_key(&profile) {
+                    profile_table.insert("context_tokens".into(),(snapshot.info.context_window_tokens as i64).into());
+                    profile_table.insert("output_tokens".into(),(snapshot.info.output_tokens as i64).into());
+                }
                 profile_table.insert("model".into(), model.clone().into());
                 profile_table.insert("provider".into(), provider_name.clone().into());
-                if previous_model != model { profile_table.remove("capabilities"); }
+                if previous_model != model { profile_table.remove("capabilities"); profile_table.remove("reasoning_effort"); profile_table.remove("output_token_parameter"); }
                 let connection = table(table(settings, "providers")?, &provider_name)?;
                 connection.insert("base_url".into(), provider.base_url.clone().into());
                 connection.insert("api_key".into(), provider.api_key.expose().into());
                 connection.remove("api_key_env");
+                connection.insert("adapter".into(),serde_json::to_value(provider.adapter)?.as_str().context("Invalid adapter")?.into());
+                connection.insert("discover_models".into(),provider.discover_models.into());
+                if raw.models.default.is_empty() { settings.insert("default".into(),profile.clone().into()); }
             }
             let encoded = toml::to_string_pretty(&values).map_err(|_| anyhow::anyhow!("Cannot encode the model settings."))?;
             let directory = path.parent().context("Configuration directory is unavailable.")?;

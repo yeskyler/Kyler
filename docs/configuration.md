@@ -25,13 +25,22 @@ supports explicit `--model`, `--base-url`, and `--api-key` overrides; supply cre
 through hidden setup input or process environment variables; command-line arguments are
 visible in shell history and process listings.
 
-`kyler configure` asks for the context window after the model name. Enter keeps
-the current value; `128k` means 128000 tokens. Legacy single-model setup saves
-`[context].context_tokens`; named-profile setup saves each profile's `context_tokens`.
-The value must match the selected provider's model limit and pass the runtime budget
-validation. Changing the model name does not automatically detect or reset its window.
-After saving, restart the backend or explicitly reload the model catalog; an admitted
-turn retains its existing snapshot.
+`kyler configure` selects a provider, requests its model directory, and lets you
+search or choose a model. It does not send inference requests. Discovery failures
+allow cached IDs, retry, or manual input. Non-interactive setup uses the supplied
+configuration/environment and never requests a remote directory.
+
+New installations use `[context].auto_model_window = true`. The runtime uses
+verified capacity metadata when known, with `context_tokens` as a fallback budget
+(default 128000), not an assertion about an unknown model's capacity. Existing
+explicit window settings remain unchanged. Named profiles use
+`auto_context_window = true` for the same behavior, or an explicit `context_tokens`
+budget. Runtime binds the effective window to each execution snapshot.
+
+Ordinary setup omits the context question. Run `kyler configure --advanced` to enter
+an explicit limit (`128k` = 128000), or `auto` to follow model metadata. The selected
+profile is updated; other profiles retain their budgets. After saving, restart the
+backend or reload its model catalog. An admitted turn retains its existing snapshot.
 
 Paths normally resolve beside the selected configuration. When the selected file is
 inside a directory named `config`, application-relative paths resolve from that
@@ -187,37 +196,85 @@ configuration do not expand the default per-session boundary. Explicitly confirm
 access can remove this containment; the session
 continues using the same private working directory.
 
+## Providers and model discovery
+
+`kyler-provider` adapts OpenAI, SiliconFlow, and generic Chat Completions endpoints.
+Existing `[llm]` and named profiles remain supported. `adapter` accepts `auto`
+(the default), `openai`, `siliconflow`, or `generic`. Auto identifies official
+endpoints by their exact hostname; specify an adapter for a compatible proxy.
+
+```toml
+[models.providers.openai]
+adapter = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+discover_models = true
+```
+
+Providers can be configured without manual profiles. Discovery fetches `GET /models`
+(SiliconFlow adds `sub_type=chat`) on startup and every five minutes. It runs in the
+background, with at most four concurrent requests and a ten-second timeout per
+provider. Web's **Refresh models** and TUI's model reload also refresh the directory.
+No inference request is used to discover or probe capabilities. The first discovered
+catalog chooses a default when none was configured; later refreshes do not silently
+replace that default or an explicit selection. If a selected model disappears,
+select another model. Before first discovery, a provider-only setup has no usable
+model; a configured profile is available immediately.
+
+The host atomically saves credential-free IDs in
+`session.directory/_model-catalog.json` when session storage is enabled. A cache
+entry is scoped to the provider, endpoint, adapter and credential fingerprint.
+Failures preserve previously discovered models and expose a safe per-provider
+status through `/v1/models`. Credentials and provider response bodies are never
+stored in this cache. Set `discover_models = false` to use manual profiles only.
+
+Model lists usually omit capability details. Explicit capability overrides take
+precedence over documented adapter rules; unknown capabilities remain unknown.
+The adapter knows GPT-5.6 Sol's context/output limits; other discovered models use
+the configured context/output budgets unless their limits are known. These fallback
+budgets are not a claim about the provider's actual limits. Named profiles can set
+budgets explicitly. Discovery IDs are namespaced using stable provider/model hashes.
+
+`output_token_parameter` now defaults to `auto`: OpenAI uses
+`max_completion_tokens`, SiliconFlow uses `max_tokens`, and generic endpoints use
+`max_tokens` except recognized GPT-5/o-series IDs. Both `[llm]` and named profiles
+can explicitly choose `max_tokens` or `max_completion_tokens` for custom endpoints.
+Only one output limit field is sent.
+
 ## Model thinking mode
 
-Agent requests automatically send `enable_thinking = true` for
-`deepseek-ai/DeepSeek-V4-Flash` on `api.siliconflow.cn` or `api.siliconflow.com`.
-Existing configurations without the setting use this default. Other model/provider
-combinations omit the provider-specific parameter unless explicitly configured.
+Configure `reasoning_effort` under `[llm]` or a named profile. It expresses intent;
+the adapter chooses the wire parameters. The removed `enable_thinking` configuration
+key is replaced by an effort string; SiliconFlow's wire protocol still uses its
+own `enable_thinking` field.
 
-To disable it, set `enable_thinking = false` under `[llm]`. When named profiles are
-configured, set it under the corresponding `[models.profiles.<name>]` instead.
-An explicit `true` also supports compatible custom gateways. Model selection and
-reload retain the setting within the execution's immutable model snapshot.
+- OpenAI GPT-5.6 Sol: Off, Low, Medium, High, XHigh, Max. Off sends
+  `reasoning_effort: "none"`; other levels use their native names.
+- SiliconFlow's documented DeepSeek V4/V4-Flash and GLM-5.2 models: Off, High, Max.
+  Off sends `enable_thinking: false` without effort; enabled requests send
+  `enable_thinking: true` and `reasoning_effort`.
+- Known non-reasoning GPT-4/3.5 models expose no levels and omit reasoning fields.
+- Unknown models expose no levels automatically. An explicit `reasoning_effort`
+  opts in that one level. For additional verified levels, configure
+  `capabilities.reasoning` with `levels`, `default`, and `source`.
 
-Streaming reasoning appears separately from the final answer. Current-turn tool
-continuations include the associated `reasoning_content` and count it in the input
-budget. Reasoning from prior turns is not resent. Thinking may increase response
-latency and token usage.
+Web renders only the selected model's supported levels and offers **Model default**.
+Default means following configured/provider behavior, rather than explicitly
+turning thinking off. `PUT /v1/sessions/{id}/thinking` accepts either a `level`,
+the legacy `enabled` boolean, or `use_default: true`. Responses include
+`follows_default`. User preferences are stored per session and provider/model
+identity, restored on switching back, and reset to the new model default if the
+saved level becomes unsupported. Legacy session-wide preferences migrate once to
+the currently selected model. Changes apply to the next run; active executions
+retain their immutable model snapshot.
 
-The Web composer displays the current model and thinking level on the right. Its
-Model and Thinking level submenus select the session model and Off, Low, High, or Max.
-The saved session choice overrides the configuration default and applies at the next
-turn without a service restart; active executions keep their captured setting.
-Sessions default to High. Off sends `enable_thinking: false` without `reasoning_effort`.
-Low, High, and Max enable thinking and send `reasoning_effort: "low"`, `"high"`, or
-`"max"`, respectively. Saved Off and legacy boolean false preferences remain Off.
-A bound model accepts explicit preferences without a local model-name allowlist.
-Provider compatibility is validated by the provider; unsupported request parameters
-remain errors rather than being silently ignored or mapped to identical requests.
+Provider-returned reasoning remains separate from answer text. SiliconFlow retains
+matching current-turn tool reasoning; generic endpoints can opt in using
+`capabilities.reasoning_content = true`. Prior-turn reasoning is not resent.
 
-Editing the configuration file still requires model reload or restart. Reload updates
-model defaults, while an existing session override retains precedence. See the
-[SiliconFlow request parameters](https://docs.siliconflow.cn/docs/api/chat-completions-post).
+See the official [OpenAI GPT-5.6 Sol model](https://developers.openai.com/api/docs/models/gpt-5.6-sol),
+[SiliconFlow request parameters](https://docs.siliconflow.cn/docs/api/chat-completions-post),
+and [SiliconFlow model discovery](https://docs.siliconflow.cn/docs/api/models-get).
 
 Web access uses `[web].access_token` in both local and network modes. Setup generates
 it automatically; `kyler service token` displays it and `--reset` rotates it. The

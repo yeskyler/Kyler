@@ -154,17 +154,18 @@ async fn start_turn(
     } else {
         state.preferences.with_extension("thinking")
     };
+    let thinking_path = super::preferences::migrate_thinking_path(&thinking_path, &agent)?;
     let agent = if agent.thinking_supported() {
         match super::preferences::read_thinking(&thinking_path)? {
             Some(level) => {
                 let level = if !agent.thinking_levels().contains(&level) {
-                    kyler_protocol::api::models::ThinkingLevel::High
+                    agent.default_thinking_level()
                 } else {
                     level
                 };
                 agent.with_thinking_level(level)?
             }
-            None => agent.with_thinking_level(kyler_protocol::api::models::ThinkingLevel::High)?,
+            None => agent,
         }
     } else {
         agent

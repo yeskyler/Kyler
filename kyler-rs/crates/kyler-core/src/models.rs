@@ -6,6 +6,6 @@ mod snapshot;
 
 pub use registry::ModelRegistry;
 pub(crate) use request::{
-    attach_reasoning, project_tool, provider_request, set_output_limit, thinking_mode,
+    attach_reasoning, default_reasoning_effort, project_tool, set_output_limit,
 };
 pub use snapshot::ModelSnapshot;

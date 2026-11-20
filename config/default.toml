@@ -1,8 +1,12 @@
 [llm]
+# auto detects official hosts; set openai/siliconflow/generic for a proxy.
+# adapter = "auto"
+# discover_models = true
+# output_token_parameter = "auto"
 base_url = "https://api.siliconflow.cn/v1"
 model = "deepseek-ai/DeepSeek-V4-Flash"
-# Thinking is enabled automatically for this model on SiliconFlow.
-# enable_thinking = false # Explicitly disable thinking.
+# Reasoning effort defaults to high for this model on SiliconFlow.
+# reasoning_effort = "none" # none / low / medium / high / xhigh / max
 # Supply KYLER_LLM_API_KEY or OPENAI_API_KEY; do not commit secrets here.
 
 [llm.capabilities]
@@ -17,6 +21,8 @@ max_parallel_calls = 8
 # additional_instructions = "Application-specific instructions for Kyler."
 
 [context]
+auto_model_window = true
+# Fallback budget when the adapter has no verified capacity; not a model-capacity claim.
 context_tokens = 128000
 window_ratio = 0.6
 trigger_ratio = 0.8
@@ -115,23 +121,28 @@ full_scan_interval_ms = 30000
 # [models]
 # default = "flash"
 # [models.providers.siliconflow]
+# adapter = "siliconflow"
+# discover_models = true
 # base_url = "https://api.siliconflow.cn/v1"
 # api_key_env = "SILICONFLOW_API_KEY"
 # [models.profiles.flash]
 # provider = "siliconflow"
 # model = "deepseek-ai/DeepSeek-V4-Flash"
-# Thinking is enabled automatically for this model on SiliconFlow.
-# enable_thinking = false # Explicitly disable thinking.
+# Reasoning effort defaults to high for this model on SiliconFlow.
+# reasoning_effort = "none" # none / low / medium / high / xhigh / max
 # context_tokens = 128000
 # output_tokens = 8192
 # output_token_parameter = "max_tokens"
 # [models.providers.openai]
+# adapter = "openai"
+# discover_models = true
 # base_url = "https://api.openai.com/v1"
 # api_key_env = "OPENAI_API_KEY"
 # [models.profiles.openai]
 # provider = "openai"
 # model = "YOUR_MODEL_ID"
-# context_tokens = 128000 # Set this to the deployed model's actual capacity.
+# auto_context_window = true
+# context_tokens = 128000 # Optional explicit budget or automatic-mode fallback.
 # output_tokens = 8192
 # output_token_parameter = "max_completion_tokens"
 

@@ -16,7 +16,9 @@ pub use app::{
 };
 pub use loader::{load, load_from};
 pub use mcp::{McpSearchSettings, McpServerSettings, McpSettings, McpTransport};
-pub use models::{ModelProfile, ModelSettings, OutputTokenParameter, ProviderSettings};
+pub use models::{
+    AdapterKind, ModelProfile, ModelSettings, OutputTokenParameter, ProviderSettings,
+};
 pub use sandbox::SandboxSettings;
 pub use skills::SkillSettings;
 pub use web::WebSettings;

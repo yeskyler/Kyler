@@ -143,18 +143,25 @@ inputs pass validation; no additional navigation confirmation is required.
 
 | Input | Requirement or default |
 | --- | --- |
-| `OPENAI_BASE_URL` | `https://api.siliconflow.cn/v1`; OpenAI-compatible Chat Completions API |
-| `OPENAI_API_KEY` | Required; input is hidden |
-| Model | `deepseek-ai/DeepSeek-V4-Flash` |
-| Context window (tokens) | Existing value or `128000`; accepts `128k` as 128000 tokens |
+| Provider | Auto, OpenAI, SiliconFlow, or a generic compatible endpoint |
+| API URL | Official service URL or a custom proxy/local endpoint |
+| API key | Required; input is hidden |
+| Model | Fetched directory with search, paging, numbered selection, and manual entry |
 
-Enter retains an existing value. A saved key is identified as configured without
-revealing its contents. Invalid input is rejected at the current prompt. Setup does not
-send a model request. The context window is supplied by the user, not detected from
-the model ID; confirm it when changing models. The wizard validates output, safety,
-and summary reservations before accepting the window. Named profiles each receive
-their own window prompt; other budget settings remain unchanged. Esc cancels configuration before an existing installation is
-replaced.
+Setup fetches model metadata, never a generation request. Enter retains an existing
+value, and a saved key is identified without revealing it. The model picker accepts
+`/text` to search, `n`/`p` to page, `m` to enter an ID, and `r` to retry discovery.
+If discovery fails or times out, cached IDs or manual entry remain available.
+For multiple configured providers, first select the connection to configure; other
+profiles remain intact. A newly selected model creates a profile when needed.
+
+The normal wizard does not ask for a context window. Known capacity follows provider
+capability rules; unknown capacity displays a clearly marked fallback budget. Existing
+explicit window overrides are retained. Use `kyler configure --advanced` to supply a
+manual token count (`128k` means 128000) or enter `auto` to restore automatic sizing.
+The wizard validates output, safety, and summary reservations. Thinking defaults follow
+the selected model; setup does not add a separate reasoning-level question.
+Esc cancels before the existing installation/configuration is replaced.
 
 ### Access scope and Web token
 

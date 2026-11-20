@@ -2410,6 +2410,7 @@ dependencies = [
  "kyler-evals",
  "kyler-logging",
  "kyler-protocol",
+ "kyler-provider",
  "kyler-server",
  "kyler-tui",
  "libc",
@@ -2445,6 +2446,7 @@ dependencies = [
  "anyhow",
  "kyler-logging",
  "kyler-protocol",
+ "kyler-provider",
  "serde",
  "tempfile",
  "toml",
@@ -2471,6 +2473,7 @@ dependencies = [
  "kyler-logging",
  "kyler-mcp",
  "kyler-protocol",
+ "kyler-provider",
  "kyler-skills",
  "kyler-store",
  "libc",
@@ -2552,6 +2555,22 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "kyler-provider"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "async-openai",
+ "axum",
+ "futures",
+ "kyler-protocol",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

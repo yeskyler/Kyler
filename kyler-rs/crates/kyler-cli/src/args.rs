@@ -54,6 +54,9 @@ pub enum Command {
     },
     /// Configure model credentials; existing values can be kept with Enter.
     Configure {
+        /// Edit context-window overrides; enter auto to follow verified model capacity.
+        #[arg(long, conflicts_with = "apply")]
+        advanced: bool,
         #[arg(long)]
         non_interactive: bool,
         /// Enable the bundled Web service and choose its access scope.

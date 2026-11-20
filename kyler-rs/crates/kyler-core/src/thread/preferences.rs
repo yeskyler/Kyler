@@ -226,38 +226,58 @@ impl ThreadHandle {
     ) -> Result<kyler_protocol::api::models::ThinkingState> {
         if let Some(level) = level {
             let (reply, receive) = tokio::sync::oneshot::channel();
-            self.submit(super::ThreadOp::SelectThinking { level, reply })
-                .await?;
+            self.submit(super::ThreadOp::SelectThinking {
+                level: Some(level),
+                reply,
+            })
+            .await?;
             return receive
                 .await
                 .context("thread stopped before thinking selection")?;
         }
         self.thinking_state(None).await
     }
+    pub async fn reset_thinking(&self) -> Result<kyler_protocol::api::models::ThinkingState> {
+        let (reply, receive) = tokio::sync::oneshot::channel();
+        self.submit(super::ThreadOp::SelectThinking { level: None, reply })
+            .await?;
+        receive
+            .await
+            .context("thread stopped before thinking reset")?
+    }
     pub(super) async fn thinking_state(
         &self,
-        level: Option<kyler_protocol::api::models::ThinkingLevel>,
+        selection: Option<Option<kyler_protocol::api::models::ThinkingLevel>>,
     ) -> Result<kyler_protocol::api::models::ThinkingState> {
-        use kyler_protocol::api::models::ThinkingLevel;
         let profile = self.inner.profile.read().await;
         let agent = self.inner.agent.bind_model(profile.as_deref())?;
         let supported = agent.thinking_supported();
         let levels = agent.thinking_levels();
-        let path = self.thinking_path().await;
-        if let Some(level) = level {
-            ensure!(
-                levels.contains(&level),
-                "Thinking level is not supported for this model/provider"
-            );
-            save(&path, &serde_json::to_vec(&level)?)?;
+        let path = migrate_thinking_path(&self.thinking_path().await, &agent)?;
+        if let Some(selection) = selection {
+            if let Some(level) = selection {
+                ensure!(
+                    levels.contains(&level),
+                    "Thinking level is not supported for this model/provider"
+                );
+                save(&path, &serde_json::to_vec(&level)?)?;
+            } else {
+                match std::fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
         }
-        let requested = read_thinking(&path)?.unwrap_or(ThinkingLevel::High);
+        let saved = read_thinking(&path)?;
+        let requested = saved.unwrap_or_else(|| agent.default_thinking_level());
         let level = if levels.contains(&requested) {
             requested
         } else {
-            ThinkingLevel::High
+            agent.default_thinking_level()
         };
         Ok(kyler_protocol::api::models::ThinkingState {
+            follows_default: saved.is_none() || !levels.contains(&requested),
             enabled: level.enabled(),
             supported,
             level,
@@ -273,6 +293,7 @@ impl ThreadHandle {
         if reload {
             let config = kyler_config::loader::load_local(self.inner.source.as_deref())?;
             registry.reload(&config)?;
+            registry.refresh_discovery().await?;
         }
         Ok(registry.catalog())
     }
@@ -371,6 +392,30 @@ fn save(path: &Path, bytes: &[u8]) -> Result<()> {
     file.persist(path)?;
     std::fs::File::open(parent)?.sync_all()?;
     Ok(())
+}
+
+/// Model identity includes the provider, so preferences cannot leak across services.
+pub(super) fn model_thinking_path(base: &Path, agent: &crate::Agent) -> std::path::PathBuf {
+    use sha2::{Digest, Sha256};
+    let info = agent.model_info();
+    let key = format!(
+        "{}\0{}",
+        info.as_ref().map_or("", |i| i.provider.as_str()),
+        agent.model()
+    );
+    base.with_extension(format!("{:x}.thinking", Sha256::digest(key)))
+}
+
+/// Adopt a legacy session-wide preference for the currently selected model once.
+pub(super) fn migrate_thinking_path(
+    base: &Path,
+    agent: &crate::Agent,
+) -> Result<std::path::PathBuf> {
+    let path = model_thinking_path(base, agent);
+    if !path.exists() && base.exists() {
+        std::fs::rename(base, &path)?;
+    }
+    Ok(path)
 }
 
 /// Read old boolean preferences and new levels without modifying historical data.

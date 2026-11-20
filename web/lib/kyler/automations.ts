@@ -1,4 +1,4 @@
-import type { ModelCatalog, PermissionMode } from "./types.ts";
+import type { ModelCatalog, PermissionMode, ThinkingLevel } from "./types.ts";
 export type TaskConfig = {
   name: string;
   prompt: string;
@@ -7,7 +7,7 @@ export type TaskConfig = {
   cron: string;
   timezone: string;
   model_profile: string | null;
-  thinking: "off" | "low" | "high" | "max";
+  thinking: ThinkingLevel;
   permission: PermissionMode;
   timeout_seconds: number;
   wait_timeout_seconds: number;
@@ -122,4 +122,21 @@ export function mergeRuns(previous: AutomationRun[], incoming: AutomationRun[]) 
   return [...new Map([...previous, ...incoming].map((run) => [run.id, run])).values()].sort(
     (a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id),
   );
+}
+
+/** Preserve a selection only when the selected model explicitly supports it. */
+export function thinkingForModel(
+  catalog: ModelCatalog,
+  profile: string | null,
+  preferred?: ThinkingLevel,
+) {
+  const capabilities = catalog.models.find((m) => m.profile === profile)?.capabilities?.reasoning;
+  const levels = capabilities?.levels ?? [];
+  return {
+    levels,
+    level:
+      preferred && levels.includes(preferred)
+        ? preferred
+        : (capabilities?.default ?? ("off" as ThinkingLevel)),
+  };
 }

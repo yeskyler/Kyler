@@ -1,4 +1,5 @@
 mod input;
+mod models;
 
 use crate::{CliError, Result};
 use input::Prompts;
@@ -26,12 +27,13 @@ pub(super) fn config_path(explicit: Option<&Path>) -> Result<PathBuf> {
         Ok(std::env::current_dir().map_err(CliError::io)?.join(path))
     }
 }
-pub fn configure(
+pub async fn configure(
     explicit: Option<&Path>,
     non_interactive: bool,
     enable_web: bool,
     addresses: bool,
     output: Option<&Path>,
+    advanced: bool,
 ) -> Result<()> {
     let path = config_path(explicit)?;
     // An explicit missing file is a new setup, not a load error.
@@ -54,6 +56,20 @@ pub fn configure(
             config.llm.base_url = "https://api.siliconflow.cn/v1".into();
         }
     }
+    // An absent window is automatic; an existing explicit budget remains authoritative.
+    if values
+        .get("context")
+        .and_then(|v| v.get("context_tokens"))
+        .is_none()
+        && values
+            .get("context")
+            .and_then(|v| v.get("auto_model_window"))
+            .is_none()
+    {
+        config.context.auto_model_window = true;
+    }
+    config.session.enabled = true;
+    let mut discovered = Vec::new();
     let old_backend = config.server.bind;
     let saved_backend = values
         .get("server")
@@ -75,43 +91,7 @@ pub fn configure(
         let mut prompts = Prompts::default();
         prompts.section("Configure model");
         eprintln!("Enter keeps current values. API keys are hidden.");
-        eprintln!("OPENAI_BASE_URL must use an OpenAI-compatible Chat Completions API.");
-        if config.models.providers.is_empty() {
-            config.llm.base_url = prompts.api_url("OPENAI_BASE_URL", &config.llm.base_url)?;
-            config.llm.api_key = prompts.key("OPENAI_API_KEY", &config.llm.api_key, false)?;
-            let previous_model = config.llm.model.clone();
-            config.llm.model = prompts.model(&config.llm.model)?;
-            if config.llm.model != previous_model {
-                eprintln!("Model changed; confirm the context window supported by the new model.");
-            }
-            eprintln!(
-                "Use the window supported by your provider; it is not detected automatically. 128k = 128000 tokens."
-            );
-            config.context.context_tokens = prompts.context_window(
-                "Context window (tokens)",
-                config.context.context_tokens,
-                &ContextPolicy::from(&config.context),
-            )?;
-        } else {
-            for (name, provider) in &mut config.models.providers {
-                provider.base_url =
-                    prompts.api_url(&format!("{name} OPENAI_BASE_URL"), &provider.base_url)?;
-                provider.api_key =
-                    prompts.key(&format!("{name} OPENAI_API_KEY"), &provider.api_key, false)?;
-            }
-            eprintln!(
-                "Set each model's provider-supported context window. 128k = 128000 tokens; Enter keeps the current value."
-            );
-            for (name, profile) in &mut config.models.profiles {
-                let mut policy = ContextPolicy::from(&config.context);
-                policy.output_tokens = profile.output_tokens;
-                profile.context_tokens = prompts.context_window(
-                    &format!("{name} context window (tokens)"),
-                    profile.context_tokens,
-                    &policy,
-                )?;
-            }
-        }
+        discovered = models::configure(&mut prompts, &mut config, &mut values, advanced).await?;
         if addresses || enable_web || config.web.enabled {
             prompts.section("Choose access scope");
             eprintln!(
@@ -234,16 +214,31 @@ pub fn configure(
         }
     }
     if config.models.providers.is_empty() {
-        table(root, "context")?.insert(
-            "context_tokens".into(),
-            toml::Value::Integer(
-                i64::try_from(config.context.context_tokens)
-                    .map_err(|_| CliError::new(2, "Context window is too large"))?,
+        models::write_window(
+            table(root, "context")?,
+            config.context.auto_model_window,
+            config.context.context_tokens,
+            "auto_model_window",
+        )?;
+        let llm = table(root, "llm")?;
+        llm.insert(
+            "adapter".into(),
+            toml::Value::String(
+                serde_json::to_value(config.llm.adapter)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .into(),
             ),
         );
-        let llm = table(root, "llm")?;
-        llm.insert("model".into(), toml::Value::String(config.llm.model));
-        llm.insert("base_url".into(), toml::Value::String(config.llm.base_url));
+        llm.insert(
+            "model".into(),
+            toml::Value::String(config.llm.model.clone()),
+        );
+        llm.insert(
+            "base_url".into(),
+            toml::Value::String(config.llm.base_url.clone()),
+        );
         llm.insert(
             "api_key".into(),
             toml::Value::String(config.llm.api_key.expose().into()),
@@ -260,21 +255,36 @@ pub fn configure(
                 toml::Value::String(provider.base_url.clone()),
             );
             value.insert(
-                "api_key".into(),
-                toml::Value::String(provider.api_key.expose().into()),
+                "adapter".into(),
+                serde_json::to_value(provider.adapter)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .into(),
             );
+            if provider.api_key_env.is_none() {
+                value.remove("api_key_env");
+                value.insert("api_key".into(), provider.api_key.expose().into());
+            }
         }
     }
     if !config.models.profiles.is_empty() {
+        table(root, "models")?.insert("default".into(), config.models.default.clone().into());
         let profiles = table(table(root, "models")?, "profiles")?;
         for (name, profile) in &config.models.profiles {
-            table(profiles, name)?.insert(
-                "context_tokens".into(),
-                toml::Value::Integer(
-                    i64::try_from(profile.context_tokens)
-                        .map_err(|_| CliError::new(2, "Context window is too large"))?,
-                ),
+            let value = table(profiles, name)?;
+            value.insert("provider".into(), profile.provider.clone().into());
+            value.insert("model".into(), profile.model.clone().into());
+            value.insert(
+                "output_tokens".into(),
+                i64::from(profile.output_tokens).into(),
             );
+            models::write_window(
+                value,
+                profile.auto_context_window,
+                profile.context_tokens,
+                "auto_context_window",
+            )?;
         }
     }
     table(root, "workspace")?
@@ -309,6 +319,7 @@ pub fn configure(
         return Ok(());
     }
     publish(&path, encoded.as_bytes())?;
+    models::save_cache(&config, discovered);
     eprintln!("Saved: {}", path.display());
     Ok(())
 }

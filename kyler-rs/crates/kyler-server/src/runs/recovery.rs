@@ -41,6 +41,26 @@ impl RunManager {
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => return Err(ApiError::storage(error.into())),
         }
+        let mut preferences = tokio::fs::read_dir(&self.root)
+            .await
+            .map_err(|e| ApiError::storage(e.into()))?;
+        while let Some(entry) = preferences
+            .next_entry()
+            .await
+            .map_err(|e| ApiError::storage(e.into()))?
+        {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name
+                .strip_prefix(&format!("{id}."))
+                .and_then(|s| s.strip_suffix(".thinking"))
+                .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+            {
+                tokio::fs::remove_file(entry.path())
+                    .await
+                    .map_err(|e| ApiError::storage(e.into()))?;
+            }
+        }
         if let Some(approvals) = &self.approvals {
             approvals.forget_session(id);
         }

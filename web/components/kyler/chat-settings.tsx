@@ -21,9 +21,10 @@ import { SessionFilesMenu } from "./artifact-browser";
 import { SessionInspectorControls } from "./session-inspector";
 export { ChatSettingsProvider } from "./chat-settings-context";
 
-const thinkingLevels = ["off", "low", "high", "max"] as const;
+const thinkingLevels = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 type ThinkingLevel = (typeof thinkingLevels)[number];
 type ThinkingState = {
+  follows_default?: boolean;
   enabled: boolean;
   supported: boolean;
   level: ThinkingLevel;
@@ -33,12 +34,14 @@ function normalizeThinking(value: ThinkingState): ThinkingState {
   return {
     ...value,
     level: thinkingLevels.includes(value.level) ? value.level : "high",
-    levels: value.levels?.filter((level) => thinkingLevels.includes(level)) ?? [...thinkingLevels],
+    levels: value.levels?.filter((level) => thinkingLevels.includes(level)) ?? [],
   };
 }
 const thinkingLabels: Record<ThinkingLevel, string> = {
   off: "Off",
   low: "Low",
+  medium: "Medium",
+  xhigh: "XHigh",
   high: "High",
   max: "Max",
 };
@@ -111,6 +114,26 @@ export function ModelThinkingControl() {
     return () => controller.abort();
   }, [session.session_id, ensureSession]);
 
+  async function refreshModels() {
+    if (busy || running) return;
+    setBusy(true);
+    setError("");
+    try {
+      setCatalog(await api<ModelCatalog>("models/reload", { method: "POST" }));
+      const bound = await ensureSession();
+      const [selected, reasoning] = await Promise.all([
+        api<SessionModel>(`sessions/${bound.session_id}/model`),
+        api<ThinkingState>(`sessions/${bound.session_id}/thinking`),
+      ]);
+      setModel(selected);
+      setThinking(normalizeThinking(reasoning));
+      setError(selected.error ?? "");
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function selectModel(profile: string) {
     if (busy || running || !catalog?.models.some((entry) => entry.profile === profile)) return;
     setOpen(false);
@@ -133,8 +156,8 @@ export function ModelThinkingControl() {
       setBusy(false);
     }
   }
-  async function selectThinking(level: ThinkingLevel) {
-    if (!thinking?.levels.includes(level) || busy || running) return;
+  async function selectThinking(level: ThinkingLevel | "default") {
+    if ((level !== "default" && !thinking?.levels.includes(level)) || busy || running) return;
     setOpen(false);
     setBusy(true);
     setError("");
@@ -144,7 +167,7 @@ export function ModelThinkingControl() {
         normalizeThinking(
           await api<ThinkingState>(`sessions/${bound.session_id}/thinking`, {
             method: "PUT",
-            body: JSON.stringify({ level }),
+            body: JSON.stringify(level === "default" ? { use_default: true } : { level }),
           }),
         ),
       );
@@ -155,7 +178,11 @@ export function ModelThinkingControl() {
     }
   }
   const modelName = model?.selected?.model ?? initialModel;
-  const label = thinkingLabels[thinking?.level ?? "high"];
+  const label = !thinking?.supported
+    ? "Unavailable"
+    : thinking.follows_default
+      ? "Model default"
+      : thinkingLabels[thinking.level];
   return (
     <span className="min-w-0 shrink">
       <Menu.Root open={open} onOpenChange={setOpen}>
@@ -165,7 +192,7 @@ export function ModelThinkingControl() {
               type="button"
               variant="ghost"
               size="xs"
-              disabled={running || busy || !catalog || !thinking}
+              disabled={running || busy}
               aria-label={`Model and thinking: ${modelName} ${label}`}
               aria-busy={busy}
               title={error || `${modelName} · ${label}`}
@@ -182,6 +209,20 @@ export function ModelThinkingControl() {
               className="max-h-[min(32rem,70vh)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-lg outline-none"
               aria-label="Model and thinking settings"
             >
+              <Menu.Item
+                onClick={() => void refreshModels()}
+                disabled={busy || running}
+                className="rounded-lg px-3 py-2 text-sm data-[highlighted]:bg-accent"
+              >
+                {busy ? "Refreshing models…" : "Refresh models"}
+              </Menu.Item>
+              {catalog?.providers
+                ?.filter((p) => p.status === "stale")
+                .map((p) => (
+                  <p key={p.provider} className="px-3 py-1 text-xs text-muted-foreground">
+                    {p.provider}: refresh failed; using saved models.
+                  </p>
+                ))}
               <SettingsSubmenu label="Model" value={modelName}>
                 <Menu.RadioGroup aria-label="Model" value={model?.selected?.profile ?? ""}>
                   {catalog?.models.map((entry) => (
@@ -202,8 +243,22 @@ export function ModelThinkingControl() {
                 </Menu.RadioGroup>
               </SettingsSubmenu>
               <SettingsSubmenu label="Thinking level" value={label}>
-                <Menu.RadioGroup aria-label="Thinking level" value={thinking?.level ?? ""}>
-                  {thinkingLevels.map((level) => (
+                <Menu.RadioGroup
+                  aria-label="Thinking level"
+                  value={thinking?.follows_default ? "default" : (thinking?.level ?? "")}
+                >
+                  <Menu.RadioItem
+                    value="default"
+                    onClick={() => void selectThinking("default")}
+                    disabled={busy || running}
+                    className="flex min-h-9 items-center justify-between rounded-lg px-3 py-2 text-sm data-[highlighted]:bg-accent"
+                  >
+                    Model default
+                    <Menu.RadioItemIndicator>
+                      <CheckIcon className="size-3.5" aria-hidden />
+                    </Menu.RadioItemIndicator>
+                  </Menu.RadioItem>
+                  {(thinking?.levels ?? []).map((level) => (
                     <Menu.RadioItem
                       key={level}
                       value={level}

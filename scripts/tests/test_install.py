@@ -385,8 +385,8 @@ else:
                     info = json.load(response)
                 self.assertEqual(info["instance_id"], first_instance)
                 self.assertEqual(info["model"], "installer-model")
-                self.assertIsNone(info["workspace_root"])
-                self.assertIsNone(info["working_directory"])
+                self.assertNotIn("workspace_root", info)
+                self.assertNotIn("working_directory", info)
                 self.assertEqual(info["default_workspace"], str((self.home / ".kyler/workspace").resolve()))
                 self.assertTrue((self.home / ".kyler/workspace").is_dir())
             self.assertIn("INSTALLER_TEST_KEY", (self.home / ".kyler/config.toml").read_text())
@@ -395,15 +395,13 @@ else:
             if installed.exists():
                 subprocess.run([str(installed), "service", "stop"], env=environment, capture_output=True, timeout=15)
 
-    def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None, access_scope="1", preserve_addresses=False):
+    def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None, access_scope="1", preserve_addresses=False, advanced=False, direct=False):
         start_services = bundle is not None
         if bundle is None:
             bundle = local_bundle(self.root, KYLER_BINARY)
         replies = list(replies)
-        if expected == 0 and not any(b"Context window" in marker for marker, _ in replies):
-            model_step = next((i for i, (marker, _) in enumerate(replies) if marker.startswith(b"[3] Model")), None)
-            if model_step is not None:
-                replies.insert(model_step + 1, (b"[4] Context window (tokens)", b"\n"))
+        if not any(marker.startswith(b"[1] Provider") for marker, _ in replies):
+            replies.insert(0, (b"[1] Provider [", b"\n"))
         addresses = []
         if expected == 0:
             if not preserve_addresses:
@@ -442,6 +440,11 @@ else:
             command = ["sh", "-c", 'cat "$1" | sh -s -- --bundle "$2" --no-start', "installer-pipe", str(INSTALLER), str(bundle)]
         elif redirected:
             command = ["sh", "-c", 'sh "$1" --bundle "$2" --no-start </dev/tty', "installer-tty", str(INSTALLER), str(bundle)]
+
+        if advanced or direct:
+            command = [str(binary), "--config", str(self.home / ".kyler/config.toml"), "configure", "--addresses"]
+            if advanced:
+                command += ["--advanced"]
 
         def controlling_terminal():
             os.setsid()
@@ -499,9 +502,9 @@ else:
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_interactive_install_hides_key_and_restores_terminal(self):
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[2] OPENAI_API_KEY", b"PTY_SECRET_TEST_KEY\r"),
-            (b"[3] Model [", b"pty-model\n"),
+            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[3] API key", b"PTY_SECRET_TEST_KEY\r"),
+            (b"[4] Model [", b"pty-model\n"),
         ])
         self.assertNotIn(b"PTY_SECRET_TEST_KEY", output)
         self.assertNotIn(b"\x1b[?1049h", output)
@@ -510,33 +513,108 @@ else:
         config = (self.home / ".kyler/config.toml").read_text()
         self.assertIn("PTY_SECRET_TEST_KEY", config)
         self.assertNotIn("tools.tavily", config)
-        for marker in [b"[1] OPENAI_BASE_URL", b"[2] OPENAI_API_KEY", b"[3] Model", b"kyler tui", b"kyler service stop"]:
+        for marker in [b"[2] API URL", b"[3] API key", b"[4] Model", b"kyler tui", b"kyler service stop"]:
             self.assertIn(marker, output)
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
-    def test_context_window_prompt_validates_k_suffix_persists_and_keeps_existing(self):
-        output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[2] OPENAI_API_KEY", b"WINDOW_TEST_KEY\r"),
-            (b"[3] Model [", b"window-model\n"),
-            (b"[4] Context window (tokens)", b"invalid\n"),
-            (b"[4] Context window (tokens)", b"8000\n"),
-            (b"[4] Context window (tokens)", b"64k\n"),
-        ])
-        self.assertIn(b"positive whole token count", output)
-        self.assertIn(b"Invalid context window", output)
-        self.assertIn("context_tokens = 64000", (self.home / ".kyler/config.toml").read_text())
-        output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"\n"),
-            (b"[2] OPENAI_API_KEY", b"\r"),
-            (b"[3] Model [", b"\n"),
-            (b"[4] Context window (tokens) [64000]", b"\n"),
-        ], preserve_addresses=True)
-        self.assertIn("context_tokens = 64000", (self.home / ".kyler/config.toml").read_text())
-        self.assertNotIn(b"WINDOW_TEST_KEY", output)
+    def test_remote_model_selection_search_and_auto_capacity(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        requests = []
+        mode = {"failed": False}
+        class Models(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                requests.append((self.path, self.headers.get("Authorization")))
+                if mode["failed"]:
+                    self.send_response(503)
+                    self.end_headers()
+                    return
+                data = json.dumps({"data": [{"id": "gpt-5.6-sol"}, {"id": "text-embedding-3-small"}, {"id": "gpt-4.1-mini"}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Models)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = "http://127.0.0.1:%s/v1" % server.server_port
+            output = self.interactive_install([
+                (b"[1] Provider [", b"openai\n"),
+                (b"[2] API URL [", (url + "\n").encode()),
+                (b"[3] API key", b"DISCOVERY_TEST_KEY\r"),
+                (b"[4] Model [", b"/5.6\n"),
+                (b"[4] Model [", b"1\n"),
+            ])
+            self.assertEqual(requests, [("/v1/models", "Bearer DISCOVERY_TEST_KEY")])
+            self.assertIn(b"1050000 tokens", output)
+            self.assertNotIn(b"text-embedding-3-small", output)
+            self.assertNotIn(b"DISCOVERY_TEST_KEY", output)
+            saved = (self.home / ".kyler/config.toml").read_text()
+            self.assertIn('model = "gpt-5.6-sol"', saved)
+            self.assertIn('adapter = "openai"', saved)
+            self.assertIn("auto_model_window = true", saved)
+            self.assertNotIn("context_tokens", saved)
+            replies = [
+                (b"[2] API URL [", b"\n"),
+                (b"[3] API key", b"\r"),
+                (b"[4] Model [gpt-5.6-sol]", b"\n"),
+            ]
+            self.interactive_install(replies, direct=True)
+            cache = self.home / ".kyler/sessions/_model-catalog.json"
+            self.assertTrue(cache.is_file())
+            self.assertNotIn("DISCOVERY_TEST_KEY", cache.read_text())
+            mode["failed"] = True
+            cached = self.interactive_install(replies, direct=True)
+            self.assertIn(b"Using 2 cached model IDs", cached)
+            self.assertIn(b"1050000 tokens", cached)
+            self.assertNotIn(b"DISCOVERY_TEST_KEY", cached)
+            self.assertEqual(len(requests), 3)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
-    def test_named_profiles_configure_context_windows_independently(self):
+    def test_context_window_is_automatic_and_advanced_override_is_optional(self):
+        output = self.interactive_install([
+            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[3] API key", b"WINDOW_TEST_KEY\r"),
+            (b"[4] Model [", b"window-model\n"),
+        ])
+        self.assertNotIn(b"Context window (tokens", output)
+        self.assertIn(b"fallback budget; not a verified model capacity", output)
+        config = self.home / ".kyler/config.toml"
+        self.assertIn("auto_model_window = true", config.read_text())
+        output = self.interactive_install([
+            (b"[2] API URL [", b"\n"),
+            (b"[3] API key", b"\r"),
+            (b"[4] Model [", b"\n"),
+            (b"[5] Context window (tokens or auto)", b"invalid\n"),
+            (b"[5] Context window (tokens or auto)", b"8000\n"),
+            (b"[5] Context window (tokens or auto)", b"64k\n"),
+        ], advanced=True)
+        self.assertIn(b"Invalid context window", output)
+        self.assertIn("context_tokens = 64000", config.read_text())
+        output = self.interactive_install([
+            (b"[2] API URL [", b"\n"),
+            (b"[3] API key", b"\r"),
+            (b"[4] Model [", b"\n"),
+        ])
+        self.assertIn("context_tokens = 64000", config.read_text())
+        output = self.interactive_install([
+            (b"[2] API URL [", b"\n"),
+            (b"[3] API key", b"\r"),
+            (b"[4] Model [", b"\n"),
+            (b"[5] Context window (tokens or auto)", b"auto\n"),
+        ], advanced=True)
+        self.assertIn("auto_model_window = true", config.read_text())
+        self.assertIn("context_tokens = 64000", config.read_text())
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_named_profiles_keep_unselected_windows_and_advanced_override(self):
         config = self.home / ".kyler/config.toml"
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text('''[models]
@@ -556,14 +634,14 @@ context_tokens = 128000
 output_tokens = 8192
 ''')
         output = self.interactive_install([
-            (b"[1] fixture OPENAI_BASE_URL", b"\n"),
-            (b"[2] fixture OPENAI_API_KEY", b"\r"),
-            (b"[3] a_small context window (tokens) [64000]", b"32k\n"),
-            (b"[4] b_large context window (tokens) [128000]", b"256k\n"),
-        ])
+            (b"[2] API URL", b"\n"),
+            (b"[3] API key", b"\r"),
+            (b"[4] Model [small-model]", b"\n"),
+            (b"[5] Context window (tokens or auto) [64000]", b"32k\n"),
+        ], advanced=True)
         text = config.read_text()
         self.assertIn("context_tokens = 32000", text)
-        self.assertIn("context_tokens = 256000", text)
+        self.assertIn("context_tokens = 128000", text)
         self.assertIn("output_tokens = 1000", text)
         self.assertIn("output_tokens = 8192", text)
         self.assertNotIn(b"PROFILE_TEST_KEY", output)
@@ -571,9 +649,9 @@ output_tokens = 8192
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
     def test_lan_scope_generates_tokens_without_address_or_password_prompts(self):
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[2] OPENAI_API_KEY", b"LAN_MODEL_TEST_KEY\r"),
-            (b"[3] Model [", b"fixture-model\n"),
+            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[3] API key", b"LAN_MODEL_TEST_KEY\r"),
+            (b"[4] Model [", b"fixture-model\n"),
         ], access_scope="2")
         text = (self.home / ".kyler/config.toml").read_text()
         self.assertEqual(text.count('bind = "0.0.0.0:'), 2)
@@ -584,9 +662,9 @@ output_tokens = 8192
         self.assertNotIn(b"LAN_MODEL_TEST_KEY", output)
         self.assertIn(b"kyler service token", output)
         again = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"\n"),
-            (b"[2] OPENAI_API_KEY", b"\r"),
-            (b"[3] Model [", b"\n"),
+            (b"[2] API URL [", b"\n"),
+            (b"[3] API key", b"\r"),
+            (b"[4] Model [", b"\n"),
         ], access_scope="", preserve_addresses=True)
         self.assertIn(b"Access scope [2]", again)
         self.assertEqual((self.home / ".kyler/config.toml").read_text(), text)
@@ -594,9 +672,9 @@ output_tokens = 8192
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_piped_installer_reads_hidden_key_from_controlling_terminal(self):
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[2] OPENAI_API_KEY", b"PIPE_SECRET_TEST_KEY\r"),
-            (b"[3] Model [", b"pipe-model\n"),
+            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[3] API key", b"PIPE_SECRET_TEST_KEY\r"),
+            (b"[4] Model [", b"pipe-model\n"),
         ], piped=True)
         self.assertNotIn(b"PIPE_SECRET_TEST_KEY", output)
         self.assertIn("PIPE_SECRET_TEST_KEY", (self.home / ".kyler/config.toml").read_text())
@@ -604,9 +682,9 @@ output_tokens = 8192
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_dev_tty_input_does_not_require_event_reader_initialization(self):
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"http://127.0.0.1:1/v1\n"),
-            (b"[2] OPENAI_API_KEY", b"TTY_SECRET_TEST_KEY\r"),
-            (b"[3] Model [", b"tty-model\n"),
+            (b"[2] API URL [", b"http://127.0.0.1:1/v1\n"),
+            (b"[3] API key", b"TTY_SECRET_TEST_KEY\r"),
+            (b"[4] Model [", b"tty-model\n"),
         ], redirected=True)
         self.assertNotIn(b"TTY_SECRET_TEST_KEY", output)
         self.assertIn("TTY_SECRET_TEST_KEY", (self.home / ".kyler/config.toml").read_text())
@@ -614,13 +692,13 @@ output_tokens = 8192
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
     def test_setup_retries_invalid_input_without_extra_configuration_steps(self):
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"not-a-url\n"),
-            (b"[1] OPENAI_BASE_URL [", b"https://example.com/v1/chat/completions\n"),
-            (b"[1] OPENAI_BASE_URL [", b"  http://127.0.0.1:1/v1/  \n"),
-            (b"[2] OPENAI_API_KEY", b"\r"),
-            (b"[2] OPENAI_API_KEY", b"\x1b[200~first\nsecond\x1b[201~\r"),
-            (b"[2] OPENAI_API_KEY", b"\x1b[200~  RETRY_SECRET_KEY\n\x1b[201~\r"),
-            (b"[3] Model [", b"  pty-model  \n"),
+            (b"[2] API URL [", b"not-a-url\n"),
+            (b"[2] API URL [", b"https://example.com/v1/chat/completions\n"),
+            (b"[2] API URL [", b"  http://127.0.0.1:1/v1/  \n"),
+            (b"[3] API key", b"\r"),
+            (b"[3] API key", b"\x1b[200~first\nsecond\x1b[201~\r"),
+            (b"[3] API key", b"\x1b[200~  RETRY_SECRET_KEY\n\x1b[201~\r"),
+            (b"[4] Model [", b"  pty-model  \n"),
         ])
         self.assertNotIn(b"RETRY_SECRET_KEY", output)
         self.assertNotIn(b"first", output)
@@ -636,13 +714,13 @@ output_tokens = 8192
     def test_setup_cancellation_keeps_existing_config_and_binary(self):
         self.install()
         config = self.home / ".kyler/config.toml"
-        config.write_text('[llm]\nmodel="original-model"\nbase_url="https://example.com/v1"\napi_key="ORIGINAL_TEST_KEY"\n')
+        config.write_text('[llm]\ndiscover_models=false\nmodel="original-model"\nbase_url="https://example.com/v1"\napi_key="ORIGINAL_TEST_KEY"\n')
         before = config.read_bytes()
         installed = self.home / ".local/bin/kyler"
         binary_before = installed.read_bytes()
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"\n"),
-            (b"[2] OPENAI_API_KEY", b"\x1b"),
+            (b"[2] API URL [", b"\n"),
+            (b"[3] API key", b"\x1b"),
         ], expected=130)
         self.assertEqual(config.read_bytes(), before)
         self.assertEqual(installed.read_bytes(), binary_before)
@@ -653,11 +731,11 @@ output_tokens = 8192
     def test_enter_keeps_existing_values_and_hidden_keys(self):
         self.install()
         config = self.home / ".kyler/config.toml"
-        config.write_text('[llm]\nmodel="kept-model"\nbase_url="https://example.com/v1"\napi_key="KEPT_MODEL_KEY"\n[tools.tavily]\nenabled=true\napi_key="KEPT_SEARCH_KEY"\n[context]\ncontext_tokens=64000\n')
+        config.write_text('[llm]\ndiscover_models=false\nmodel="kept-model"\nbase_url="https://example.com/v1"\napi_key="KEPT_MODEL_KEY"\n[tools.tavily]\nenabled=true\napi_key="KEPT_SEARCH_KEY"\n[context]\ncontext_tokens=64000\n')
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"\n"),
-            (b"[2] OPENAI_API_KEY", b"\r"),
-            (b"[3] Model [", b"\n"),
+            (b"[2] API URL [", b"\n"),
+            (b"[3] API key", b"\r"),
+            (b"[4] Model [", b"\n"),
         ])
         self.assertNotIn(b"KEPT_MODEL_KEY", output)
         self.assertNotIn(b"KEPT_SEARCH_KEY", output)
@@ -671,15 +749,15 @@ output_tokens = 8192
     def test_invalid_saved_key_retries_without_advancing_or_exposing_credentials(self):
         self.install()
         config = self.home / ".kyler/config.toml"
-        config.write_text('[llm]\nmodel="kept-model"\nbase_url="https://example.com/v1"\napi_key="invalid saved key"\n')
+        config.write_text('[llm]\ndiscover_models=false\nmodel="kept-model"\nbase_url="https://example.com/v1"\napi_key="invalid saved key"\n')
         output = self.interactive_install([
-            (b"[1] OPENAI_BASE_URL [", b"\n"),
-            (b"[2] OPENAI_API_KEY", b"\r"),
-            (b"[2] OPENAI_API_KEY", b"REPLACEMENT_TEST_KEY\r"),
-            (b"[3] Model [", b"\n"),
+            (b"[2] API URL [", b"\n"),
+            (b"[3] API key", b"\r"),
+            (b"[3] API key", b"REPLACEMENT_TEST_KEY\r"),
+            (b"[4] Model [", b"\n"),
         ])
         self.assertIn(b"Saved key is invalid", output)
-        self.assertEqual(output.count(b"[2] OPENAI_API_KEY"), 2)
+        self.assertEqual(output.count(b"[3] API key"), 2)
         self.assertNotIn(b"Backend URL", output)
         self.assertNotIn(b"invalid saved key", output)
         self.assertNotIn(b"REPLACEMENT_TEST_KEY", output)
@@ -831,14 +909,14 @@ class BundleTests(unittest.TestCase):
         self.env.pop("KYLER_SERVER_BIND")
         self.env.pop("KYLER_WEB_BIND")
         output = InstallTests.interactive_install(self, [
-            (b"[1] OPENAI_BASE_URL [https://api.siliconflow.cn/v1]", b"\n"),
-            (b"[2] OPENAI_API_KEY", b"WIZARD_TEST_KEY\r"),
-            (b"[3] Model [deepseek-ai/DeepSeek-V4-Flash]", b"\n"),
+            (b"[2] API URL [https://api.siliconflow.cn/v1]", b"http://127.0.0.1:1/v1\n"),
+            (b"[3] API key", b"WIZARD_TEST_KEY\r"),
+            (b"[4] Model [deepseek-ai/DeepSeek-V4-Flash]", b"\n"),
         ], bundle=self.bundle("interactive"))
         titles = [b"Configure model", b"Choose access scope", b"Service status and management"]
         self.assertEqual([output.index(title) for title in titles], sorted(output.index(title) for title in titles))
         self.assertEqual(output.count(b"Local access:"), 1)
-        self.assertIn(b"OpenAI-compatible Chat Completions API", output)
+        self.assertIn(b"Providers:", output)
         self.assertNotIn(b"WIZARD_TEST_KEY", output)
         self.assertNotIn(b"Backend URL", output)
         self.assertNotIn(b"next page", output.lower())
@@ -846,7 +924,7 @@ class BundleTests(unittest.TestCase):
         self.assertIn(b"kyler service start --restart", output)
         config = (self.home / ".kyler/config.toml").read_text()
         self.assertIn('model = "deepseek-ai/DeepSeek-V4-Flash"', config)
-        self.assertIn('base_url = "https://api.siliconflow.cn/v1"', config)
+        self.assertIn('base_url = "http://127.0.0.1:1/v1"', config)
         state = self.status("status")
         self.assertTrue(state["backend"]["running"])
         self.assertTrue(state["web"]["running"])

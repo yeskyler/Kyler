@@ -718,9 +718,13 @@ async fn thinking_agent(
 ) -> Agent {
     let mut config = kyler_config::AppConfig::default();
     config.llm.base_url = url;
+    config.llm.discover_models = false;
     config.llm.api_key = kyler_config::SecretString::new("fixture");
     config.llm.model = "fixture".into();
-    config.llm.enable_thinking = Some(enabled);
+    config.llm.capabilities.reasoning_content = Some(true);
+    config.llm.reasoning_effort = Some(kyler_protocol::api::models::ThinkingLevel::from_enabled(
+        enabled,
+    ));
     config.skills.enabled = false;
     config.session.enabled = true;
     config.session.directory = directory.join("sessions");
@@ -773,7 +777,8 @@ async fn enabled_thinking_is_sent_and_current_tool_reasoning_survives_only_its_t
     assert!(
         requests
             .iter()
-            .all(|request| request["enable_thinking"] == true)
+            .all(|request| request["reasoning_effort"] == "high"
+                && request.get("enable_thinking").is_none())
     );
     let continuation = requests[1]["messages"]
         .as_array()
@@ -836,7 +841,8 @@ async fn nonstreaming_thinking_and_tool_continuation_use_the_same_provider_param
     assert!(
         requests
             .iter()
-            .all(|request| request["enable_thinking"] == true)
+            .all(|request| request["reasoning_effort"] == "high"
+                && request.get("enable_thinking").is_none())
     );
     let message = requests[1]["messages"]
         .as_array()
@@ -848,7 +854,7 @@ async fn nonstreaming_thinking_and_tool_continuation_use_the_same_provider_param
     server.abort();
 }
 #[tokio::test]
-async fn explicit_thinking_disable_is_sent_as_false() {
+async fn explicit_thinking_disable_is_sent_as_none_effort() {
     let (url, server) = fixture(vec![answer("Done")]).await;
     let directory = tempfile::tempdir().unwrap();
     thinking_agent(url, ToolBox::new(), directory.path(), false)
@@ -859,7 +865,9 @@ async fn explicit_thinking_disable_is_sent_as_false() {
         .finish()
         .await
         .unwrap();
-    assert_eq!(server.await.unwrap()[0]["enable_thinking"], false);
+    let requests = server.await.unwrap();
+    assert_eq!(requests[0]["reasoning_effort"], "none");
+    assert!(requests[0].get("enable_thinking").is_none());
 }
 
 struct PatchProbe(Arc<AtomicUsize>);
