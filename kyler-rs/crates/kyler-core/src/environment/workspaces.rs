@@ -79,7 +79,7 @@ impl WorkspaceFactory {
             allowed_roots.iter().all(|path| path.is_dir()),
             "allowed roots must be directories"
         );
-        let runtime = Runtime::discover();
+        let runtime = Runtime::discover_for_worker(&worker);
         let mut search_path = runtime.search_path();
         if !sandbox.mode.isolated() {
             search_path = std::env::var("PATH").unwrap_or(search_path);

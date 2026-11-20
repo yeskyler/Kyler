@@ -10,7 +10,7 @@ services. Run these commands from the repository root.
 | --- | --- |
 | `scripts/package.sh` / `package.py` | Build Rust and Web; bundle a native Node.js runtime |
 | `scripts/release.sh` / `release.py` | Validate existing bundles, push a version tag, and publish a GitHub Release |
-| `scripts/install.sh` | Download or install a bundle, configure it, and manage installed services |
+| `scripts/install.sh` | Verify and unpack the release, then invoke its CLI installer |
 | `scripts/tests/test_install.py` | Isolated installer regression tests |
 | `scripts/tests/test_release.py` | Isolated publisher tests; no real uploads or tag pushes |
 | `scripts/tests/test_package.py` | Isolated toolchain setup and runtime download tests |
@@ -31,6 +31,27 @@ and system compilers must already be available.
 Publishing requires Git, Python 3.9+, and an authenticated [GitHub
 CLI](https://cli.github.com/). Complete bundles include the runtime components required
 for installation.
+
+## Private tool payloads
+
+Packaging always includes a standalone ripgrep 15.2.0 with pinned upstream archive
+checksums and licenses. A TLS/download failure can use a locked build from the
+published crate; Linux source builds target musl. Hash mismatches stop immediately.
+`--ripgrep-binary PATH` accepts an offline standalone distribution with COPYING,
+LICENSE-MIT and UNLICENSE. Host rg executables are never discovered as a fallback;
+macOS linkage checks reject Homebrew and other external dylibs.
+
+Linux packaging collects native sandbox executables from the build host, copies
+their non-glibc shared-library closure and xtables extensions, and generates
+relocatable launchers. Each component's distro copyright metadata and package
+version are retained. `--sandbox-dist PATH` accepts a prepared bin/lib/licenses
+payload instead. Missing tools, attribution, private libraries, incompatible
+versions or unresolved host-library references stop packaging. This build-time
+collection does not authorize using host helpers after installation.
+
+Validate native `kyler doctor` on every target before distributing a release.
+Runtime execution requires the private tools and retains host kernel/ABI checks;
+there is no brew/apt/sudo installation or fallback to host rg/Bubblewrap.
 
 ## 1. Prepare the source
 

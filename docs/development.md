@@ -15,7 +15,7 @@ Rust workspace is inside `kyler-rs/`; the repository root has no Cargo manifest.
 
 On macOS, install command-line build tools with `xcode-select --install`. Ubuntu and
 Debian builds require `build-essential`, `pkg-config`, and `libssl-dev`; native Linux
-sandbox tests also need Bubblewrap and isolated-network dependencies listed in
+sandbox payload builds also need Bubblewrap and isolated-network dependencies listed in
 [installation](installation.md#host-compatibility-and-sandbox-dependencies), plus a host
 that permits user namespaces.
 Additional native libraries are determined by the build dependencies. Install Python
@@ -38,6 +38,7 @@ Prebuilt release installations do not require these development tools; see
 ```sh
 cargo check --manifest-path kyler-rs/Cargo.toml --workspace
 cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
+python3 scripts/prepare_runtime.py --profile debug
 cargo fmt --manifest-path kyler-rs/Cargo.toml --all -- --check
 cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-config
 cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-cli --test service
@@ -81,6 +82,23 @@ workspaces and session stores.
 
 ## Configuration and local execution
 
+Prepare private tools once after building the CLI, before running source builds
+or native tests:
+
+```sh
+python3 scripts/prepare_runtime.py --profile debug
+```
+
+The runtime is placed beside Cargo's binary (`target/debug/runtime`). No host
+ripgrep or sandbox-helper fallback exists. Release packaging creates its own
+payload. Use `--ripgrep-binary` for an offline standalone distribution with its
+upstream licenses, and `--sandbox-dist` for a prebuilt Linux tool distribution.
+Linux builders must have the source tools, ldd, xtables modules and distro copyright
+metadata available; installation of the resulting archive needs none of those host
+tool executables. Library-level Linux tests should prepend
+`kyler-rs/target/debug/runtime/sandbox/bin` to PATH; the Kyler executable performs
+this initialization itself before starting threads.
+
 For first-time backend setup from a checkout:
 
 ```sh
@@ -120,16 +138,18 @@ Build the CLI before running installer tests so integration cases are not skippe
 
 ```sh
 cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
+python3 scripts/prepare_runtime.py --profile debug
 cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-cli --lib commands::install
 python3 scripts/tests/test_install.py
 python3 scripts/tests/test_release.py
 python3 scripts/tests/test_package.py
+python3 scripts/tests/test_package_runtime.py
 sh -n scripts/install.sh scripts/package.sh scripts/release.sh
 ```
 
 The installer tests use temporary homes and ports. Node.js is needed for the
-complete-bundle fixture tests. Rust tests exercise dependency plans with a closed
-PATH and fake package managers; they never install host packages. Shell tests cover
+complete-bundle fixture tests. Runtime tests reject missing payloads and verify private-tool selection with a
+broken host rg; they never install host packages. Shell tests cover
 bootstrap download/verification and delegate activation to the real CLI. Installer
 tests verify package activation, configuration
 preservation, service startup, and rollback. Release validation also requires a

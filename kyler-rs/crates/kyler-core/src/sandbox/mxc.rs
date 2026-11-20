@@ -22,6 +22,7 @@ pub struct MxcSandbox {
 }
 impl MxcSandbox {
     pub fn new() -> Result<Self> {
+        super::paths::require_bundled_tools(&std::env::current_exe()?)?;
         let support = v1::platform_support();
         ensure!(
             support.is_supported,

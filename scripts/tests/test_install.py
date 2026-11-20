@@ -38,6 +38,13 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)));
 '''
 
 
+def copy_bundled_runtime(bundle):
+    runtime = KYLER_BINARY.parent / "runtime"
+    if not (runtime / "tools/rg").is_file():
+        raise RuntimeError("Prepare bundled tools first: python3 scripts/prepare_runtime.py --profile debug")
+    shutil.copytree(runtime, bundle / "runtime", dirs_exist_ok=True)
+
+
 def local_bundle(root, binary):
     bundle = Path(tempfile.mkdtemp(prefix="source bundle ", dir=root))
     for folder in ("bin", "runtime", "web"):
@@ -60,6 +67,7 @@ def local_bundle(root, binary):
     runtime.write_text("#!/bin/sh\nexec " + shlex.quote(node) + ' "$@"\n')
     runtime.chmod(0o755)
     (bundle / "web/server.js").write_text(WEB_FIXTURE)
+    copy_bundled_runtime(bundle)
     BundleTests.manifest(bundle)
     return bundle
 
@@ -157,6 +165,24 @@ else:
         self.assertIn("[2/2] Download and verify bundle", result.stdout)
         self.assertIn("sh install.sh --bundle", result.stdout)
         self.assertIn("Installation complete", result.stdout)
+
+    @unittest.skipUnless(KYLER_BINARY.is_file(), "build kyler-cli first")
+    def test_bundled_rg_is_used_by_installer_and_sandbox_with_broken_host_rg(self):
+        bundle = local_bundle(self.root, KYLER_BINARY)
+        tool = bundle / "runtime/tools/rg"
+        host = self.root / "sandbox-tools/rg"
+        host.write_text('#!/bin/sh\n: > "$HOME/host-rg-used"\nexit 77\n')
+        host.chmod(0o755)
+        BundleTests.manifest(bundle)
+        result = subprocess.run([str(KYLER_BINARY), "install", "--bundle", str(bundle), "--no-configure", "--no-start"], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("(bundled)", result.stdout)
+        self.assertIn("Sandbox ready", result.stdout)
+        installed = self.home / ".local/bin/kyler"
+        doctor = subprocess.run([str(installed), "--json", "doctor"], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(doctor.returncode, 0, doctor.stderr)
+        self.assertTrue(all(check["ripgrep"] for check in json.loads(doctor.stdout)["checks"]))
+        self.assertFalse((self.home / "host-rg-used").exists())
 
     def test_cli_installs_without_bootstrap_and_rejects_modified_bundles(self):
         bundle = local_bundle(self.root, self.source)
@@ -1093,6 +1119,7 @@ class BundleTests(unittest.TestCase):
         shutil.copy2(shutil.which("node"), bundle / "runtime/node")
         script = WEB_FIXTURE
         (bundle / "web/server.js").write_text("process.exit(42);" if broken else script)
+        copy_bundled_runtime(bundle)
         self.manifest(bundle)
         return bundle
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Build a native release bundle. No end-user npm/Cargo installation is needed."""
+from package_runtime import prepare_ripgrep, prepare_linux_sandbox
+
 import argparse
 import hashlib
 import json
@@ -160,6 +162,8 @@ def source_revision():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ripgrep-binary", type=Path, help="Standalone native rg with upstream licenses beside it (offline builds)")
+    parser.add_argument("--sandbox-dist", type=Path, help="Native Linux sandbox tool distribution with bin/lib/licenses (otherwise collect host tools)")
     parser.add_argument("--node-dist", type=Path, help="Extracted official Node distribution (bin/node and LICENSE)")
     parser.add_argument("--download-node", action="store_true", help="Download official Node.js 24 instead of reusing local Node.js")
     parser.add_argument("--skip-build", action="store_true", help="Use an already-built backend and web/.next/standalone")
@@ -222,6 +226,12 @@ def main():
         shutil.copy2(binary, bundle / "bin/kyler")
         shutil.copy2(node, bundle / "runtime/node")
         (bundle / "licenses").mkdir()
+        runtime_tools = {"ripgrep": prepare_ripgrep(bundle / "runtime/tools/rg", bundle / "licenses/ripgrep", temporary, node_os, arch, args.ripgrep_binary)}
+        if node_os == "linux":
+            runtime_tools["sandbox"] = prepare_linux_sandbox(bundle / "runtime/sandbox", args.sandbox_dist)
+        elif args.sandbox_dist:
+            raise ValueError("--sandbox-dist only applies to native Linux packages")
+
         shutil.copy2(license_path, bundle / "licenses/NODE-LICENSE")
         standalone = WEB / ".next/standalone"
         if not (standalone / "server.js").is_file():
@@ -240,7 +250,7 @@ def main():
         notices = [{"package": path, "version": item.get("version"), "license": item.get("license")} for path, item in lock.get("packages", {}).items() if path and not item.get("dev")]
         (bundle / "licenses/npm-packages.json").write_text(json.dumps(notices, indent=2) + "\n")
         step(7, "Write bundle metadata and internal checksums")
-        (bundle / "bundle.json").write_text(json.dumps({"version": version, "target": target, "source_revision": revision if revision == source_revision() else None, "node": details["version"], "web": "standalone", "license_note": "Project distribution licensing must be selected by the owner before public release." if not (ROOT / "LICENSE").exists() else None}, indent=2) + "\n")
+        (bundle / "bundle.json").write_text(json.dumps({"version": version, "target": target, "source_revision": revision if revision == source_revision() else None, "node": details["version"], "web": "standalone", "runtime_tools": runtime_tools, "license_note": "Project distribution licensing must be selected by the owner before public release." if not (ROOT / "LICENSE").exists() else None}, indent=2) + "\n")
         files = sorted(path for path in bundle.rglob("*") if path.is_file())
         if any("\n" in str(path) or "\r" in str(path) for path in files):
             raise ValueError("Bundle filenames cannot contain line breaks")

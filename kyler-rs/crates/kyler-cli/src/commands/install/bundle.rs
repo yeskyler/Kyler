@@ -70,7 +70,12 @@ pub(super) fn verify(root: &Path) -> Result<String> {
             ));
         }
     }
-    for required in ["bin/kyler", "runtime/node", "web/server.js"] {
+    for required in [
+        "bin/kyler",
+        "runtime/node",
+        "web/server.js",
+        "runtime/tools/rg",
+    ] {
         if !expected.contains_key(Path::new(required)) {
             return Err(CliError::new(2, format!("Missing checksum for {required}")));
         }
@@ -117,7 +122,12 @@ mod tests {
     fn fixture() -> tempfile::TempDir {
         let root = tempfile::tempdir().unwrap();
         let mut manifest = String::new();
-        for name in ["bin/kyler", "runtime/node", "web/server.js"] {
+        for name in [
+            "bin/kyler",
+            "runtime/node",
+            "web/server.js",
+            "runtime/tools/rg",
+        ] {
             let path = root.path().join(name);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(&path, name).unwrap();

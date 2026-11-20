@@ -383,7 +383,7 @@ async fn install(
     no_start: bool,
     no_configure: bool,
     non_interactive: bool,
-    environment: dependencies::Environment,
+    mut environment: dependencies::Environment,
 ) -> Result<()> {
     // Execute only the private verified copy, not a mutable download directory.
     private_directory(versions)?;
@@ -396,6 +396,12 @@ async fn install(
         return Err(CliError::new(2, "Bundle changed during staging."));
     }
     let source = verified.path();
+    environment.bundle = Some(source.to_path_buf());
+    environment.path = kyler_core::sandbox::paths::bundled_search_path(
+        &source.join("bin/kyler"),
+        &environment.path,
+    )
+    .map_err(CliError::io)?;
     println!("\n[1/5] Check environment and dependencies");
     let mut dependency_log = log.try_clone().map_err(CliError::io)?;
     tokio::task::spawn_blocking(move || environment.prepare(&mut dependency_log))

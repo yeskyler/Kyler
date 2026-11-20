@@ -1,7 +1,11 @@
 //! Discover host-installed tools without importing the host's shell or credentials.
 #[cfg(any(target_os = "macos", test))]
 mod macho;
-use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 
 use crate::sandbox::policy::RustupRuntime;
 
@@ -12,11 +16,18 @@ pub(crate) struct Runtime {
     pub rustup: Option<RustupRuntime>,
 }
 impl Runtime {
-    pub fn discover() -> Self {
-        Self::from_environment(&std::env::vars_os().collect())
+    pub fn discover_for_worker(worker: &Path) -> Self {
+        Self::from_environment_and_worker(&std::env::vars_os().collect(), Some(worker))
     }
 
+    #[cfg(test)]
     fn from_environment(environment: &BTreeMap<OsString, OsString>) -> Self {
+        Self::from_environment_and_worker(environment, None)
+    }
+    fn from_environment_and_worker(
+        environment: &BTreeMap<OsString, OsString>,
+        worker: Option<&Path>,
+    ) -> Self {
         let value = |name: &str| environment.get(std::ffi::OsStr::new(name));
         let home = value("HOME").map(PathBuf::from);
         let cargo_home = value("CARGO_HOME")
@@ -36,6 +47,12 @@ impl Runtime {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let bundled = worker
+            .map(crate::sandbox::paths::bundled_tool_directories)
+            .unwrap_or_default();
+        for path in bundled.iter().rev() {
+            directories.insert(0, path.clone());
+        }
         // Services and fresh terminals may not inherit Homebrew's shell initialization.
         #[cfg(target_os = "macos")]
         directories.extend([
@@ -46,7 +63,17 @@ impl Runtime {
             directories.push(home.join("bin"));
         }
         let mut runtime = Self::default();
-        if let Some(binary) = find_executable(&directories, "rg") {
+        for directory in &bundled {
+            runtime.add_directory(directory.clone());
+            // Sandboxed helpers may need their private libexec, libraries and modules.
+            let root = if directory.file_name().is_some_and(|n| n == "bin") {
+                directory.parent().unwrap()
+            } else {
+                directory.as_path()
+            };
+            runtime.readonly_paths.push(root.to_path_buf());
+        }
+        if let Some(binary) = worker.and_then(crate::sandbox::paths::bundled_ripgrep) {
             runtime.add_directory(binary.parent().unwrap().to_path_buf());
             #[cfg(target_os = "macos")]
             runtime.readonly_paths.extend(macho::libraries(&binary));

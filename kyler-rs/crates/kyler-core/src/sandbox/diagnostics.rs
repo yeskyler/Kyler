@@ -37,7 +37,7 @@ pub async fn check(worker: &Path) -> Result<Vec<SandboxCheck>> {
     let host = TcpStream::connect(address).await?;
     let (accepted, _) = listener.accept().await?;
     drop((host, accepted));
-    let runtime = crate::environment::workspaces::runtime::Runtime::discover();
+    let runtime = crate::environment::workspaces::runtime::Runtime::discover_for_worker(worker);
     let mut results = Vec::new();
     for (mode, network) in [
         ("offline", NetworkAccess::Deny),
@@ -133,7 +133,7 @@ pub(super) async fn probe(arguments: Value) -> Result<String> {
     })
     .await
     .context(
-        "sandbox ripgrep search failed; install ripgrep and ensure rg is on the service PATH",
+        "sandbox ripgrep search failed; repair the bundled ripgrep runtime; host rg is never substituted",
     )?;
     let ripgrep = matches.lines().any(|line| {
         Path::new(line)

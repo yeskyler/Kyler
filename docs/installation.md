@@ -38,53 +38,32 @@ checksums and checks both this cache and the current directory. Matching archive
 are reused; corrupt or replaced versions are downloaded again. The cache survives
 configuration or startup failures.
 
-### Host compatibility and sandbox dependencies
+### Host compatibility and bundled runtime
 
-The installer recognizes macOS/Linux and x86_64/ARM64. A release must contain the
-matching architecture. Current Linux download targets use glibc; musl-based systems
-such as Alpine require a separate compatible build. The CLI checks glibc before
-installing prerequisites; an incompatible binary may fail during bootstrap before
-it can produce that diagnostic. A detected glibc version
-is informational: execution of both the bundled Kyler and Node.js is the final ABI
-compatibility check. There is no universal minimum glibc guarantee across locally
-built bundles, and the installer does not upgrade system libraries.
+Release bundles contain their own ripgrep. Kyler never selects a host `rg`, even
+when one is installed. macOS uses a standalone native build without Homebrew/PCRE2
+dylib dependencies and the operating system's Seatbelt backend.
 
-On Linux, Bubblewrap >= 0.5.0 and the networking tools required by the pinned MXC
-adapter are checked by the CLI before activation: `slirp4netns`, `ip`, `unshare`, `nsenter`,
-`iptables`, `ip6tables`, their `-restore` commands, `sh`, and `sleep`. Compatible
-installed tools are reused. Missing dependencies use the first available supported
-package manager:
+Linux bundles also contain Bubblewrap >= 0.5.0, slirp4netns, ip, unshare, nsenter,
+iptables/ip6tables and their restore commands, sh, sleep, xtables extensions, and
+the required non-glibc shared libraries. Private launchers scope library/module
+paths to the package. SDK helpers must resolve to this payload; missing, damaged
+or shadowed payloads fail instead of falling back to system tools.
 
-| Package manager | Sandbox packages (only missing components are installed) |
-| --- | --- |
-| `apt-get` | `bubblewrap slirp4netns iproute2 util-linux iptables` |
-| `dnf` / `yum` | `bubblewrap slirp4netns iproute util-linux iptables` |
-| `pacman` | `bubblewrap slirp4netns iproute2 util-linux iptables` |
-| `zypper` | `bubblewrap slirp4netns iproute2 util-linux iptables` |
+The installer does not invoke brew, apt, sudo or another package manager, and never
+fetches helper tools separately. All runtime files are covered by the installation
+manifest and version switching/rollback. Install the complete native archive;
+copying only `bin/kyler` is insufficient.
 
-Commands and package-manager output remain visible. Non-root users need `sudo` to
-install missing packages; root invokes the manager directly. Unknown managers,
-insufficient privileges, failed installations and insufficient repository versions
-stop with manual instructions. No third-party repository is added. Arch installation
-uses `pacman -S --needed` without a partial repository refresh; maintain the host
-through its normal full-system update procedure if repository versions are outdated.
-Package-manager recognition is not a certification of every distribution/version.
+macOS/Linux and x86_64/ARM64 builds are supported. Linux still requires the host's
+glibc ABI, kernel namespace capabilities and compatible security policy. Those
+cannot be bundled as user-space executables. Both offline and outbound native
+sandbox execution are mandatory checks before activation. No host security setting
+is weakened and there is no unrestricted-execution fallback.
 
-macOS uses the system Seatbelt sandbox without downloading a separate sandbox runtime.
-Both macOS and Linux require ripgrep (`rg`). Existing working installations are
-reused. On macOS, missing ripgrep is installed using an existing Homebrew;
-if Homebrew is absent, the installer stops with the Homebrew URL and manual command.
-Homebrew is never installed automatically or run through sudo. Standard Apple
-Silicon and Intel Homebrew binary directories are included in the installer PATH.
-On Linux, only packages for missing/outdated sandbox tools and ripgrep
-are requested from the supported system package manager. Package output
-is displayed, and missing packages or an outdated repository stop installation with
-manual retry instructions. The installer does not add repositories or alter host
-security settings. Basic shell, archive and text utilities must already be present.
-Release bundles include Node.js; installing Kyler does not require Rust or a separate
-Node.js installation.
-Windows is not currently supported by Kyler's adapter, regardless of MXC's wider
-platform support.
+The Shell bootstrap still needs basic shell/archive/checksum utilities and curl
+for remote downloads. These bootstrap utilities are separate from Kyler's private
+runtime. Node.js is included; Rust is only needed when building from source.
 
 ### Native sandbox self-check
 
@@ -314,8 +293,8 @@ Advanced options support automation and maintenance:
 
 The three advanced options are also available on `kyler install`. The CLI accepts
 `--config` for a separate configuration path and rejects `--server` and `--json`.
-Non-interactive dependency installation uses non-prompting `sudo`; prepare system
-packages first when privileges are unavailable.
+Runtime checks are validation-only, including in non-interactive mode; missing
+payloads must be repaired with a complete bundle.
 
 Non-interactive setup accepts the environment overrides listed in
 [configuration](configuration.md). Installations always include the backend, Web UI,

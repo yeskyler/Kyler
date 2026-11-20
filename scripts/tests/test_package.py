@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Isolated packaging setup tests; never install toolchains or use the network."""
 import argparse
+import sys
 import importlib.util
 import contextlib
 import io
@@ -12,6 +13,8 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 spec = importlib.util.spec_from_file_location("package", Path(__file__).resolve().parents[1] / "package.py")
 package = importlib.util.module_from_spec(spec)
@@ -133,7 +136,17 @@ class PackageSetupTests(unittest.TestCase):
             if Path(command[0]).name == "node":
                 return json.dumps({"version": "v24.0.0", "platform": "linux", "arch": "x64"})
             return "kyler 0.1.0"
-        with patch.object(package, "ROOT", project), patch.object(package, "WEB", web), patch.object(package.platform, "system", return_value="Linux"), patch.object(package.platform, "machine", return_value="x86_64"), patch.object(package.subprocess, "check_output", side_effect=version), patch.object(package.subprocess, "run") as run, patch("sys.argv", ["package.py", "--skip-build", "--node-dist", str(distribution), "--binary", str(self.bin / "kyler"), "--output", str(output)]), contextlib.redirect_stdout(log):
+        def rg_payload(binary, licenses, *args):
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"fixture-ripgrep")
+            licenses.mkdir(parents=True)
+            (licenses / "COPYING").write_text("fixture license")
+            return {"version": "fixture"}
+        def sandbox_payload(destination, supplied):
+            (destination / "bin").mkdir(parents=True)
+            (destination / "bin/bwrap").write_bytes(b"fixture-bwrap")
+            return {"tools": ["bwrap"]}
+        with patch.object(package, "prepare_ripgrep", side_effect=rg_payload), patch.object(package, "prepare_linux_sandbox", side_effect=sandbox_payload), patch.object(package, "ROOT", project), patch.object(package, "WEB", web), patch.object(package.platform, "system", return_value="Linux"), patch.object(package.platform, "machine", return_value="x86_64"), patch.object(package.subprocess, "check_output", side_effect=version), patch.object(package.subprocess, "run") as run, patch("sys.argv", ["package.py", "--skip-build", "--node-dist", str(distribution), "--binary", str(self.bin / "kyler"), "--output", str(output)]), contextlib.redirect_stdout(log):
             package.main()
         run.assert_not_called()
         text = log.getvalue()
@@ -148,6 +161,8 @@ class PackageSetupTests(unittest.TestCase):
             self.assertNotIn(prefix + "/install.sh", bundle.getnames())
             self.assertEqual(bundle.extractfile(prefix + "/runtime/node").read(), (distribution / "bin/node").read_bytes())
             self.assertEqual(bundle.extractfile(prefix + "/licenses/NODE-LICENSE").read(), b"Node license")
+            self.assertEqual(bundle.extractfile(prefix + "/runtime/tools/rg").read(), b"fixture-ripgrep")
+            self.assertEqual(bundle.extractfile(prefix + "/runtime/sandbox/bin/bwrap").read(), b"fixture-bwrap")
 
     def test_default_node_download_is_verified_and_includes_npm(self):
         distribution = self.root / "node-v24.0.0-linux-x64"

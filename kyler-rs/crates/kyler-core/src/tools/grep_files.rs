@@ -99,7 +99,10 @@ async fn run_rg_search(
     limit: usize,
     cwd: &Path,
 ) -> anyhow::Result<Vec<String>> {
-    let mut command = Command::new("rg");
+    let worker = std::env::current_exe()?;
+    let binary = crate::sandbox::paths::bundled_ripgrep(&worker)
+        .context("Bundled ripgrep is missing; prepare the development runtime or reinstall Kyler. Host rg is never used")?;
+    let mut command = Command::new(binary);
     command
         .current_dir(cwd)
         .arg("--files-with-matches")
@@ -117,7 +120,9 @@ async fn run_rg_search(
     let output = timeout(COMMAND_TIMEOUT, command.output())
         .await
         .map_err(|_| anyhow::anyhow!("rg timed out after 30 seconds"))?
-        .context("failed to launch rg; ensure ripgrep is installed and on PATH")?;
+        .context(
+            "failed to launch rg; repair the bundled runtime; host ripgrep is never substituted",
+        )?;
 
     if output.status.success() {
         return Ok(parse_results(&output.stdout, limit));

@@ -60,9 +60,14 @@ checksum() {
 }
 check_manifest() {
     [ -f "$1/SHA256SUMS" ] || fail 'Bundle SHA256SUMS is missing.'
-    for required in bin/kyler runtime/node web/server.js; do
+    for required in bin/kyler runtime/node web/server.js runtime/tools/rg; do
         awk -v file="$required" '$2==file {found=1} END {exit !found}' "$1/SHA256SUMS" || fail "Missing checksum for $required"
     done
+    if [ "$host_os" = Linux ]; then
+        for tool in bwrap slirp4netns ip unshare nsenter iptables ip6tables iptables-restore ip6tables-restore sh sleep; do
+            awk -v file="runtime/sandbox/bin/$tool" '$2==file {found=1} END {exit !found}' "$1/SHA256SUMS" || fail "Missing bundled sandbox tool: $tool"
+        done
+    fi
     # Never let checksum entries address files outside the verified bundle.
     awk 'length($1)!=64 || $1 ~ /[^a-fA-F0-9]/ {bad=1} {name=substr($0,67); sub(/^\*/,"",name); if(name ~ /^\// || name ~ /(^|\/)\.\.($|\/)/) bad=1} END {exit bad}' "$1/SHA256SUMS" || fail 'Unsafe bundle checksum entry.'
     # Release bundles contain regular files and directories only.
