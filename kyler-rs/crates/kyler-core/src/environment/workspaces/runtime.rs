@@ -1,4 +1,6 @@
 //! Discover host-installed tools without importing the host's shell or credentials.
+#[cfg(any(target_os = "macos", test))]
+mod macho;
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
 use crate::sandbox::policy::RustupRuntime;
@@ -46,6 +48,8 @@ impl Runtime {
         let mut runtime = Self::default();
         if let Some(binary) = find_executable(&directories, "rg") {
             runtime.add_directory(binary.parent().unwrap().to_path_buf());
+            #[cfg(target_os = "macos")]
+            runtime.readonly_paths.extend(macho::libraries(&binary));
             runtime.readonly_paths.push(binary);
         }
         if let Some(home) = rustup_home {

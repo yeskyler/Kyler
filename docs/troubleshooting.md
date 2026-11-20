@@ -94,6 +94,16 @@ configured approval interaction when approval is requested; approval cannot exce
 permissions. A sandbox process-start error also requires inspection of host containment
 support and executable permissions.
 
+On macOS, a Homebrew `rg` can depend on libraries outside its executable directory,
+such as PCRE2 under `/opt/homebrew/opt/`. A `dyld` error containing
+`file system sandbox blocked open()` means the sandbox denied the dependency,
+not that ripgrep is missing. Host runtime discovery reads Mach-O dependencies and
+grants only the resolved library files read-only access, including transitive and
+run-path dependencies; it does not expose the whole Homebrew prefix or require
+Xcode tools. After updating the binary or rebuilding its installation bundle, run
+`kyler doctor` with the same PATH used for installation. The installer keeps the
+previous installation when this self-check fails.
+
 ## Upgrade failure
 
 Check the installer output and both logs. Complete upgrades attempt to restore the
