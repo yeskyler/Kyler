@@ -30,27 +30,27 @@ function selection(
     },
   };
 }
-test("all seven levels stay visible while availability follows the selected model", () => {
+test("all seven levels stay visible while all remain selectable", () => {
   assert.deepEqual(thinkingLevels, ["off", "low", "medium", "high", "xhigh", "max", "ultra"]);
   const known = validateModelSettings(selection("supported", ["high", "max"], "high"));
   const options = thinkingOptions(known.thinking!);
   assert.equal(options.length, 7);
   assert.deepEqual(
     options.filter((item) => item.available).map((item) => item.level),
-    ["high", "max"],
+    thinkingLevels,
   );
-  assert.equal(options.find((item) => item.level === "ultra")?.available, false);
-  assert.equal(options.find((item) => item.level === "off")?.available, false);
+  assert.equal(options.find((item) => item.level === "ultra")?.available, true);
+  assert.equal(options.find((item) => item.level === "off")?.available, true);
 });
 test("unknown, unsupported and failed loads never masquerade as one another", () => {
   const unknown = validateModelSettings(selection("unknown", [], "off"));
-  assert.ok(thinkingOptions(unknown.thinking!).every((item) => !item.available));
+  assert.ok(thinkingOptions(unknown.thinking!).every((item) => item.available));
   const unsupported = validateModelSettings(selection("unsupported", ["off"], "off"));
   assert.deepEqual(
     thinkingOptions(unsupported.thinking!)
       .filter((item) => item.available)
       .map((item) => item.level),
-    ["off"],
+    thinkingLevels,
   );
   assert.ok(thinkingOptions(undefined).every((item) => !item.available));
   assert.throws(() => validateModelSettings({ ...unknown, thinking: null }), /unavailable/);
@@ -66,8 +66,9 @@ test("mixed model identities and catalog generations are rejected", () => {
     () => validateModelSettings({ ...value, thinking: { ...value.thinking!, revision: 3 } }),
     /do not match/,
   );
-  assert.throws(
-    () => validateModelSettings({ ...value, thinking: { ...value.thinking!, level: "max" } }),
-    /not supported/,
+  assert.equal(
+    validateModelSettings({ ...value, thinking: { ...value.thinking!, level: "max" } }).thinking!
+      .level,
+    "max",
   );
 });

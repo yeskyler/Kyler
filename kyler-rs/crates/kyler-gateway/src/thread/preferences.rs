@@ -270,12 +270,8 @@ impl ThreadHandle {
             Some(caps) if !caps.levels.is_empty() => ThinkingSupport::Supported,
             Some(_) => ThinkingSupport::Unsupported,
         };
-        let levels = match status {
-            ThinkingSupport::Unknown => vec![],
-            ThinkingSupport::Unsupported => vec![ThinkingLevel::Off],
-            ThinkingSupport::Supported => caps.unwrap().levels.clone(),
-        };
-        let default = caps.map_or(ThinkingLevel::Off, |caps| caps.default);
+        let levels = ThinkingLevel::ALL.to_vec();
+        let default = ThinkingLevel::Off;
         let path = migrate_thinking_path(&self.thinking_path().await, &snapshot.preference_key())?;
         if let Some(selection) = selection {
             if let Some(level) = selection {
@@ -302,7 +298,7 @@ impl ThreadHandle {
             profile: snapshot.info.profile.clone(),
             revision: snapshot.info.revision,
             follows_default: saved.is_none_or(|level| !levels.contains(&level)),
-            enabled: status == ThinkingSupport::Supported && level.enabled(),
+            enabled: level.enabled(),
             supported: status == ThinkingSupport::Supported,
             level,
             levels,
@@ -362,7 +358,10 @@ impl ThreadHandle {
         }
         let (selected, thinking, error) = match resolved {
             Ok(snapshot) => {
-                let thinking = self.thinking_for_snapshot(&snapshot, None).await?;
+                let reset = selection
+                    .as_ref()
+                    .map(|_| Some(kyler_protocol::api::models::ThinkingLevel::Off));
+                let thinking = self.thinking_for_snapshot(&snapshot, reset).await?;
                 (Some(snapshot.info.clone()), Some(thinking), None)
             }
             Err(error) => (None, None, Some(error.to_string())),

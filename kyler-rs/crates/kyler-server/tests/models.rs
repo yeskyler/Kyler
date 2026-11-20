@@ -206,7 +206,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .unwrap();
     assert_eq!(
         thinking,
-        json!({"status":"supported","source":"configuration","profile":"fast","revision":1,"follows_default":false,"enabled":false,"supported":true,"level":"off","levels":["off","low","medium","high","xhigh","max"]})
+        json!({"status":"supported","source":"configuration","profile":"fast","revision":1,"follows_default":false,"enabled":false,"supported":true,"level":"off","levels":["off","low","medium","high","xhigh","max","ultra"]})
     );
     assert_eq!(
         client
@@ -303,7 +303,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .json()
         .await
         .unwrap();
-    assert_eq!(restored["level"], "low");
+    assert_eq!(restored["level"], "off");
     assert_eq!(restored["follows_default"], false);
     let default: Value = client
         .put(&thinking_url)
@@ -317,7 +317,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .await
         .unwrap();
     assert_eq!(default["follows_default"], true);
-    assert_eq!(default["level"], "high");
+    assert_eq!(default["level"], "off");
     client
         .put(&thinking_url)
         .json(&json!({"level":"low"}))
@@ -367,7 +367,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
         .json()
         .await
         .unwrap();
-    assert_eq!(other_thinking["enabled"], true);
+    assert_eq!(other_thinking["enabled"], false);
 
     client
         .put(&other_selection)
@@ -385,7 +385,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
             .await
             .unwrap()
             .status(),
-        400
+        200
     );
     assert_eq!(
         client
@@ -551,7 +551,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
     assert!(requests[0].get("max_completion_tokens").is_none());
     assert_eq!(requests[1]["max_completion_tokens"], 1024);
     assert!(requests[1].get("enable_thinking").is_none());
-    assert_eq!(requests[1]["reasoning_effort"], "high"); // A different model starts with its own default.
+    assert_eq!(requests[1]["reasoning_effort"], "none"); // Model selection starts with Off.
     assert!(requests[2].get("enable_thinking").is_none());
     assert_eq!(requests[2]["reasoning_effort"], "high");
     assert!(requests[1].get("max_tokens").is_none());
@@ -565,7 +565,7 @@ async fn model_selection_reload_and_streaming_runs_keep_independent_snapshots() 
     assert_eq!(selection.profile.as_deref(), Some("fast"));
     assert!(selection.active.is_none());
     assert!(
-        server
+        !server
             .state
             .runs
             .session_thinking(&id, None)
@@ -1004,7 +1004,7 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
     );
     assert_eq!(
         state.levels,
-        vec![kyler_protocol::api::models::ThinkingLevel::Off]
+        kyler_protocol::api::models::ThinkingLevel::ALL.to_vec()
     );
     let selected: SessionModel = client
         .put(&model_url)
@@ -1083,7 +1083,7 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
                 .await
                 .unwrap()
                 .status(),
-            400
+            200
         );
     }
     let selected: SessionModel = client
@@ -1099,7 +1099,7 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
         .unwrap();
     assert_eq!(
         selected.thinking.unwrap().level,
-        kyler_protocol::api::models::ThinkingLevel::Ultra
+        kyler_protocol::api::models::ThinkingLevel::Off
     );
     stop.send(()).unwrap();
     service.await.unwrap().unwrap();
@@ -1114,7 +1114,7 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
             .thinking
             .unwrap()
             .level,
-        kyler_protocol::api::models::ThinkingLevel::Ultra
+        kyler_protocol::api::models::ThinkingLevel::Off
     );
     restarted.state.runs.shutdown().await;
     upstream.abort();

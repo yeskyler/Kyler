@@ -13,6 +13,7 @@ pub struct ModelSnapshot {
     pub info: ModelInfo,
     pub policy: ContextPolicy,
     pub output_token_parameter: OutputTokenParameter,
+    pub(crate) manual_reasoning: bool,
     pub reasoning_effort: Option<kyler_protocol::api::models::ThinkingLevel>,
     pub(crate) base_url: String,
     pub(crate) api_key: SecretString,

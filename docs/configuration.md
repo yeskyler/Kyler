@@ -266,14 +266,14 @@ own `enable_thinking` field.
   opts in that one level. For additional verified levels, configure
   `capabilities.reasoning` with `levels`, `default`, and `source`.
 
-Web always displays **Off, Low, Medium, High, Extra high, Max, Ultra** in the
-thinking menu. Unsupported values are disabled, including Off for models that
-cannot disable reasoning. Known non-reasoning models permit only Off and omit
-reasoning parameters. Unknown capabilities disable the menu choices and display
-**Unconfirmed**; loading and failed requests have separate states with retry.
-There is no Model default menu item. Ultra is independent of Max: it is sent as
-`ultra` only when explicit configuration or metadata declares support. Existing
-adapter rules do not automatically gain Ultra.
+Web always displays selectable **Off, Low, Medium, High, Xhigh, Max, Ultra**.
+Selecting a model resets thinking to **Off**, including selecting a previously used
+model. Users can then choose any grade manually, independently of capability
+metadata. Manual grades pass through the adapter without remapping or silent
+fallback; a provider may reject an unsupported grade. Off uses a declared disable
+parameter when available; otherwise reasoning parameters are omitted. This cannot
+turn off internal reasoning in providers that always enable it.
+Loading and failed requests have separate states with retry.
 A verified custom model may declare a restricted set without enabling every grade:
 
 ```toml
@@ -288,15 +288,17 @@ For named profiles, use `[models.profiles.<profile>.capabilities.reasoning]`.
 `GET`/`PUT /v1/sessions/{id}/model` return the model and its `thinking` state from
 one immutable catalog snapshot. Thinking state includes `status`
 (`supported`, `unsupported`, `unknown`), `source`, `profile`, `revision`, and the
-effective level and supported values. Frontend requests are cancelled or ignored
+effective level and selectable manual values. Provider-declared capabilities remain
+in the model metadata and are not expanded by a manual selection. Frontend requests are cancelled or ignored
 after session changes, and mixed model/capability generations are rejected.
 `PUT /v1/sessions/{id}/thinking` accepts a `level`, the legacy `enabled` boolean,
 or `use_default: true`. Responses include `follows_default`.
 
 Preferences are scoped to the session, provider connection, endpoint, model and
 wire protocol; credentials are excluded so rotation does not reset user choices.
-Switching back restores a still-supported grade. Otherwise the model's valid
-default is used. Ambiguous older provider/model-only preference files are retained
+Page reloads retain the manual choice, but each explicit model selection resets
+it to Off. The default without a saved choice is Off.
+Ambiguous older provider/model-only preference files are retained
 but are not applied to a newly scoped connection. Legacy session-wide preferences
 still migrate once to the currently selected model. Active executions keep their
 immutable snapshot. Unsupported requests are rejected rather than silently mapped

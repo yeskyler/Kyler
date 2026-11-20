@@ -157,21 +157,9 @@ async fn start_turn(
     };
     let thinking_path =
         super::preferences::migrate_thinking_path(&thinking_path, &agent.model_preference_key())?;
-    let agent = if agent.thinking_supported() {
-        match super::preferences::read_thinking(&thinking_path)? {
-            Some(level) => {
-                let level = if !agent.thinking_levels().contains(&level) {
-                    agent.default_thinking_level()
-                } else {
-                    level
-                };
-                agent.with_thinking_level(level)?
-            }
-            None => agent,
-        }
-    } else {
-        agent
-    };
+    let level = super::preferences::read_thinking(&thinking_path)?
+        .unwrap_or(kyler_protocol::api::models::ThinkingLevel::Off);
+    let agent = agent.with_manual_thinking_level(level)?;
     *state.environment.write().await = agent.execution_environment();
     let permissions = state.permissions.read().await.clone();
     kyler_core::skills::validate_references(&turn.skills)?;

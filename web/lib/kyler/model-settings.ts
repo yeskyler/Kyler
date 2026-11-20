@@ -36,18 +36,6 @@ export function validateModelSettings(value: SessionModel): SessionModel {
   ) {
     throw new Error("Invalid thinking capabilities returned for this model.");
   }
-  if (state.status === "supported" && (!state.supported || !state.levels.includes(state.level))) {
-    throw new Error("The current thinking level is not supported by this model.");
-  }
-  if (
-    state.status === "unsupported" &&
-    (state.level !== "off" || state.levels.some((level) => level !== "off"))
-  ) {
-    throw new Error("Invalid disabled thinking state returned for this model.");
-  }
-  if (state.status === "unknown" && state.levels.length > 0) {
-    throw new Error("Unconfirmed thinking capabilities cannot enable levels.");
-  }
   return value;
 }
 
@@ -55,13 +43,7 @@ export function thinkingOptions(state?: ThinkingState) {
   return thinkingLevels.map((level) => ({
     level,
     label: thinkingLabels[level],
-    available: !!state && state.status !== "unknown" && state.levels.includes(level),
-    reason: !state
-      ? "Thinking settings are unavailable."
-      : state.status === "unknown"
-        ? "This model's thinking capabilities have not been confirmed."
-        : !state.levels.includes(level)
-          ? "This model does not support this thinking level."
-          : undefined,
+    available: !!state,
+    reason: !state ? "Thinking settings are unavailable." : undefined,
   }));
 }

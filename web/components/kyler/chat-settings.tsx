@@ -123,15 +123,7 @@ export function ModelThinkingControl() {
     }
   }
   async function selectThinking(level: ThinkingLevel) {
-    if (
-      !thinking ||
-      thinking.status === "unknown" ||
-      !thinking.levels.includes(level) ||
-      thinking.level === level ||
-      busy ||
-      running
-    )
-      return;
+    if (!thinking || thinking.level === level || busy || running) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -159,14 +151,8 @@ export function ModelThinkingControl() {
     }
   }
   const modelName = model?.selected?.model ?? initialModel;
-  const displayedLevel = thinking?.status === "unknown" ? "" : (thinking?.level ?? "");
-  const label = busy
-    ? "Loading…"
-    : !thinking
-      ? "Unavailable"
-      : thinking.status === "unknown"
-        ? "Unconfirmed"
-        : thinkingLabels[thinking.level];
+  const displayedLevel = thinking?.level ?? "";
+  const label = busy ? "Loading…" : !thinking ? "Unavailable" : thinkingLabels[thinking.level];
   return (
     <span className="min-w-0 shrink">
       <Menu.Root open={open} onOpenChange={setOpen}>

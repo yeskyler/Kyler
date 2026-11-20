@@ -112,6 +112,7 @@ impl ModelRegistry {
                     output_token_parameter: adapter
                         .output_parameter(&profile.model, profile.output_token_parameter),
                     reasoning_effort,
+                    manual_reasoning: false,
                     base_url: provider.base_url.clone(),
                     api_key: provider.api_key.clone(),
                 }),

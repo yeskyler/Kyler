@@ -86,6 +86,18 @@ impl Agent {
         snapshot.reasoning_effort = Some(level);
         Ok(self)
     }
+    /// Apply explicit user intent independently of provider capability discovery.
+    pub fn with_manual_thinking_level(
+        mut self,
+        level: kyler_protocol::api::models::ThinkingLevel,
+    ) -> Result<Self> {
+        if let Some(snapshot) = self.model_snapshot.as_mut() {
+            let snapshot = Arc::make_mut(snapshot);
+            snapshot.manual_reasoning = true;
+            snapshot.reasoning_effort = Some(level);
+        }
+        Ok(self)
+    }
     pub(super) fn provider_request(
         &self,
         request: async_openai::types::chat::CreateChatCompletionRequest,
@@ -105,12 +117,41 @@ impl Agent {
             .as_ref()
             .and_then(|s| s.info.capabilities.reasoning.as_ref())
             .or(inferred.as_ref());
+        let manual = self
+            .model_snapshot
+            .as_ref()
+            .is_some_and(|s| s.manual_reasoning);
+        let requested = self.reasoning_effort();
+        // Off uses a declared disable parameter when available; otherwise omit it.
+        let effort = if manual
+            && requested == Some(kyler_protocol::api::models::ThinkingLevel::Off)
+            && !self
+                .model_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.info.capabilities.reasoning.as_ref())
+                .is_some_and(|caps| {
+                    caps.levels
+                        .contains(&kyler_protocol::api::models::ThinkingLevel::Off)
+                }) {
+            None
+        } else {
+            requested
+        };
+        let manual_caps = kyler_protocol::api::models::ReasoningCapabilities {
+            levels: kyler_protocol::api::models::ThinkingLevel::ALL.to_vec(),
+            default: kyler_protocol::api::models::ThinkingLevel::Off,
+            source: "manual".into(),
+        };
         adapter.project(
             &mut value,
             &self.model,
             self.output_token_parameter(),
-            self.reasoning_effort(),
-            capabilities,
+            effort,
+            if manual {
+                Some(&manual_caps)
+            } else {
+                capabilities
+            },
         )?;
         if self.carries_reasoning() && self.thinking_enabled() {
             crate::models::attach_reasoning(&mut value["messages"], session);
@@ -213,6 +254,36 @@ mod thinking_level_tests {
         agent.model_registry = Some(Arc::new(ModelRegistry::new(&config).unwrap()));
         let bound = agent.bind_model(None).unwrap();
         assert!(bound.thinking_levels().is_empty());
+        let request = CreateChatCompletionRequestArgs::default()
+            .model("unknown")
+            .messages(vec![
+                ChatCompletionRequestUserMessageArgs::default()
+                    .content("hello")
+                    .build()
+                    .unwrap()
+                    .into(),
+            ])
+            .build()
+            .unwrap();
+        let manual = bound
+            .clone()
+            .with_manual_thinking_level(ThinkingLevel::Ultra)
+            .unwrap();
+        assert!(manual.thinking_levels().is_empty());
+        let value = manual
+            .provider_request(request.clone(), &crate::Session::new())
+            .unwrap();
+        assert_eq!(value["reasoning_effort"], "ultra");
+        let off = bound
+            .clone()
+            .with_manual_thinking_level(ThinkingLevel::Off)
+            .unwrap();
+        assert!(
+            off.provider_request(request, &crate::Session::new())
+                .unwrap()
+                .get("reasoning_effort")
+                .is_none()
+        );
         assert!(bound.with_thinking_level(ThinkingLevel::High).is_err());
         config.llm.reasoning_effort = Some(ThinkingLevel::High);
         agent.model_registry = Some(Arc::new(ModelRegistry::new(&config).unwrap()));
