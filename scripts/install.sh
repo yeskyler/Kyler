@@ -48,6 +48,8 @@ done
 case "${HOME:-}" in /*) ;; *) fail 'HOME must be an absolute directory.' ;; esac
 umask 077
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/kyler-install.XXXXXX") || fail 'Cannot create temporary directory.'
+diagnostic_log=$scratch/environment.log
+: > "$diagnostic_log"
 binary_stage= config_stage= config_backup= version_stage=
 old_entry= old_current= old_binary= old_running=false
 cleanup() {
@@ -61,6 +63,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+show_rg_version() {
+    rg_version=$(rg --version 2>&1) || { printf '%s\n' "$rg_version" >> "$diagnostic_log"; printf '%s\n' "$rg_version" >&2; return 1; }
+    printf '%s\n' "$rg_version" >> "$diagnostic_log"
+    printf '%s\n' "$rg_version" | head -n 1
+}
 checksum() {
     if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}';
     elif command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}';
@@ -109,7 +116,7 @@ prepare_runtime_dependencies() {
         else
             printf 'Reusing installed ripgrep and download tools.\n'
         fi
-        rg --version || fail 'ripgrep is still unavailable; check your Homebrew installation and PATH.'
+        show_rg_version || fail 'ripgrep is still unavailable; check your Homebrew installation and PATH.'
         command -v curl >/dev/null 2>&1 || fail 'curl is still unavailable.'
         command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || fail 'SHA256 checksum tools are missing.'
         return 0
@@ -150,7 +157,7 @@ prepare_runtime_dependencies() {
     done
     case "$manager" in dnf|yum) ip_package=iproute ;; *) ip_package=iproute2 ;; esac
     if dependencies_ready; then
-        rg --version
+        show_rg_version
         printf 'Reusing installed Bubblewrap, networking tools, ripgrep and download tools.\n'
         return 0
     fi
@@ -176,7 +183,7 @@ prepare_runtime_dependencies() {
         zypper) $elevated zypper --non-interactive install $packages || fail "Dependency installation failed. Run as administrator: $instruction" ;;
     esac
     dependencies_ready || fail "Dependencies remain unavailable: $missing. The system repository may be too old or commands may be missing from PATH. No third-party repositories were added."
-    rg --version
+    show_rg_version
     printf 'Dependency commands ready; native sandbox execution will be checked after unpacking.\n'
 }
 transfer() {
@@ -317,9 +324,16 @@ unset KYLER_INTERNAL_TOOL_WORKER KYLER_STARTUP_TRACE
 version=$("$binary_stage" --version) || fail 'The new binary cannot run on this machine; installed version was kept.'
 case "$version" in 'kyler '[0-9]*) ;; *) fail 'File did not report a kyler version.' ;; esac
 case "${version#kyler }" in *[!a-zA-Z0-9.+-]*) fail 'Invalid binary version.' ;; esac
-"$bundle/runtime/node" --version || fail 'Bundled Node.js cannot run on this machine; check its architecture and runtime requirements. Previous installation was kept.'
+if ! "$bundle/runtime/node" --version >> "$diagnostic_log" 2>&1; then
+    cat "$diagnostic_log" >&2
+    fail 'Bundled Node.js cannot run on this machine; check its architecture and runtime requirements. Previous installation was kept.'
+fi
 printf 'Checking native sandbox with the new binary as the current user...\n'
-"$binary_stage" doctor || fail 'Sandbox self-check failed. Previous installation and configuration were kept. Inspect the diagnostic above; check Linux user namespaces, AppArmor or container restrictions with your administrator.'
+if ! "$binary_stage" doctor >> "$diagnostic_log" 2>&1; then
+    cat "$diagnostic_log" >&2
+    fail 'Sandbox self-check failed. Previous installation and configuration were kept. Inspect the diagnostic above; check Linux user namespaces, AppArmor or container restrictions with your administrator.'
+fi
+printf 'Sandbox ready.\n'
 mkdir -p "$data_dir/versions"
 [ ! -e "$data_dir/current" ] || [ -L "$data_dir/current" ] || fail 'current must be a version symlink.'
 bundle_id=$(checksum "$bundle/SHA256SUMS")
@@ -411,6 +425,11 @@ if [ -n "$config_stage" ] && ! "$binary_stage" --config "$config_path" configure
 fi
 atomic_link "$version_dir" "$data_dir/current"
 atomic_link "$data_dir/current/bin/kyler" "$installed_binary"
+mkdir -p "$config_dir/logs"
+install_log_stage=$(mktemp "$config_dir/logs/.install-log.XXXXXX")
+cp "$diagnostic_log" "$install_log_stage"
+chmod 600 "$install_log_stage"
+mv -f "$install_log_stage" "$config_dir/logs/install.log"
 printf '\nInstalled %s\n' "$version"
 case "${SHELL:-}" in */zsh) startup_file=$HOME/.zshrc ;; */bash) startup_file=$HOME/.bashrc ;; *) startup_file=$HOME/.profile ;; esac
 [ ! -d "$startup_file" ] || fail "$startup_file is a directory."
@@ -435,6 +454,6 @@ if [ "$start_server" = true ]; then
     fi
 else printf '\nKyler · Service status and management\n\nServices not started.\n'; fi
 printf '\nInstallation complete.\n'
-printf '\nConfiguration: %s\n' "$config_path"
+printf '\nConfiguration: %s\nInstall log: %s/logs/install.log\n' "$config_path" "$config_dir"
 printf '\nService management:\n  Status:   kyler service status\n  Stop:     kyler service stop\n  Start:    kyler service start\n  Restart:  kyler service start --restart\n  Token:    kyler service token\n  Diagnose: kyler doctor\n  Logs:     kyler logs backend\n  Web logs: kyler logs web\n'
 printf '\nRun in your project:\n  kyler tui\n'

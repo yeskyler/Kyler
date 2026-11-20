@@ -395,21 +395,58 @@ else:
             if installed.exists():
                 subprocess.run([str(installed), "service", "stop"], env=environment, capture_output=True, timeout=15)
 
-    def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None, access_scope="1", preserve_addresses=False, advanced=False, direct=False):
+    def interactive_install(self, replies, expected=0, piped=False, redirected=False, bundle=None, access_scope="1", preserve_addresses=False, advanced=False, direct=False, native=False, complete=True):
         start_services = bundle is not None
         if bundle is None:
             bundle = local_bundle(self.root, KYLER_BINARY)
         replies = list(replies)
-        if not any(marker.startswith(b"[1] Provider") for marker, _ in replies):
-            replies.insert(0, (b"[1] Provider [", b"\n"))
+        if not native:
+            if not any(marker.startswith(b"[1] Provider") for marker, _ in replies):
+                replies.insert(0, (b"[1] Provider [", b"Custom\n"))
+            # Old scenarios describe the same choices; drive the new widgets with
+            # searchable labels and real keys instead of command-like model numbers.
+            converted=[]
+            searching=False
+            previous_field=None
+            previous_text=b""
+            for marker, answer in replies:
+                field=marker.split(b"] ",1)[-1].split(b" [",1)[0]
+                if field.startswith(b"Context window"):
+                    field=b"Context window (tokens or auto)"
+                text=answer.rstrip(b"\r\n")
+                if field in (b"API URL",b"Context window (tokens or auto)") and field==previous_field:
+                    answer=b"\x7f"*len(previous_text)+answer
+                previous_field=field
+                previous_text=text
+                if field==b"Provider" and answer.strip():
+                    choice={b"1":b"OpenAI",b"2":b"SiliconFlow",b"3":b"Custom"}.get(answer.strip(),answer.strip())
+                    answer=choice+b"\r"
+                if field==b"Model":
+                    value=answer.strip()
+                    if value.startswith(b"/"):
+                        answer=value[1:]
+                        searching=True
+                    elif searching and value.isdigit():
+                        answer=b"\r"
+                        searching=False
+                    elif value:
+                        converted.append((b"\xe2\x97\x86 Model",b"Enter model ID manually\r"))
+                        field=b"Model ID"
+                if answer==b"\x1b":
+                    answer=b"\x03"  # Cancellation scenarios use Ctrl+C; Esc now navigates back.
+                converted.append((b"\xe2\x97\x86 "+field,answer))
+            replies=converted
         addresses = []
-        if expected == 0:
+        if expected == 0 or native:
             if not preserve_addresses:
                 for _ in range(2):
                     with socket.socket() as listener:
                         listener.bind(("127.0.0.1", 0))
                         addresses.append("127.0.0.1:" + str(listener.getsockname()[1]))
-            replies += [(b"[1] Access scope", (access_scope + "\n").encode())]
+            if complete and expected == 0:
+                answer={"1":b"This machine only\r","2":b"Local network\r","":b"\r"}[access_scope]
+                replies += [(b"\xe2\x97\x86 Access scope", answer),(b"\xe2\x97\x86 Finish setup",b"\r")]
+
         import pty
         import select
         import termios
@@ -421,7 +458,12 @@ else:
                 environment.pop(name)
         if addresses:
             environment["KYLER_SERVER_BIND"], environment["KYLER_WEB_BIND"] = addresses
+        environment["NO_COLOR"]="1"
+        environment.pop("CLICOLOR_FORCE",None)
+        environment.pop("FORCE_COLOR",None)
         master, slave = pty.openpty()
+        import struct
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         before = termios.tcgetattr(slave)
 
         def assert_terminal_restored():
@@ -450,11 +492,17 @@ else:
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
+        command=["sh", "-c", 'echo "__WIZARD_CHILD_PID__:$$"; exec "$@"', "wizard-child", *command]
+        # Keep the session leader alive until terminal state has been checked. A
+        # pipe gate avoids canonical-mode input races and macOS PTY hangup resets.
+        release_read,release_write=os.pipe()
+        command=["sh", "-c", 'gate=$1; shift; "$@"; code=$?; echo "__WIZARD_EXIT__:$code"; read release <&"$gate"; exit "$code"', "wizard-terminal", str(release_read), *command]
         process = subprocess.Popen(
             command,
             cwd=self.root, env=environment, stdin=slave, stdout=slave, stderr=slave,
-            preexec_fn=controlling_terminal if piped or redirected else None,
+            preexec_fn=controlling_terminal, pass_fds=(release_read,),
         )
+        os.close(release_read)
         output = b""
         cursor = 0
         try:
@@ -462,40 +510,37 @@ else:
                 deadline = time.monotonic() + 15
                 while marker not in output[cursor:]:
                     if process.poll() is not None or time.monotonic() > deadline:
+                        Path("/tmp/kyler-inline-last-terminal.log").write_bytes(output)
                         self.fail("Installer did not show prompt " + repr(marker))
                     if select.select([master], [], [], 0.1)[0]:
                         output += os.read(master, 65536)
                 cursor = output.index(marker, cursor) + len(marker)
-                if (piped or redirected) and marker == b"[1] Access scope":
-                    assert_terminal_restored()
-                if marker.startswith(b"["):
-                    step = int(marker.split(b"]", 1)[0][1:])
-                    self.assertNotIn(("[%d] " % (step + 1)).encode(), output[cursor:], "A later prompt appeared before the current answer passed")
-                os.write(master, answer)
+                if answer == b"__SIGNAL_INTERRUPT__":
+                    import re, signal
+                    child=int(re.search(rb"__WIZARD_CHILD_PID__:(\d+)",output).group(1))
+                    os.kill(child,signal.SIGINT)
+                else:
+                    os.write(master, answer)
+                # Widgets redraw on every key. Let the submitted input settle before
+                # matching a repeated label, so a prior repaint cannot trigger the next
+                # answer while the previous Enter is still being processed.
+                settle=time.monotonic()+1
+                while time.monotonic()<settle and select.select([master],[],[],0.04)[0]:
+                    output+=os.read(master,65536)
             deadline = time.monotonic() + 15
-            while process.poll() is None and time.monotonic() < deadline:
+            while b"__WIZARD_EXIT__:" not in output and time.monotonic() < deadline:
                 if select.select([master], [], [], 0.05)[0]:
                     output += os.read(master, 65536)
-            self.assertEqual(process.poll(), expected)
-            while select.select([master], [], [], 0.05)[0]:
-                try:
-                    chunk = os.read(master, 65536)
-                except OSError as error:
-                    if error.errno == 5:
-                        break
-                    raise
-                if not chunk:
-                    break
-                output += chunk
-            # A session leader's exit hangs up its controlling PTY on macOS.
-            # Those cases check restoration above while the next prompt is live.
-            if not piped and not redirected:
-                assert_terminal_restored()
+            self.assertIn(b"__WIZARD_EXIT__:", output, "Wizard did not finish")
+            assert_terminal_restored()
+            os.write(release_write,b"\n")
+            self.assertEqual(process.wait(timeout=5), expected)
             return output
         finally:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+            os.close(release_write)
             os.close(master)
             os.close(slave)
 
@@ -513,8 +558,141 @@ else:
         config = (self.home / ".kyler/config.toml").read_text()
         self.assertIn("PTY_SECRET_TEST_KEY", config)
         self.assertNotIn("tools.tavily", config)
-        for marker in [b"[2] API URL", b"[3] API key", b"[4] Model", b"kyler tui", b"kyler service stop"]:
+        for marker in [b"API URL", b"API key", b"Model", b"kyler tui", b"kyler service stop"]:
             self.assertIn(marker, output)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_official_providers_skip_url_and_back_returns_to_provider(self):
+        self.install()
+        config = self.home / ".kyler/config.toml"
+        for label, adapter, url in [
+            (b"OpenAI", "openai", "https://api.openai.com/v1"),
+            (b"SiliconFlow", "siliconflow", "https://api.siliconflow.cn/v1"),
+        ]:
+            with self.subTest(provider=adapter):
+                config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="fixture"\nbase_url="http://127.0.0.1:1/v1"\napi_key="OFFICIAL_FIXTURE_KEY"\n')
+                output = self.interactive_install([
+                    ("◆ Provider".encode(), label+b"\r"),
+                    ("◆ API key".encode(), b"\x1b"),
+                    ("◆ Provider".encode(), b"\r"),
+                    ("◆ API key".encode(), b"\r"),
+                    ("◆ Model".encode(), b"\r"),
+                    ("◆ Access scope".encode(), b"\r"),
+                    ("◆ Finish setup".encode(), b"\r"),
+                ], native=True, direct=True, complete=False)
+                self.assertNotIn("◆ API URL".encode(), output)
+                self.assertNotIn(b"Auto-detect provider", output)
+                self.assertNotIn(b"OFFICIAL_FIXTURE_KEY", output)
+                saved=config.read_text()
+                self.assertIn('adapter = "'+adapter+'"', saved)
+                self.assertIn('base_url = "'+url+'"', saved)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_inline_back_navigation_and_review_save(self):
+        self.install()
+        config = self.home / ".kyler/config.toml"
+        config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="original"\nbase_url="http://127.0.0.1:1/v1"\napi_key="KEPT_WIZARD_KEY"\n[context]\ncontext_tokens=64000\n')
+        output = self.interactive_install([
+            ("◆ Provider".encode(), b"\r"),
+            ("◆ API URL".encode(), b"http://127.0.0.1:2/v1\r"),
+            ("◆ API key".encode(), b"\x1b"),
+            ("◆ API URL".encode(), b"http://127.0.0.1:3/v1\r"),
+            ("◆ API key".encode(), b"\r"),
+            ("◆ Model".encode(), b"Enter model ID manually\r"),
+            ("◆ Model ID".encode(), b"\x1b"),
+            ("◆ Model".encode(), b"Enter model ID manually\r"),
+            ("◆ Model ID".encode(), b"changed-model\r"),
+            ("◆ Access scope".encode(), b"\x1b[B\r"),
+            ("◆ Finish setup".encode(), b"\x1b"),
+            ("◆ Access scope".encode(), b"\x1b[A\r"),
+            ("◆ Finish setup".encode(), b"\r"),
+        ], native=True, direct=True, complete=False)
+        saved=config.read_text()
+        self.assertIn('model = "changed-model"', saved)
+        self.assertIn('base_url = "http://127.0.0.1:3/v1"', saved)
+        self.assertIn('context_tokens = 64000', saved)
+        self.assertNotIn('bind = "0.0.0.0:', saved)
+        self.assertNotIn(b"KEPT_WIZARD_KEY", output)
+        self.assertNotIn(b"\x1b[?1049h", output)
+        self.assertNotIn(b"\x1b[2J", output)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_inline_review_cancellation_preserves_configuration(self):
+        self.install()
+        config=self.home / ".kyler/config.toml"
+        config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="original"\nbase_url="http://127.0.0.1:1/v1"\napi_key="CANCEL_WIZARD_KEY"\n')
+        before=config.read_bytes()
+        output=self.interactive_install([
+            ("◆ Provider".encode(),b"\r"),
+            ("◆ API URL".encode(),b"\r"),
+            ("◆ API key".encode(),b"\r"),
+            ("◆ Model".encode(),b"\r"),
+            ("◆ Access scope".encode(),b"\r"),
+            ("◆ Finish setup".encode(),b"\x03"),
+        ], native=True, direct=True, complete=False, expected=130)
+        self.assertEqual(config.read_bytes(),before)
+        self.assertNotIn(b"CANCEL_WIZARD_KEY",output)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_inline_directory_loading_can_be_cancelled_without_saving(self):
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        release=threading.Event()
+        class SlowDirectory(BaseHTTPRequestHandler):
+            def log_message(self,*args): pass
+            def do_GET(self):
+                release.wait(timeout=10)
+                try:
+                    self.send_response(200);self.send_header("Content-Length","11");self.end_headers();self.wfile.write(b'{"data":[]}')
+                except OSError: pass
+        server=ThreadingHTTPServer(("127.0.0.1",0),SlowDirectory)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        self.install()
+        config=self.home / ".kyler/config.toml"
+        config.write_text('[llm]\nadapter="generic"\nmodel="original"\nbase_url="http://127.0.0.1:%s/v1"\napi_key="LOADING_WIZARD_KEY"\n' % server.server_port)
+        before=config.read_bytes()
+        try:
+            for interrupt in (b"\x03",b"__SIGNAL_INTERRUPT__"):
+                with self.subTest(interrupt=interrupt):
+                    output=self.interactive_install([
+                        ("◆ Provider".encode(),b"\r"),
+                        ("◆ API URL".encode(),b"\r"),
+                        ("◆ API key".encode(),b"\r"),
+                        ("Fetching model directory".encode(),interrupt),
+                    ],native=True,direct=True,complete=False,expected=130)
+                    self.assertEqual(config.read_bytes(),before)
+                    self.assertNotIn(b"LOADING_WIZARD_KEY",output)
+        finally:
+            release.set();server.shutdown();server.server_close();thread.join(timeout=2)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_inline_retry_action_can_fetch_from_a_manual_only_connection(self):
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        requests=[]
+        class Directory(BaseHTTPRequestHandler):
+            def log_message(self,*args): pass
+            def do_GET(self):
+                requests.append(self.path)
+                data=b'{"data":[{"id":"retry-model"}]}'
+                self.send_response(200);self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
+        server=ThreadingHTTPServer(("127.0.0.1",0),Directory)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        self.install();config=self.home / ".kyler/config.toml"
+        config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="original"\nbase_url="http://127.0.0.1:%s/v1"\napi_key="RETRY_WIZARD_KEY"\n' % server.server_port)
+        try:
+            output=self.interactive_install([
+                ("◆ Provider".encode(),b"\r"),
+                ("◆ API URL".encode(),b"\r"),
+                ("◆ API key".encode(),b"\r"),
+                ("◆ Model".encode(),b"Retry discovery\r"),
+                ("◇ Models: 1 available".encode(),b""),
+                ("◆ Model".encode(),b"retry-model\r"),
+            ],native=True,direct=True)
+            self.assertEqual(requests,["/v1/models"])
+            self.assertIn('model = "retry-model"',config.read_text())
+            self.assertIn('discover_models = false',config.read_text())
+            self.assertNotIn(b"RETRY_WIZARD_KEY",output)
+        finally:
+            server.shutdown();server.server_close();thread.join(timeout=2)
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
     def test_remote_model_selection_search_and_auto_capacity(self):
@@ -542,19 +720,19 @@ else:
         try:
             url = "http://127.0.0.1:%s/v1" % server.server_port
             output = self.interactive_install([
-                (b"[1] Provider [", b"openai\n"),
+                (b"[1] Provider [", b"Custom\n"),
                 (b"[2] API URL [", (url + "\n").encode()),
                 (b"[3] API key", b"DISCOVERY_TEST_KEY\r"),
                 (b"[4] Model [", b"/5.6\n"),
                 (b"[4] Model [", b"1\n"),
             ])
             self.assertEqual(requests, [("/v1/models", "Bearer DISCOVERY_TEST_KEY")])
-            self.assertIn(b"1050000 tokens", output)
+            self.assertIn(b"fallback", output.lower())
             self.assertNotIn(b"text-embedding-3-small", output)
             self.assertNotIn(b"DISCOVERY_TEST_KEY", output)
             saved = (self.home / ".kyler/config.toml").read_text()
             self.assertIn('model = "gpt-5.6-sol"', saved)
-            self.assertIn('adapter = "openai"', saved)
+            self.assertIn('adapter = "generic"', saved)
             self.assertIn("auto_model_window = true", saved)
             self.assertNotIn("context_tokens", saved)
             replies = [
@@ -569,7 +747,7 @@ else:
             mode["failed"] = True
             cached = self.interactive_install(replies, direct=True)
             self.assertIn(b"Using 2 cached model IDs", cached)
-            self.assertIn(b"1050000 tokens", cached)
+            self.assertIn(b"fallback", cached.lower())
             self.assertNotIn(b"DISCOVERY_TEST_KEY", cached)
             self.assertEqual(len(requests), 3)
         finally:
@@ -666,7 +844,7 @@ output_tokens = 8192
             (b"[3] API key", b"\r"),
             (b"[4] Model [", b"\n"),
         ], access_scope="", preserve_addresses=True)
-        self.assertIn(b"Access scope [2]", again)
+        self.assertIn(b"Local network", again)
         self.assertEqual((self.home / ".kyler/config.toml").read_text(), text)
 
     @unittest.skipUnless(os.name == "posix" and (KYLER_BINARY).is_file(), "requires PTY and kyler binary")
@@ -757,7 +935,7 @@ output_tokens = 8192
             (b"[4] Model [", b"\n"),
         ])
         self.assertIn(b"Saved key is invalid", output)
-        self.assertEqual(output.count(b"[3] API key"), 2)
+        self.assertEqual(output.count(b"\xe2\x97\x86 API key"), 2)
         self.assertNotIn(b"Backend URL", output)
         self.assertNotIn(b"invalid saved key", output)
         self.assertNotIn(b"REPLACEMENT_TEST_KEY", output)
@@ -913,10 +1091,10 @@ class BundleTests(unittest.TestCase):
             (b"[3] API key", b"WIZARD_TEST_KEY\r"),
             (b"[4] Model [deepseek-ai/DeepSeek-V4-Flash]", b"\n"),
         ], bundle=self.bundle("interactive"))
-        titles = [b"Configure model", b"Choose access scope", b"Service status and management"]
+        titles = ["Kyler · Setup".encode(), b"Review setup", b"Service status and management"]
         self.assertEqual([output.index(title) for title in titles], sorted(output.index(title) for title in titles))
         self.assertEqual(output.count(b"Local access:"), 1)
-        self.assertIn(b"Providers:", output)
+        self.assertIn(b"OpenAI", output)
         self.assertNotIn(b"WIZARD_TEST_KEY", output)
         self.assertNotIn(b"Backend URL", output)
         self.assertNotIn(b"next page", output.lower())
@@ -1000,11 +1178,11 @@ class SandboxSetupTests(unittest.TestCase):
                 path.write_text("#!/bin/sh\n" + body + "\n")
                 path.chmod(0o755)
             # A closed PATH ensures tests can never invoke the host package manager or sudo.
-            for utility in ("awk", "touch", "sh") + (("sleep",) if missing_network else ()):
+            for utility in ("awk", "touch", "sh", "head") + (("sleep",) if missing_network else ()):
                 (tools / utility).symlink_to(shutil.which(utility))
             text = INSTALLER.read_text()
-            function = text[text.index("prepare_runtime_dependencies() {"):text.index("transfer() {")]
-            env = dict(os.environ, PATH=str(tools), SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no", UPGRADE="yes" if upgrade else "no", MISSING_RG="yes" if missing_rg else "no")
+            function = text[text.index("show_rg_version() {"):text.index("checksum() {")] + text[text.index("prepare_runtime_dependencies() {"):text.index("transfer() {")]
+            env = dict(os.environ, diagnostic_log=str(root / "environment.log"), PATH=str(tools), SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no", UPGRADE="yes" if upgrade else "no", MISSING_RG="yes" if missing_rg else "no")
             result = subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\nprepare_runtime_dependencies'], env=env, capture_output=True, text=True, timeout=10)
             return result, log.read_text() if log.exists() else ""
 

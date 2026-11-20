@@ -10,233 +10,419 @@ use kyler_provider::{Adapter, AdapterKind, discovery::DiscoveredModel};
 
 pub(super) type Discovery = (String, ProviderSettings, Vec<DiscoveredModel>);
 
-pub(super) async fn configure(
-    prompts: &mut Prompts,
-    config: &mut AppConfig,
-    values: &mut toml::Value,
-    advanced: bool,
-) -> Result<Vec<Discovery>> {
-    let legacy = config.models.providers.is_empty();
-    let name = if legacy {
-        "default".into()
-    } else {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Step {
+    Connection,
+    Provider,
+    Url,
+    Key,
+    Model,
+    Manual,
+    Context,
+}
+/// All edits remain in this draft until the final review accepts them.
+pub(super) struct Wizard {
+    baseline: AppConfig,
+    values: toml::Value,
+    names: Vec<String>,
+    name: String,
+    provider: ProviderSettings,
+    selected: String,
+    profile: String,
+    window: Option<Option<usize>>,
+    step: Step,
+    directory_for: Option<(String, ProviderSettings)>,
+    cached: Vec<DiscoveredModel>,
+    models: Vec<DiscoveredModel>,
+    discovered: Option<Vec<DiscoveredModel>>,
+    force_fetch: bool,
+}
+impl Wizard {
+    pub fn new(config: &AppConfig, values: &toml::Value) -> Self {
         let names = config.models.providers.keys().cloned().collect::<Vec<_>>();
-        let current = config
+        let name = config
             .models
             .profiles
             .get(&config.models.default)
-            .map(|p| p.provider.as_str())
-            .unwrap_or(&names[0]);
-        if names.len() == 1 {
-            names[0].clone()
+            .map(|p| p.provider.clone())
+            .or_else(|| names.first().cloned())
+            .unwrap_or_else(|| "default".into());
+        let provider = if names.is_empty() {
+            ProviderSettings {
+                adapter: config.llm.adapter,
+                base_url: config.llm.base_url.clone(),
+                api_key: config.llm.api_key.clone(),
+                api_key_env: None,
+                discover_models: config.llm.discover_models,
+            }
         } else {
-            prompts.connection(&names, current)?
+            config.models.providers[&name].clone()
+        };
+        let selected = if names.is_empty() {
+            config.llm.model.clone()
+        } else {
+            config
+                .models
+                .profiles
+                .get(&config.models.default)
+                .map(|p| p.model.clone())
+                .unwrap_or_default()
+        };
+        Self {
+            baseline: config.clone(),
+            values: values.clone(),
+            step: if names.len() > 1 {
+                Step::Connection
+            } else {
+                Step::Provider
+            },
+            names,
+            name,
+            provider,
+            selected,
+            profile: config.models.default.clone(),
+            window: None,
+            directory_for: None,
+            cached: Vec::new(),
+            models: Vec::new(),
+            discovered: None,
+            force_fetch: false,
         }
-    };
-    let mut provider = if legacy {
-        ProviderSettings {
-            adapter: config.llm.adapter,
-            base_url: config.llm.base_url.clone(),
-            api_key: config.llm.api_key.clone(),
-            api_key_env: None,
-            discover_models: config.llm.discover_models,
-        }
-    } else {
-        config.models.providers[&name].clone()
-    };
-    let previous = provider.clone();
-    provider.adapter = prompts.provider("Provider", provider.adapter)?;
-    let suggested = default_url(provider.adapter, &provider.base_url);
-    provider.base_url = prompts.api_url("API URL", &suggested)?;
-    provider.api_key = prompts.key("API key", &provider.api_key, false)?;
-    if provider.api_key.expose() != previous.api_key.expose() {
-        provider.api_key_env = None;
     }
-    let previous_model = if legacy {
-        config.llm.model.clone()
-    } else {
-        config
-            .models
-            .profiles
-            .get(&config.models.default)
-            .filter(|p| p.provider == name)
-            .map(|p| p.model.clone())
-            .unwrap_or_default()
-    };
-    let adapter = Adapter::resolve(provider.adapter, &provider.base_url);
-    let cached = ModelRegistry::cached_model_ids(config, &name, &provider);
-    let mut models = cached.clone();
-    let mut discovered = None;
-    let mut fetch = provider.discover_models;
-    let selected = loop {
-        if fetch {
-            eprintln!("Fetching model directory (no generation request)...");
-            match tokio::time::timeout(
-                Duration::from_secs(8),
-                kyler_provider::discovery::list_models(
-                    &provider.base_url,
-                    provider.api_key.expose(),
-                    adapter,
-                ),
-            )
-            .await
-            {
+    pub fn edit_model(&mut self) {
+        self.step = Step::Model;
+    }
+    fn previous(&mut self) -> Result<()> {
+        self.step = match self.step {
+            Step::Connection => return Err(super::input::cancelled()),
+            Step::Provider if self.names.len() > 1 => Step::Connection,
+            Step::Provider => return Err(super::input::cancelled()),
+            Step::Url => Step::Provider,
+            Step::Key if self.provider.adapter == AdapterKind::Generic => Step::Url,
+            Step::Key => Step::Provider,
+            Step::Model => Step::Key,
+            Step::Manual | Step::Context => Step::Model,
+        };
+        Ok(())
+    }
+    async fn load_directory(&mut self, prompts: &mut Prompts) -> Result<()> {
+        self.cached = ModelRegistry::cached_model_ids(&self.baseline, &self.name, &self.provider);
+        self.models = self.cached.clone();
+        self.discovered = None;
+        let force_fetch = std::mem::take(&mut self.force_fetch);
+        if self.provider.discover_models || force_fetch {
+            let adapter = Adapter::resolve(self.provider.adapter, &self.provider.base_url);
+            let response = prompts
+                .loading(
+                    "Fetching model directory…",
+                    tokio::time::timeout(
+                        Duration::from_secs(8),
+                        kyler_provider::discovery::list_models(
+                            &self.provider.base_url,
+                            self.provider.api_key.expose(),
+                            adapter,
+                        ),
+                    ),
+                )
+                .await?;
+            match response {
                 Ok(Ok(entries)) => {
-                    models = entries
+                    self.models = entries
                         .into_iter()
                         .filter(|m| adapter.selectable_model(&m.id))
                         .collect();
-                    discovered = Some(models.clone());
-                    eprintln!("Available chat models: {}", models.len());
+                    self.discovered = Some(self.models.clone());
+                    eprintln!("◇ Models: {} available", self.models.len());
                 }
-                Ok(Err(error)) => {
-                    eprintln!(
-                        "Model directory unavailable: {error}. Use cached models or enter an ID manually."
-                    );
-                    models = cached.clone();
-                }
-                Err(_) => {
-                    eprintln!(
-                        "Model directory timed out. Use cached models or enter an ID manually."
-                    );
-                    models = cached.clone();
-                }
+                Ok(Err(error)) => eprintln!(
+                    "◇ Model directory unavailable: {error}. Choose retry, cached models, or manual entry."
+                ),
+                Err(_) => eprintln!(
+                    "◇ Model directory timed out. Choose retry, cached models, or manual entry."
+                ),
             }
         }
-        if !cached.is_empty() && discovered.is_none() {
-            eprintln!("Using {} cached model IDs.", cached.len());
+        if self.discovered.is_none() && !self.cached.is_empty() {
+            eprintln!("◇ Using {} cached model IDs", self.cached.len());
         }
-        match prompts.model_choice(&previous_model, &models, !cached.is_empty())? {
-            ModelChoice::Selected(model) => break model,
-            ModelChoice::Retry => fetch = true,
-            ModelChoice::Cached => {
-                models = cached.clone();
-                fetch = false;
+        self.directory_for = Some((self.name.clone(), self.provider.clone()));
+        Ok(())
+    }
+    fn directory_matches(&self) -> bool {
+        self.directory_for.as_ref().is_some_and(|(name, p)| {
+            name == &self.name
+                && p.adapter == self.provider.adapter
+                && p.base_url == self.provider.base_url
+                && p.api_key.expose() == self.provider.api_key.expose()
+        })
+    }
+    fn choose(&mut self, id: String) {
+        if id != self.selected {
+            self.window = None;
+        }
+        self.selected = id;
+        if !self.names.is_empty() {
+            self.profile = self
+                .baseline
+                .models
+                .profiles
+                .get(&self.baseline.models.default)
+                .filter(|p| p.provider == self.name && p.model == self.selected)
+                .map(|_| self.baseline.models.default.clone())
+                .or_else(|| {
+                    self.baseline
+                        .models
+                        .profiles
+                        .iter()
+                        .find(|(_, p)| p.provider == self.name && p.model == self.selected)
+                        .map(|(n, _)| n.clone())
+                })
+                .unwrap_or_else(|| format!("setup_{}", uuid::Uuid::new_v4().simple()));
+        }
+    }
+    pub async fn run(
+        &mut self,
+        prompts: &mut Prompts,
+        config: &mut AppConfig,
+        values: &mut toml::Value,
+        advanced: bool,
+    ) -> Result<Vec<Discovery>> {
+        loop {
+            let result: Result<bool> = match self.step {
+                Step::Connection => prompts.connection(&self.names, &self.name).map(|name| {
+                    if name != self.name {
+                        self.provider = self.baseline.models.providers[&name].clone();
+                        self.selected = self
+                            .baseline
+                            .models
+                            .profiles
+                            .values()
+                            .find(|p| p.provider == name)
+                            .map(|p| p.model.clone())
+                            .unwrap_or_default();
+                        self.window = None;
+                        self.name = name;
+                    }
+                    self.step = Step::Provider;
+                    false
+                }),
+                Step::Provider => prompts
+                    .provider("Provider", wizard_adapter(&self.provider))
+                    .map(|kind| {
+                        self.provider.base_url = default_url(kind, &self.provider.base_url);
+                        self.provider.adapter = kind;
+                        self.step = if kind == AdapterKind::Generic {
+                            Step::Url
+                        } else {
+                            Step::Key
+                        };
+                        false
+                    }),
+                Step::Url => prompts
+                    .api_url("API URL", &self.provider.base_url)
+                    .map(|url| {
+                        self.provider.base_url = url;
+                        self.step = Step::Key;
+                        false
+                    }),
+                Step::Key => prompts
+                    .key("API key", &self.provider.api_key, false)
+                    .map(|key| {
+                        if key.expose() != self.provider.api_key.expose() {
+                            self.provider.api_key_env = None;
+                        }
+                        self.provider.api_key = key;
+                        self.step = Step::Model;
+                        false
+                    }),
+                Step::Model => {
+                    if !self.directory_matches() {
+                        if let Err(e) = self.load_directory(prompts).await {
+                            if e.code == super::input::BACK {
+                                self.step = Step::Key;
+                                continue;
+                            }
+                            return Err(e);
+                        }
+                    }
+                    match prompts.model_choice(
+                        &self.selected,
+                        &self.models,
+                        !self.cached.is_empty(),
+                    ) {
+                        Ok(ModelChoice::Selected(id)) => {
+                            self.choose(id);
+                            if advanced {
+                                self.step = Step::Context;
+                            }
+                            Ok(!advanced)
+                        }
+                        Ok(ModelChoice::Manual) => {
+                            self.step = Step::Manual;
+                            Ok(false)
+                        }
+                        Ok(ModelChoice::Retry) => {
+                            self.directory_for = None;
+                            self.force_fetch = true;
+                            Ok(false)
+                        }
+                        Ok(ModelChoice::Cached) => {
+                            self.models = self.cached.clone();
+                            Ok(false)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                Step::Manual => prompts.manual_model(&self.selected).map(|id| {
+                    self.choose(id);
+                    self.step = if advanced { Step::Context } else { Step::Model };
+                    !advanced
+                }),
+                Step::Context => {
+                    let (draft, _) = self.project();
+                    let (policy, automatic) = window_policy(&draft);
+                    prompts
+                        .context_window(
+                            "Context window (tokens or auto)",
+                            (!automatic).then_some(policy.context_tokens),
+                            &policy,
+                        )
+                        .map(|window| {
+                            self.window = Some(window);
+                            true
+                        })
+                }
+            };
+            match result {
+                Err(e) if e.code == super::input::BACK => self.previous()?,
+                Err(e) => return Err(e),
+                Ok(true) => {
+                    let (draft, raw) = self.project();
+                    *config = draft;
+                    *values = raw;
+                    self.step = if advanced { Step::Context } else { Step::Model };
+                    return Ok(self
+                        .discovered
+                        .clone()
+                        .map(|models| vec![(self.name.clone(), self.provider.clone(), models)])
+                        .unwrap_or_default());
+                }
+                Ok(false) => {}
             }
         }
-    };
-    let connection_changed =
-        provider.adapter != previous.adapter || provider.base_url != previous.base_url;
-    if legacy {
-        let changed = connection_changed || selected != previous_model;
-        if changed {
-            config.llm.capabilities = Default::default();
-            config.llm.reasoning_effort = None;
-            config.llm.output_token_parameter = OutputTokenParameter::Auto;
-            clear_model_fields(values.get_mut("llm"));
-        }
-        config.llm.model = selected.clone();
-        config.llm.base_url = provider.base_url.clone();
-        config.llm.api_key = provider.api_key.clone();
-        config.llm.adapter = provider.adapter;
-        if advanced {
-            let chosen = prompts.context_window(
-                "Context window (tokens or auto)",
-                (!config.context.auto_model_window).then_some(config.context.context_tokens),
-                &ContextPolicy::from(&config.context),
-            )?;
-            config.context.auto_model_window = chosen.is_none();
-            if let Some(tokens) = chosen {
-                config.context.context_tokens = tokens;
+    }
+    fn project(&self) -> (AppConfig, toml::Value) {
+        let mut config = self.baseline.clone();
+        let mut values = self.values.clone();
+        if self.names.is_empty() {
+            let changed = config.llm.adapter != self.provider.adapter
+                || config.llm.base_url != self.provider.base_url
+                || config.llm.model != self.selected;
+            if changed {
+                config.llm.capabilities = Default::default();
+                config.llm.reasoning_effort = None;
+                config.llm.output_token_parameter = OutputTokenParameter::Auto;
+                clear_model_fields(values.get_mut("llm"));
             }
+            config.llm.model = self.selected.clone();
+            config.llm.base_url = self.provider.base_url.clone();
+            config.llm.api_key = self.provider.api_key.clone();
+            config.llm.adapter = self.provider.adapter;
+            if let Some(window) = self.window {
+                config.context.auto_model_window = window.is_none();
+                if let Some(n) = window {
+                    config.context.context_tokens = n;
+                }
+            }
+        } else {
+            let old = &self.baseline.models.providers[&self.name];
+            let changed =
+                old.adapter != self.provider.adapter || old.base_url != self.provider.base_url;
+            let profile = config
+                .models
+                .profiles
+                .entry(self.profile.clone())
+                .or_insert_with(|| ModelProfile {
+                    provider: self.name.clone(),
+                    model: self.selected.clone(),
+                    auto_context_window: true,
+                    context_tokens: config.context.context_tokens,
+                    output_tokens: config.context.output_tokens,
+                    reasoning_effort: None,
+                    capabilities: Default::default(),
+                    output_token_parameter: OutputTokenParameter::Auto,
+                });
+            if changed {
+                profile.capabilities = Default::default();
+                profile.reasoning_effort = None;
+                profile.output_token_parameter = OutputTokenParameter::Auto;
+                clear_model_fields(
+                    values
+                        .get_mut("models")
+                        .and_then(|v| v.get_mut("profiles"))
+                        .and_then(|v| v.get_mut(&self.profile)),
+                );
+            }
+            if let Some(window) = self.window {
+                profile.auto_context_window = window.is_none();
+                if let Some(n) = window {
+                    profile.context_tokens = n;
+                }
+            }
+            config.models.default = self.profile.clone();
+            config
+                .models
+                .providers
+                .insert(self.name.clone(), self.provider.clone());
         }
-        summary(
-            adapter,
-            &selected,
-            &config.llm.capabilities,
-            config.llm.reasoning_effort,
-            &ContextPolicy::from(&config.context),
-            config.context.auto_model_window,
-        )?;
-    } else {
-        let selected_profile = config
-            .models
-            .profiles
-            .get(&config.models.default)
-            .filter(|p| p.provider == name && p.model == selected)
-            .map(|_| config.models.default.clone())
-            .or_else(|| {
-                config
-                    .models
-                    .profiles
-                    .iter()
-                    .find(|(_, p)| p.provider == name && p.model == selected)
-                    .map(|(n, _)| n.clone())
-            })
-            .unwrap_or_else(|| format!("setup_{}", uuid::Uuid::new_v4().simple()));
-        let profile = config
-            .models
-            .profiles
-            .entry(selected_profile.clone())
-            .or_insert_with(|| ModelProfile {
-                provider: name.clone(),
-                model: selected.clone(),
-                auto_context_window: true,
-                context_tokens: config.context.context_tokens,
-                output_tokens: config.context.output_tokens,
-                reasoning_effort: None,
-                capabilities: Default::default(),
-                output_token_parameter: OutputTokenParameter::Auto,
-            });
-        if connection_changed {
-            profile.capabilities = Default::default();
-            profile.reasoning_effort = None;
-            profile.output_token_parameter = OutputTokenParameter::Auto;
-            clear_model_fields(
-                values
-                    .get_mut("models")
-                    .and_then(|v| v.get_mut("profiles"))
-                    .and_then(|v| v.get_mut(&selected_profile)),
-            );
-        }
-        let mut policy = ContextPolicy::from(&config.context);
+        (config, values)
+    }
+}
+fn window_policy(config: &AppConfig) -> (ContextPolicy, bool) {
+    let mut policy = ContextPolicy::from(&config.context);
+    if let Some(profile) = config.models.profiles.get(&config.models.default) {
         policy.context_tokens = profile.context_tokens;
         policy.output_tokens = profile.output_tokens;
-        if advanced {
-            let chosen = prompts.context_window(
-                "Context window (tokens or auto)",
-                (!profile.auto_context_window).then_some(profile.context_tokens),
-                &policy,
-            )?;
-            profile.auto_context_window = chosen.is_none();
-            if let Some(tokens) = chosen {
-                profile.context_tokens = tokens;
-                policy.context_tokens = tokens;
-            }
-        }
-        summary(
-            adapter,
-            &selected,
-            &profile.capabilities,
-            profile.reasoning_effort,
-            &policy,
-            profile.auto_context_window,
-        )?;
-        config.models.default = selected_profile;
-        config
-            .models
-            .providers
-            .insert(name.clone(), provider.clone());
+        (policy, profile.auto_context_window)
+    } else {
+        (policy, config.context.auto_model_window)
     }
-    Ok(discovered
-        .map(|models| vec![(name, provider, models)])
-        .unwrap_or_default())
+}
+pub(super) fn review(config: &AppConfig) -> Result<()> {
+    let settings = config.effective_models();
+    let profile = settings
+        .profiles
+        .get(&settings.default)
+        .ok_or_else(|| CliError::new(2, "Select a model before saving"))?;
+    let provider = &settings.providers[&profile.provider];
+    eprintln!(
+        "\n┌  Review setup\n│  API URL: {}\n│  API key: Configured",
+        provider.base_url
+    );
+    summary(
+        Adapter::resolve(provider.adapter, &provider.base_url),
+        &profile.model,
+        &profile.capabilities,
+        profile.reasoning_effort,
+        &window_policy(config).0,
+        window_policy(config).1,
+    )
+}
+fn wizard_adapter(provider: &ProviderSettings) -> AdapterKind {
+    let inferred = Adapter::resolve(AdapterKind::Auto, &provider.base_url).0;
+    if provider.adapter == AdapterKind::Generic || inferred == AdapterKind::Generic {
+        AdapterKind::Generic
+    } else if provider.adapter == AdapterKind::Auto {
+        inferred
+    } else {
+        provider.adapter
+    }
 }
 fn default_url(kind: AdapterKind, current: &str) -> String {
-    let old = Adapter::resolve(AdapterKind::Auto, current).0;
-    if current.is_empty()
-        || (old != AdapterKind::Generic
-            && old != kind
-            && kind != AdapterKind::Auto
-            && kind != AdapterKind::Generic)
-    {
-        match kind {
-            AdapterKind::Openai => "https://api.openai.com/v1".into(),
-            AdapterKind::Siliconflow => "https://api.siliconflow.cn/v1".into(),
-            _ => current.into(),
-        }
-    } else {
-        current.into()
+    match kind {
+        AdapterKind::Openai => "https://api.openai.com/v1".into(),
+        AdapterKind::Siliconflow => "https://api.siliconflow.cn/v1".into(),
+        _ => current.into(),
     }
 }
 fn clear_model_fields(value: Option<&mut toml::Value>) {
@@ -344,6 +530,39 @@ pub(super) fn save_cache(config: &AppConfig, discovered: Vec<Discovery>) {
 mod tests {
     use super::*;
     #[test]
+    fn editing_a_draft_model_does_not_accumulate_profiles_or_publish_secrets() {
+        let config = kyler_config::loader::parse(
+            r#"[models]
+default="original"
+[models.providers.local]
+base_url="http://localhost:1234/v1"
+api_key="fixture-private"
+[models.profiles.original]
+provider="local"
+model="original"
+context_tokens=64000
+output_tokens=8192
+"#,
+        )
+        .unwrap();
+        let raw = toml::from_str("[models]\ndefault=\"original\"\n").unwrap();
+        let mut wizard = Wizard::new(&config, &raw);
+        wizard.choose("draft-one".into());
+        assert_eq!(wizard.project().0.models.profiles.len(), 2);
+        wizard.choose("draft-two".into());
+        let (projected, _) = wizard.project();
+        assert_eq!(projected.models.profiles.len(), 2);
+        assert!(
+            !projected
+                .models
+                .profiles
+                .values()
+                .any(|p| p.model == "draft-one")
+        );
+        assert_eq!(config.models.profiles.len(), 1);
+        assert_eq!(config.models.default, "original");
+    }
+    #[test]
     fn window_serialization_distinguishes_fallback_from_manual_override() {
         let mut settings = toml::Table::new();
         settings.insert("context_tokens".into(), 64000.into());
@@ -360,14 +579,33 @@ mod tests {
         assert_eq!(settings["auto_model_window"].as_bool(), Some(false));
     }
     #[test]
-    fn provider_selection_suggests_official_urls_without_replacing_custom_proxies() {
+    fn custom_connections_default_to_custom_and_back_navigation_skips_fixed_urls() {
+        let config = AppConfig::default();
+        let mut wizard = Wizard::new(&config, &toml::Value::Table(Default::default()));
+        wizard.provider.adapter = AdapterKind::Openai;
+        wizard.provider.base_url = "http://localhost:1234/v1".into();
+        assert_eq!(wizard_adapter(&wizard.provider), AdapterKind::Generic);
+        wizard.step = Step::Key;
+        wizard.previous().unwrap();
+        assert!(matches!(wizard.step, Step::Provider));
+        wizard.provider.adapter = AdapterKind::Generic;
+        wizard.step = Step::Key;
+        wizard.previous().unwrap();
+        assert!(matches!(wizard.step, Step::Url));
+        assert_eq!(
+            default_url(AdapterKind::Generic, "http://localhost:1234/v1"),
+            "http://localhost:1234/v1"
+        );
+    }
+    #[test]
+    fn provider_selection_uses_fixed_official_urls_and_preserves_custom_urls() {
         assert_eq!(
             default_url(AdapterKind::Openai, "https://api.siliconflow.cn/v1"),
             "https://api.openai.com/v1"
         );
         assert_eq!(
             default_url(AdapterKind::Siliconflow, "http://localhost:1234/v1"),
-            "http://localhost:1234/v1"
+            "https://api.siliconflow.cn/v1"
         );
     }
 }

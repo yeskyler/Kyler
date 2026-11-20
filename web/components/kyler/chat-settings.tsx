@@ -114,26 +114,6 @@ export function ModelThinkingControl() {
     return () => controller.abort();
   }, [session.session_id, ensureSession]);
 
-  async function refreshModels() {
-    if (busy || running) return;
-    setBusy(true);
-    setError("");
-    try {
-      setCatalog(await api<ModelCatalog>("models/reload", { method: "POST" }));
-      const bound = await ensureSession();
-      const [selected, reasoning] = await Promise.all([
-        api<SessionModel>(`sessions/${bound.session_id}/model`),
-        api<ThinkingState>(`sessions/${bound.session_id}/thinking`),
-      ]);
-      setModel(selected);
-      setThinking(normalizeThinking(reasoning));
-      setError(selected.error ?? "");
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
   async function selectModel(profile: string) {
     if (busy || running || !catalog?.models.some((entry) => entry.profile === profile)) return;
     setOpen(false);
@@ -146,6 +126,7 @@ export function ModelThinkingControl() {
         body: JSON.stringify({ profile }),
       });
       setModel(selected);
+      setThinking(undefined);
       setError(selected.error ?? "");
       setThinking(
         normalizeThinking(await api<ThinkingState>(`sessions/${bound.session_id}/thinking`)),
@@ -156,8 +137,8 @@ export function ModelThinkingControl() {
       setBusy(false);
     }
   }
-  async function selectThinking(level: ThinkingLevel | "default") {
-    if ((level !== "default" && !thinking?.levels.includes(level)) || busy || running) return;
+  async function selectThinking(level: ThinkingLevel) {
+    if (!thinking?.levels.includes(level) || busy || running) return;
     setOpen(false);
     setBusy(true);
     setError("");
@@ -167,7 +148,7 @@ export function ModelThinkingControl() {
         normalizeThinking(
           await api<ThinkingState>(`sessions/${bound.session_id}/thinking`, {
             method: "PUT",
-            body: JSON.stringify(level === "default" ? { use_default: true } : { level }),
+            body: JSON.stringify({ level }),
           }),
         ),
       );
@@ -178,11 +159,8 @@ export function ModelThinkingControl() {
     }
   }
   const modelName = model?.selected?.model ?? initialModel;
-  const label = !thinking?.supported
-    ? "Unavailable"
-    : thinking.follows_default
-      ? "Model default"
-      : thinkingLabels[thinking.level];
+  const supportsThinking = thinking?.supported && thinking.levels.length > 0;
+  const label = supportsThinking ? thinkingLabels[thinking.level] : "";
   return (
     <span className="min-w-0 shrink">
       <Menu.Root open={open} onOpenChange={setOpen}>
@@ -195,13 +173,13 @@ export function ModelThinkingControl() {
               disabled={running || busy}
               aria-label={`Model and thinking: ${modelName} ${label}`}
               aria-busy={busy}
-              title={error || `${modelName} · ${label}`}
+              title={error || [modelName, label].filter(Boolean).join(" · ")}
               className={`max-w-[55vw] gap-2 px-2 font-normal ${error ? "text-destructive" : "text-muted-foreground hover:text-foreground"}`}
             />
           }
         >
           <span className="min-w-0 truncate">{modelName}</span>
-          <span className="shrink-0">{label}</span>
+          {supportsThinking && <span className="shrink-0">{label}</span>}
         </Menu.Trigger>
         <Menu.Portal>
           <Menu.Positioner side="top" align="end" sideOffset={8} className="z-50">
@@ -209,20 +187,6 @@ export function ModelThinkingControl() {
               className="max-h-[min(32rem,70vh)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-lg outline-none"
               aria-label="Model and thinking settings"
             >
-              <Menu.Item
-                onClick={() => void refreshModels()}
-                disabled={busy || running}
-                className="rounded-lg px-3 py-2 text-sm data-[highlighted]:bg-accent"
-              >
-                {busy ? "Refreshing models…" : "Refresh models"}
-              </Menu.Item>
-              {catalog?.providers
-                ?.filter((p) => p.status === "stale")
-                .map((p) => (
-                  <p key={p.provider} className="px-3 py-1 text-xs text-muted-foreground">
-                    {p.provider}: refresh failed; using saved models.
-                  </p>
-                ))}
               <SettingsSubmenu label="Model" value={modelName}>
                 <Menu.RadioGroup aria-label="Model" value={model?.selected?.profile ?? ""}>
                   {catalog?.models.map((entry) => (
@@ -242,38 +206,26 @@ export function ModelThinkingControl() {
                   ))}
                 </Menu.RadioGroup>
               </SettingsSubmenu>
-              <SettingsSubmenu label="Thinking level" value={label}>
-                <Menu.RadioGroup
-                  aria-label="Thinking level"
-                  value={thinking?.follows_default ? "default" : (thinking?.level ?? "")}
-                >
-                  <Menu.RadioItem
-                    value="default"
-                    onClick={() => void selectThinking("default")}
-                    disabled={busy || running}
-                    className="flex min-h-9 items-center justify-between rounded-lg px-3 py-2 text-sm data-[highlighted]:bg-accent"
-                  >
-                    Model default
-                    <Menu.RadioItemIndicator>
-                      <CheckIcon className="size-3.5" aria-hidden />
-                    </Menu.RadioItemIndicator>
-                  </Menu.RadioItem>
-                  {(thinking?.levels ?? []).map((level) => (
-                    <Menu.RadioItem
-                      key={level}
-                      value={level}
-                      onClick={() => void selectThinking(level)}
-                      disabled={busy || running || !thinking?.levels.includes(level)}
-                      className="flex min-h-9 cursor-default items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-40"
-                    >
-                      {thinkingLabels[level]}
-                      <Menu.RadioItemIndicator>
-                        <CheckIcon className="size-3.5" aria-hidden />
-                      </Menu.RadioItemIndicator>
-                    </Menu.RadioItem>
-                  ))}
-                </Menu.RadioGroup>
-              </SettingsSubmenu>
+              {supportsThinking && (
+                <SettingsSubmenu label="Thinking level" value={label}>
+                  <Menu.RadioGroup aria-label="Thinking level" value={thinking?.level ?? ""}>
+                    {(thinking?.levels ?? []).map((level) => (
+                      <Menu.RadioItem
+                        key={level}
+                        value={level}
+                        onClick={() => void selectThinking(level)}
+                        disabled={busy || running || !thinking?.levels.includes(level)}
+                        className="flex min-h-9 cursor-default items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-40"
+                      >
+                        {thinkingLabels[level]}
+                        <Menu.RadioItemIndicator>
+                          <CheckIcon className="size-3.5" aria-hidden />
+                        </Menu.RadioItemIndicator>
+                      </Menu.RadioItem>
+                    ))}
+                  </Menu.RadioGroup>
+                </SettingsSubmenu>
+              )}
             </Menu.Popup>
           </Menu.Positioner>
         </Menu.Portal>

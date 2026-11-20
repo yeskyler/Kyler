@@ -25,10 +25,12 @@ supports explicit `--model`, `--base-url`, and `--api-key` overrides; supply cre
 through hidden setup input or process environment variables; command-line arguments are
 visible in shell history and process listings.
 
-`kyler configure` selects a provider, requests its model directory, and lets you
-search or choose a model. It does not send inference requests. Discovery failures
+`kyler configure` uses an inline keyboard wizard to select a provider, request its
+model directory, and search or choose a model. It does not send inference requests. Discovery failures
 allow cached IDs, retry, or manual input. Non-interactive setup uses the supplied
-configuration/environment and never requests a remote directory.
+configuration/environment and never requests a remote directory. In the wizard,
+Esc goes back, Ctrl+C cancels, and the final review can save, edit, or cancel the
+draft. API keys remain hidden, including completed-question summaries.
 
 New installations use `[context].auto_model_window = true`. The runtime uses
 verified capacity metadata when known, with `context_tokens` as a fallback budget
@@ -214,7 +216,7 @@ discover_models = true
 Providers can be configured without manual profiles. Discovery fetches `GET /models`
 (SiliconFlow adds `sub_type=chat`) on startup and every five minutes. It runs in the
 background, with at most four concurrent requests and a ten-second timeout per
-provider. Web's **Refresh models** and TUI's model reload also refresh the directory.
+provider. TUI's model reload also refreshes the directory.
 No inference request is used to discover or probe capabilities. The first discovered
 catalog chooses a default when none was configured; later refreshes do not silently
 replace that default or an explicit selection. If a selected model disappears,

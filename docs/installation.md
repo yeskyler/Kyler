@@ -143,17 +143,33 @@ inputs pass validation; no additional navigation confirmation is required.
 
 | Input | Requirement or default |
 | --- | --- |
-| Provider | Auto, OpenAI, SiliconFlow, or a generic compatible endpoint |
-| API URL | Official service URL or a custom proxy/local endpoint |
+| Provider | OpenAI, SiliconFlow, or Custom (OpenAI-compatible API) |
+| API URL | Custom only; official providers use fixed URLs |
 | API key | Required; input is hidden |
-| Model | Fetched directory with search, paging, numbered selection, and manual entry |
+| Model | Searchable keyboard selection, with manual entry and retry/cache actions |
 
-Setup fetches model metadata, never a generation request. Enter retains an existing
-value, and a saved key is identified without revealing it. The model picker accepts
-`/text` to search, `n`/`p` to page, `m` to enter an ID, and `r` to retry discovery.
-If discovery fails or times out, cached IDs or manual entry remain available.
+Provider choices are **OpenAI**, **SiliconFlow**, and **Custom (OpenAI-compatible API)**.
+OpenAI and SiliconFlow use their official API URLs without an address prompt. Only
+Custom asks for a base URL; use it for local servers and compatible gateways.
+Existing custom endpoints default to Custom.
+
+Setup is an inline terminal wizard built with Rust `inquire`. It keeps normal
+terminal history, uses arrow-key selection, and filters lists as you type. Completed
+questions collapse to one-line answers; API keys are never echoed. Enter continues,
+Esc returns to the previous step, and Ctrl+C cancels. At the first step Esc cancels.
+It does not switch to a full-screen alternate terminal buffer.
+
+Setup fetches model metadata, never a generation request. Loading has a progress
+indicator and supports Esc/Ctrl+C. If discovery fails or times out, choose **Retry
+discovery**, **Use cached models**, or **Enter model ID manually**. These actions
+remain visible even when a search has no model matches. Back-navigation keeps draft
+values and avoids refetching an unchanged connection's directory.
+
 For multiple configured providers, first select the connection to configure; other
-profiles remain intact. A newly selected model creates a profile when needed.
+profiles remain intact. Before saving, review the selected model, address, capacity,
+and access scope. Choose **Save and continue**, edit a previous step, or cancel.
+No configuration is replaced until this final choice. Unattended setup retains
+`--non-interactive` and does not open terminal widgets.
 
 The normal wizard does not ask for a context window. Known capacity follows provider
 capability rules; unknown capacity displays a clearly marked fallback budget. Existing
@@ -161,7 +177,7 @@ explicit window overrides are retained. Use `kyler configure --advanced` to supp
 manual token count (`128k` means 128000) or enter `auto` to restore automatic sizing.
 The wizard validates output, safety, and summary reservations. Thinking defaults follow
 the selected model; setup does not add a separate reasoning-level question.
-Esc cancels before the existing installation/configuration is replaced.
+Ctrl+C or **Cancel setup** exits without replacing the existing installation/configuration.
 
 ### Access scope and Web token
 
@@ -300,3 +316,10 @@ heading or press `Ctrl+O` to toggle the latest reasoning block; expanding retain
 the full text. A manual disclosure choice stays in effect as new fragments arrive.
 Completed live blocks show their elapsed thinking time. Restored history starts
 collapsed and does not invent timing information that was not saved.
+
+### Installation diagnostics
+
+Successful environment and sandbox checks show short status messages. Their detailed
+output is retained in `~/.kyler/logs/install.log` with private file permissions. Failed
+checks show the diagnostic needed to understand the failure. API-key input and the
+interactive configuration transcript are not written to this log.

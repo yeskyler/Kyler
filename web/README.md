@@ -278,10 +278,11 @@ validated parent-frame bridge (64 KiB, 256 keys). sessionStorage is scoped to th
 current frame. Neither grants access to application cookies or application storage.
 
 The composer offers a model and thinking menu. It displays the selected model,
-its supported reasoning levels, and a Model default option. Preferences are saved
+its effective reasoning level and the supported reasoning choices. Preferences are saved
 per session and provider/model identity for subsequent turns; generation keeps its
-bound settings. Refresh models updates the discovered directory. Provider adapters
-choose the corresponding request fields.
+bound settings. The menu uses the server model catalog and hides thinking controls
+when reasoning capabilities are unknown or unsupported. Provider adapters choose
+the corresponding request fields.
 
 Composer progress keeps a completed/total `Steps` control on the right while an
 unfinished plan is running. The centered strip shows the latest confirmed live

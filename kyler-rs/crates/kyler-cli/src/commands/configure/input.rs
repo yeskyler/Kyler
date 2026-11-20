@@ -1,68 +1,137 @@
-//! Interactive setup prompts with local validation and hidden credential entry.
+//! Inline setup controls with typed navigation and credential-safe terminal input.
 use crate::{CliError, Result};
 
-use std::io::{self, Write};
+use std::{
+    future::{Future, poll_fn},
+    io::{self, IsTerminal, Write},
+    pin::Pin,
+    task::Poll,
+    time::Duration,
+};
 
 use crossterm::{
     event::{DisableBracketedPaste, EnableBracketedPaste},
     execute, terminal,
 };
+use inquire::{
+    Select, Text,
+    error::InquireError,
+    ui::{Color, RenderConfig, Styled},
+};
 
 use kyler_config::{SecretString, models::ProviderSettings};
 use kyler_core::context::ContextPolicy;
 
-/// Each prompt completes its validation loop before the next step is printed.
-/// Plain terminal output remains in scrollback; setup never opens a full-screen view.
-#[derive(Default)]
-pub(super) struct Prompts {
-    completed: usize,
+pub(super) const BACK: u8 = 129;
+fn back() -> CliError {
+    CliError::new(BACK, "Return to the previous step")
 }
+pub(super) fn cancelled() -> CliError {
+    CliError::new(130, "Configuration cancelled.")
+}
+fn prompt_error(error: InquireError) -> CliError {
+    match error {
+        InquireError::OperationCanceled => back(),
+        InquireError::OperationInterrupted => cancelled(),
+        InquireError::IO(e) if e.kind() == io::ErrorKind::Interrupted => cancelled(),
+        InquireError::IO(e) => CliError::io(e),
+        _ => CliError::new(
+            2,
+            "Could not open the terminal wizard. Use --non-interactive for unattended setup.",
+        ),
+    }
+}
+fn theme() -> RenderConfig<'static> {
+    let mut config = RenderConfig::default();
+    let colored = std::env::var_os("NO_COLOR").is_none() && io::stderr().is_terminal();
+    config.prompt_prefix = if colored {
+        Styled::new("◆").with_fg(Color::LightCyan)
+    } else {
+        Styled::new("◆")
+    };
+    config.answered_prompt_prefix = if colored {
+        Styled::new("◇").with_fg(Color::LightGreen)
+    } else {
+        Styled::new("◇")
+    };
+    config.highlighted_option_prefix = Styled::new("›");
+    config.canceled_prompt_indicator = Styled::new("Back");
+    config
+}
+const HELP: &str = "↑↓ Select · Type to search · Enter Continue · Esc Back · Ctrl+C Cancel";
+pub(super) struct Prompts {
+    cancel: Pin<Box<dyn Future<Output = io::Result<()>> + Send>>,
+}
+#[derive(Clone)]
 pub(super) enum ModelChoice {
     Selected(String),
+    Manual,
     Retry,
     Cached,
 }
-impl Prompts {
-    pub fn section(&mut self, title: &str) {
-        self.completed = 0;
-        eprintln!("\nKyler · {title}\n");
+#[derive(Clone)]
+struct ModelOption {
+    label: String,
+    choice: ModelChoice,
+}
+impl std::fmt::Display for ModelOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
     }
-    fn step<T>(&mut self, label: &str, read: impl FnOnce(&str) -> Result<T>) -> Result<T> {
-        let label = format!("[{}] {label}", self.completed + 1);
-        let value = read(&label)?;
-        self.completed += 1;
-        Ok(value)
+}
+impl Prompts {
+    pub async fn new() -> Result<Self> {
+        // Register cancellation before a directory fetch can run in canonical terminal mode.
+        let mut cancel: Pin<Box<dyn Future<Output = io::Result<()>> + Send>> =
+            Box::pin(tokio::signal::ctrl_c());
+        poll_fn(|cx| {
+            if let Poll::Ready(result) = cancel.as_mut().poll(cx) {
+                result.map_err(CliError::io)?;
+                return Poll::Ready(Err(cancelled()));
+            }
+            Poll::Ready(Ok::<_, CliError>(()))
+        })
+        .await?;
+        Ok(Self { cancel })
+    }
+    pub fn section(&mut self, title: &str) {
+        eprintln!("\n┌  Kyler · {title}\n│  Enter Continue · Esc Back · Ctrl+C Cancel\n│");
+    }
+    pub fn select(&mut self, label: &str, options: Vec<String>, current: usize) -> Result<usize> {
+        Select::new(label, options)
+            .with_starting_cursor(current)
+            .with_page_size(7)
+            .with_help_message(HELP)
+            .with_render_config(theme())
+            .raw_prompt()
+            .map(|v| v.index)
+            .map_err(prompt_error)
     }
     pub fn provider(
         &mut self,
         label: &str,
         default: kyler_provider::AdapterKind,
     ) -> Result<kyler_provider::AdapterKind> {
-        self.step(label,|label| {
-            eprintln!("Providers: auto, openai, siliconflow, generic (1=OpenAI, 2=SiliconFlow, 3=Generic).");
-            let default=serde_json::to_value(default).map_err(|_|CliError::new(2,"Invalid adapter"))?;
-            loop {let value=prompt(label,default.as_str().unwrap_or("auto"))?;
-                match value.to_ascii_lowercase().as_str() {
-                    "auto"=>return Ok(kyler_provider::AdapterKind::Auto),
-                    "1"|"openai"=>return Ok(kyler_provider::AdapterKind::Openai),
-                    "2"|"siliconflow"=>return Ok(kyler_provider::AdapterKind::Siliconflow),
-                    "3"|"generic"=>return Ok(kyler_provider::AdapterKind::Generic),
-                    _=>eprintln!("Choose auto, openai, siliconflow, or generic."),
-                }
-            }
-        })
+        use kyler_provider::AdapterKind::*;
+        let kinds = [Openai, Siliconflow, Generic];
+        let index = self.select(
+            label,
+            vec![
+                "OpenAI".into(),
+                "SiliconFlow".into(),
+                "Custom (OpenAI-compatible API)".into(),
+            ],
+            kinds.iter().position(|k| *k == default).unwrap_or(0),
+        )?;
+        Ok(kinds[index])
     }
     pub fn connection(&mut self, names: &[String], default: &str) -> Result<String> {
-        self.step("Provider connection", |label| {
-            eprintln!("Connections: {}", names.join(", "));
-            loop {
-                let value = prompt(label, default)?;
-                if names.contains(&value) {
-                    return Ok(value);
-                }
-                eprintln!("Choose one of the configured provider names.");
-            }
-        })
+        let n = self.select(
+            "Provider connection",
+            names.to_vec(),
+            names.iter().position(|n| n == default).unwrap_or(0),
+        )?;
+        Ok(names[n].clone())
     }
     pub fn model_choice(
         &mut self,
@@ -70,61 +139,80 @@ impl Prompts {
         models: &[kyler_provider::discovery::DiscoveredModel],
         cached: bool,
     ) -> Result<ModelChoice> {
-        let label = format!("[{}] Model", self.completed + 1);
-        let mut query = String::new();
-        let mut offset = 0;
-        loop {
-            let filtered = models
-                .iter()
-                .filter(|m| m.id.to_lowercase().contains(&query))
-                .collect::<Vec<_>>();
-            for (i, m) in filtered.iter().enumerate().skip(offset).take(20) {
-                eprintln!("  {}. {}", i + 1, m.id);
-            }
-            eprintln!(
-                "Enter an ID or number; /text searches, n/p pages, m enters an ID, r retries{}.",
-                if cached { ", c uses cached models" } else { "" }
+        let mut options = models
+            .iter()
+            .map(|m| ModelOption {
+                label: m.id.clone(),
+                choice: ModelChoice::Selected(m.id.clone()),
+            })
+            .collect::<Vec<_>>();
+        if !default.is_empty() && !models.iter().any(|m| m.id == default) {
+            options.insert(
+                0,
+                ModelOption {
+                    label: format!("Keep current model · {default}"),
+                    choice: ModelChoice::Selected(default.into()),
+                },
             );
-            let value = prompt(&label, default)?;
-            match value.as_str() {
-                "r" => return Ok(ModelChoice::Retry),
-                "c" if cached => return Ok(ModelChoice::Cached),
-                "n" => {
-                    if offset + 20 < filtered.len() {
-                        offset += 20;
-                    }
-                    continue;
-                }
-                "p" => {
-                    offset = offset.saturating_sub(20);
-                    continue;
-                }
-                "m" => {
-                    let value = model("Model ID", default)?;
-                    self.completed += 1;
-                    return Ok(ModelChoice::Selected(value));
-                }
-                _ => {}
-            }
-            if let Some(search) = value.strip_prefix('/') {
-                query = search.to_lowercase();
-                offset = 0;
-                continue;
-            }
-            if let Ok(number) = value.parse::<usize>() {
-                if let Some(m) = number.checked_sub(1).and_then(|n| filtered.get(n)) {
-                    self.completed += 1;
-                    return Ok(ModelChoice::Selected(m.id.clone()));
-                }
-                eprintln!("Model number is outside the displayed directory.");
-                continue;
-            }
-            if valid_model_id(&value) {
-                self.completed += 1;
-                return Ok(ModelChoice::Selected(value));
-            }
-            eprintln!("Enter a model ID, or m for manual entry.");
         }
+        options.push(ModelOption {
+            label: "Enter model ID manually…".into(),
+            choice: ModelChoice::Manual,
+        });
+        options.push(ModelOption {
+            label: "Retry discovery".into(),
+            choice: ModelChoice::Retry,
+        });
+        if cached {
+            options.push(ModelOption {
+                label: "Use cached models".into(),
+                choice: ModelChoice::Cached,
+            });
+        }
+        let current = options
+            .iter()
+            .position(|o| matches!(&o.choice,ModelChoice::Selected(id) if id==default))
+            .unwrap_or(0);
+        let scorer = |query: &str, option: &ModelOption, label: &str, _: usize| {
+            if !matches!(option.choice, ModelChoice::Selected(_)) {
+                return Some(if label.to_lowercase().contains(&query.to_lowercase()) {
+                    0
+                } else {
+                    -1
+                });
+            }
+            label
+                .to_lowercase()
+                .contains(&query.to_lowercase())
+                .then_some(1)
+        };
+        Select::new("Model", options)
+            .with_starting_cursor(current)
+            .with_scorer(&scorer)
+            .with_page_size(7)
+            .with_help_message(HELP)
+            .with_render_config(theme())
+            .prompt()
+            .map(|o| o.choice)
+            .map_err(prompt_error)
+    }
+    pub fn manual_model(&mut self, default: &str) -> Result<String> {
+        Text::new("Model ID")
+            .with_default(default)
+            .with_help_message("Enter a model ID · Esc Back · Ctrl+C Cancel")
+            .with_validator(|v: &str| {
+                Ok(if valid_model_id(v.trim()) {
+                    inquire::validator::Validation::Valid
+                } else {
+                    inquire::validator::Validation::Invalid(
+                        "Enter a model ID with at most 256 characters.".into(),
+                    )
+                })
+            })
+            .with_render_config(theme())
+            .prompt()
+            .map(|id| id.trim().to_owned())
+            .map_err(prompt_error)
     }
     pub fn context_window(
         &mut self,
@@ -132,35 +220,58 @@ impl Prompts {
         default: Option<usize>,
         policy: &ContextPolicy,
     ) -> Result<Option<usize>> {
-        self.step(label, |label| {
-            loop {
-                let value = prompt(
-                    label,
-                    &default.map_or_else(|| "auto".into(), |n| n.to_string()),
-                )?;
-                if value.eq_ignore_ascii_case("auto") {
-                    return Ok(None);
-                }
-                match parse_context_window(&value, policy) {
-                    Ok(tokens) => return Ok(Some(tokens)),
-                    Err(message) => eprintln!("{message} Try again, or press Esc to cancel."),
-                }
-            }
-        })
+        let default = default.map_or_else(|| "auto".into(), |n| n.to_string());
+        let value = Text::new(label)
+            .with_default(&default)
+            .with_help_message("auto follows verified model capacity · Esc Back")
+            .with_validator(|v: &str| {
+                let v = v.trim();
+                Ok(if v.eq_ignore_ascii_case("auto") {
+                    inquire::validator::Validation::Valid
+                } else {
+                    match parse_context_window(v, policy) {
+                        Ok(_) => inquire::validator::Validation::Valid,
+                        Err(e) => inquire::validator::Validation::Invalid(e.into()),
+                    }
+                })
+            })
+            .with_render_config(theme())
+            .prompt()
+            .map_err(prompt_error)?;
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("auto") {
+            Ok(None)
+        } else {
+            parse_context_window(&value, policy)
+                .map(Some)
+                .map_err(|e| CliError::new(2, e))
+        }
     }
     pub fn api_url(&mut self, label: &str, default: &str) -> Result<String> {
-        self.step(label, |label| api_url(label, default))
+        Text::new(label)
+            .with_default(default)
+            .with_help_message("API base URL · Enter keeps current · Esc Back")
+            .with_validator(|v: &str| {
+                Ok(match validate_url(v.trim()) {
+                    Ok(()) => inquire::validator::Validation::Valid,
+                    Err(e) => inquire::validator::Validation::Invalid(e.into()),
+                })
+            })
+            .with_render_config(theme())
+            .prompt()
+            .map(|s| s.trim().trim_end_matches('/').into())
+            .map_err(prompt_error)
     }
     pub fn access_scope(&mut self, lan: bool) -> Result<bool> {
-        self.step("Access scope", |label| {
-            loop {
-                match prompt(label, if lan { "2" } else { "1" })?.as_str() {
-                    "1" => return Ok(false),
-                    "2" => return Ok(true),
-                    _ => eprintln!("Choose 1 for this machine or 2 for local network access."),
-                }
-            }
-        })
+        self.select(
+            "Access scope",
+            vec![
+                "This machine only · 127.0.0.1".into(),
+                "Local network · all interfaces".into(),
+            ],
+            usize::from(lan),
+        )
+        .map(|n| n == 1)
     }
     pub fn key(
         &mut self,
@@ -168,41 +279,183 @@ impl Prompts {
         existing: &SecretString,
         optional: bool,
     ) -> Result<SecretString> {
-        self.step(label, |label| key(label, existing, optional))
+        key(label, existing, optional)
+    }
+    pub async fn loading<T>(&mut self, label: &str, future: impl Future<Output = T>) -> Result<T> {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        struct LoadingGuard(Arc<AtomicBool>);
+        impl Drop for LoadingGuard {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+                let _ = terminal::disable_raw_mode();
+                eprint!("\r\x1b[2K");
+                let _ = io::stderr().flush();
+            }
+        }
+        terminal::enable_raw_mode().map_err(CliError::io)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let _guard = LoadingGuard(stop.clone());
+        let key_stop = stop.clone();
+        let mut keyboard = tokio::task::spawn_blocking(move || loading_key(key_stop));
+        tokio::pin!(future);
+        let mut ticks = tokio::time::interval(Duration::from_millis(100));
+        let mut frame = 0;
+        let mut key_finished = false;
+        let result = loop {
+            tokio::select! {
+                value=&mut future=>break Ok(value),
+                _=&mut self.cancel=>break Err(cancelled()),
+                exit=&mut keyboard=>{key_finished=true;break Err(exit.unwrap_or_else(|_|CliError::new(3,"Terminal input stopped")));},
+                _=ticks.tick()=>{let frames=["◐","◓","◑","◒"];eprint!("\r\x1b[2K{} {label} · Esc Back · Ctrl+C Cancel",frames[frame%frames.len()]);if let Err(e)=io::stderr().flush(){break Err(CliError::io(e));}frame+=1;}
+            }
+        };
+        stop.store(true, Ordering::Relaxed);
+        if !key_finished {
+            let _ = keyboard.await;
+        }
+        result
     }
 }
-
-fn prompt(label: &str, default: &str) -> Result<String> {
-    if default.is_empty() {
-        eprint!("{label}: ");
-    } else {
-        eprint!("{label} [{default}]: ");
+/// macOS /dev/tty readiness requires select(2); poll can report a non-readable
+/// event there. Check actual readability so no input worker blocks on a false event.
+#[cfg(unix)]
+fn input_ready(fd: std::os::fd::RawFd, timeout: i32) -> io::Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        if fd < 0 || fd as usize >= libc::FD_SETSIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Terminal descriptor is out of range",
+            ));
+        }
+        let mut reads: libc::fd_set = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::FD_SET(fd, &mut reads);
+        }
+        let mut duration = libc::timeval {
+            tv_sec: (timeout / 1000) as _,
+            tv_usec: ((timeout % 1000) * 1000) as _,
+        };
+        let ready = unsafe {
+            libc::select(
+                fd + 1,
+                &mut reads,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut duration,
+            )
+        };
+        if ready < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(ready > 0 && unsafe { libc::FD_ISSET(fd, &reads) })
+        }
     }
-    io::stderr().flush().map_err(CliError::io)?;
-    let mut line = String::new();
-    if io::stdin().read_line(&mut line).map_err(CliError::io)? == 0 || line.trim() == "\u{1b}" {
-        return Err(CliError::new(130, "Configuration cancelled."));
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut descriptor = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut descriptor, 1, timeout) };
+        if ready < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if descriptor.revents & (libc::POLLERR | libc::POLLNVAL | libc::POLLHUP) != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Terminal input closed",
+            ));
+        }
+        Ok(ready > 0 && descriptor.revents & libc::POLLIN != 0)
     }
-    let line = line.trim();
-    Ok(if line.is_empty() {
-        default.into()
-    } else {
-        line.into()
-    })
 }
-
+#[cfg(unix)]
+fn loading_key(stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> CliError {
+    use std::os::fd::AsFd;
+    let descriptor = match io::stdin().as_fd().try_clone_to_owned() {
+        Ok(fd) => fd,
+        Err(e) => return CliError::io(e),
+    };
+    loading_key_from_file(std::fs::File::from(descriptor), stop)
+}
+#[cfg(unix)]
+fn loading_key_from_file(
+    mut input: std::fs::File,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> CliError {
+    use std::{io::Read, os::fd::AsRawFd, sync::atomic::Ordering};
+    while !stop.load(Ordering::Relaxed) {
+        let ready = match input_ready(input.as_raw_fd(), 100) {
+            Ok(ready) => ready,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return CliError::io(e),
+        };
+        if ready {
+            let mut byte = [0];
+            if let Err(e) = input.read_exact(&mut byte) {
+                return CliError::io(e);
+            }
+            match byte[0] {
+                27 => {
+                    match input_ready(input.as_raw_fd(), 80) {
+                        Ok(false) => return back(),
+                        Err(_) => return cancelled(),
+                        Ok(true) => {}
+                    }
+                    if input.read_exact(&mut byte).is_err() {
+                        return cancelled();
+                    }
+                    if matches!(byte[0], b'[' | b'O') {
+                        for _ in 0..32 {
+                            if !input_ready(input.as_raw_fd(), 80).unwrap_or(false) {
+                                break;
+                            }
+                            if input.read_exact(&mut byte).is_err() {
+                                return cancelled();
+                            }
+                            if (0x40..=0x7e).contains(&byte[0]) {
+                                break;
+                            }
+                        }
+                    }
+                }
+                3 | 4 => return cancelled(),
+                _ => {}
+            }
+        }
+    }
+    cancelled()
+}
+#[cfg(not(unix))]
+fn loading_key(stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> CliError {
+    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+    use std::sync::atomic::Ordering;
+    while !stop.load(Ordering::Relaxed) {
+        match event::poll(Duration::from_millis(100)) {
+            Ok(true) => match event::read() {
+                Ok(Event::Key(k)) if k.code == KeyCode::Esc => return back(),
+                Ok(Event::Key(k))
+                    if matches!(k.code, KeyCode::Char('c' | 'd'))
+                        && k.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    return cancelled();
+                }
+                Err(e) => return CliError::io(e),
+                _ => {}
+            },
+            Err(e) => return CliError::io(e),
+            _ => {}
+        }
+    }
+    cancelled()
+}
 fn valid_model_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
-}
-
-fn model(label: &str, default: &str) -> Result<String> {
-    loop {
-        let value = prompt(label, default)?;
-        if valid_model_id(&value) {
-            return Ok(value);
-        }
-        eprintln!("Enter a model ID, such as deepseek-ai/DeepSeek-V4-Flash.");
-    }
 }
 
 fn parse_context_window(value: &str, policy: &ContextPolicy) -> std::result::Result<usize, String> {
@@ -245,16 +498,6 @@ fn validate_url(value: &str) -> std::result::Result<(), &'static str> {
     Ok(())
 }
 
-fn api_url(label: &str, default: &str) -> Result<String> {
-    loop {
-        let value = prompt(label, default)?;
-        match validate_url(&value) {
-            Ok(()) => return Ok(value.trim_end_matches('/').into()),
-            Err(message) => eprintln!("{message} Try again."),
-        }
-    }
-}
-
 fn normalize_key(value: &str) -> std::result::Result<&str, &'static str> {
     let value = value.trim();
     if value
@@ -278,15 +521,29 @@ fn key(label: &str, existing: &SecretString, optional: bool) -> Result<SecretStr
         let value = password(label, hint)?;
         match normalize_key(&value) {
             Ok("") if !existing.is_empty() => match normalize_key(existing.expose()) {
-                Ok(value) if !value.is_empty() => return Ok(SecretString::new(value)),
+                Ok(value) if !value.is_empty() => {
+                    key_done(label);
+                    return Ok(SecretString::new(value));
+                }
                 _ => eprintln!("Saved key is invalid. Paste a replacement."),
             },
-            Ok("") if optional => return Ok(SecretString::default()),
-            Ok("") => eprintln!("An API key is required. Paste it, or press Esc to cancel."),
-            Ok(value) => return Ok(SecretString::new(value)),
+            Ok("") if optional => {
+                key_done(label);
+                return Ok(SecretString::default());
+            }
+            Ok("") => eprintln!("An API key is required. Paste it, or press Esc to go back."),
+            Ok(value) => {
+                key_done(label);
+                return Ok(SecretString::new(value));
+            }
             Err(message) => eprintln!("{message}"),
         }
     }
+}
+
+fn key_done(label: &str) {
+    eprint!("\x1b[1A\r\x1b[2K◇ {label}: Configured\n");
+    let _ = io::stderr().flush();
 }
 
 fn password(label: &str, hint: &str) -> Result<String> {
@@ -301,7 +558,7 @@ fn password(label: &str, hint: &str) -> Result<String> {
     terminal::enable_raw_mode().map_err(CliError::io)?;
     let _guard = Guard;
     execute!(io::stderr(), EnableBracketedPaste).map_err(CliError::io)?;
-    eprint!("{label} [{hint}]: ");
+    eprint!("◆ {label} [{hint}]: ");
     io::stderr().flush().map_err(CliError::io)?;
     read_password()
 }
@@ -314,7 +571,6 @@ fn read_password() -> Result<String> {
         os::fd::{AsFd, AsRawFd},
     };
 
-    // poll(2) supports /dev/tty on macOS, unlike the event reader's kqueue registration.
     let mut input = File::from(
         io::stdin()
             .as_fd()
@@ -323,22 +579,12 @@ fn read_password() -> Result<String> {
     );
     collect_password(|timeout| {
         if let Some(timeout) = timeout {
-            let mut descriptor = libc::pollfd {
-                fd: input.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
             loop {
-                let ready = unsafe { libc::poll(&mut descriptor, 1, timeout) };
-                if ready == 0 {
-                    return Ok(None);
-                }
-                if ready > 0 {
-                    break;
-                }
-                let error = io::Error::last_os_error();
-                if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(CliError::io(error));
+                match input_ready(input.as_raw_fd(), timeout) {
+                    Ok(false) => return Ok(None),
+                    Ok(true) => break,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(CliError::io(e)),
                 }
             }
         }
@@ -382,7 +628,7 @@ fn collect_password(mut next: impl FnMut(Option<i32>) -> Result<Option<u8>>) -> 
             }
             27 => {
                 let Some(first) = next(Some(100))? else {
-                    return Err(CliError::new(130, "Configuration cancelled."));
+                    return Err(back());
                 };
                 if first != b'[' && first != b'O' {
                     continue;
@@ -417,7 +663,7 @@ fn read_password() -> Result<String> {
         match event::read().map_err(CliError::io)? {
             Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
                 KeyCode::Enter => return Ok(value),
-                KeyCode::Esc => return Err(CliError::new(130, "Configuration cancelled.")),
+                KeyCode::Esc => return Err(back()),
                 KeyCode::Char('c' | 'd') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Err(CliError::new(130, "Configuration cancelled."));
                 }
@@ -444,6 +690,31 @@ fn read_password() -> Result<String> {
 mod tests {
     use super::{normalize_key, validate_url};
 
+    #[cfg(unix)]
+    #[test]
+    fn loading_arrows_do_not_leak_into_the_next_prompt() {
+        use std::{
+            io::Write,
+            os::{fd::OwnedFd, unix::net::UnixStream},
+            sync::{Arc, atomic::AtomicBool},
+        };
+        for (bytes, expected) in [
+            (b"\x1b[B\x03".as_slice(), 130),
+            (b"\x1b".as_slice(), super::BACK),
+        ] {
+            let (reader, mut writer) = UnixStream::pair().unwrap();
+            writer.write_all(bytes).unwrap();
+            let fd: OwnedFd = reader.into();
+            assert_eq!(
+                super::loading_key_from_file(
+                    std::fs::File::from(fd),
+                    Arc::new(AtomicBool::new(false))
+                )
+                .code,
+                expected
+            );
+        }
+    }
     #[test]
     fn context_window_accepts_decimal_k_and_enforces_the_runtime_budget() {
         let policy = kyler_core::context::ContextPolicy::default();
@@ -492,7 +763,8 @@ mod tests {
             "first\nsecond"
         );
         assert_eq!(collect("ab\u{00e9}\u{7f}c\r".as_bytes()).unwrap(), "abc");
-        for cancelled in [b"\x1b".as_slice(), b"\x03", b"\x04", b""] {
+        assert_eq!(collect(b"\x1b").unwrap_err().code, super::BACK);
+        for cancelled in [b"\x03".as_slice(), b"\x04", b""] {
             assert_eq!(collect(cancelled).unwrap_err().code, 130);
         }
     }

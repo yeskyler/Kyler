@@ -88,54 +88,110 @@ pub async fn configure(
         config.web.enabled = true;
     }
     if interactive {
-        let mut prompts = Prompts::default();
-        prompts.section("Configure model");
-        eprintln!("Enter keeps current values. API keys are hidden.");
-        discovered = models::configure(&mut prompts, &mut config, &mut values, advanced).await?;
-        if addresses || enable_web || config.web.enabled {
-            prompts.section("Choose access scope");
-            eprintln!(
-                "1. This machine only (127.0.0.1)\n2. Local network (all network interfaces)"
-            );
-            let lan = prompts.access_scope(
-                !config.server.bind.ip().is_loopback()
-                    || (config.web.enabled && !config.web.bind.ip().is_loopback()),
-            )?;
-            let ip = if lan {
-                std::net::Ipv4Addr::UNSPECIFIED
-            } else {
-                std::net::Ipv4Addr::LOCALHOST
-            };
-            config.server.bind.set_ip(ip.into());
-            config.web.bind.set_ip(ip.into());
-            for (label, address, old, record) in [
-                ("Backend", config.server.bind, old_backend, "server.json"),
-                (
-                    "Web",
-                    config.web.bind,
-                    config_before_web(&values),
-                    "web.json",
-                ),
-            ] {
-                if label == "Web" && !config.web.enabled {
-                    continue;
+        #[derive(Clone, Copy)]
+        enum Page {
+            Model,
+            Access,
+            Review,
+        }
+        let mut prompts = Prompts::new().await?;
+        prompts.section("Setup");
+        let mut wizard = models::Wizard::new(&config, &values);
+        let scope = addresses || enable_web || config.web.enabled;
+        let mut lan = !config.server.bind.ip().is_loopback()
+            || (config.web.enabled && !config.web.bind.ip().is_loopback());
+        let mut page = Page::Model;
+        loop {
+            match page {
+                Page::Model => {
+                    discovered = wizard
+                        .run(&mut prompts, &mut config, &mut values, advanced)
+                        .await?;
+                    page = if scope { Page::Access } else { Page::Review };
                 }
-                if !address_available(address)
-                    && !(address.port() == old.port()
-                        && path.parent().unwrap().join(record).is_file())
-                {
-                    return Err(CliError::new(
-                        2,
-                        format!(
-                            "{label} port {} is unavailable. Stop its owner and run setup again.",
-                            address.port()
+                Page::Access => {
+                    match prompts.access_scope(lan) {
+                        Ok(value) => lan = value,
+                        Err(e) if e.code == input::BACK => {
+                            page = Page::Model;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                    let ip = if lan {
+                        std::net::Ipv4Addr::UNSPECIFIED
+                    } else {
+                        std::net::Ipv4Addr::LOCALHOST
+                    };
+                    config.server.bind.set_ip(ip.into());
+                    config.web.bind.set_ip(ip.into());
+                    for (label, address, old, record) in [
+                        ("Backend", config.server.bind, old_backend, "server.json"),
+                        (
+                            "Web",
+                            config.web.bind,
+                            config_before_web(&values),
+                            "web.json",
                         ),
-                    ));
+                    ] {
+                        if label == "Web" && !config.web.enabled {
+                            continue;
+                        }
+                        if !address_available(address)
+                            && !(address.port() == old.port()
+                                && path.parent().unwrap().join(record).is_file())
+                        {
+                            return Err(CliError::new(
+                                2,
+                                format!(
+                                    "{label} port {} is unavailable. Stop its owner and run setup again.",
+                                    address.port()
+                                ),
+                            ));
+                        }
+                    }
+                    config.client.server_url = kyler_config::web::connect_url(config.server.bind);
+
+                    page = Page::Review;
+                }
+                Page::Review => {
+                    models::review(&config)?;
+                    if scope {
+                        eprintln!(
+                            "│  Access: {}",
+                            if lan {
+                                "Local network"
+                            } else {
+                                "This machine only"
+                            }
+                        );
+                    }
+                    let mut choices = vec!["Save and continue".into(), "Edit model".into()];
+                    if scope {
+                        choices.push("Edit access scope".into());
+                    }
+                    choices.push("Cancel setup".into());
+                    match prompts.select("Finish setup", choices, 0) {
+                        Ok(0) => {
+                            eprintln!("└  Setup ready\n");
+                            break;
+                        }
+                        Ok(1) => {
+                            wizard.edit_model();
+                            page = Page::Model;
+                        }
+                        Ok(2) if scope => page = Page::Access,
+                        Ok(_) => return Err(input::cancelled()),
+                        Err(e) if e.code == input::BACK => {
+                            page = if scope { Page::Access } else { Page::Model };
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             }
-            config.client.server_url = kyler_config::web::connect_url(config.server.bind);
         }
     }
+
     if addresses || enable_web || config.web.enabled {
         if config.web.enabled && config.web.access_token.is_empty() {
             config.web.access_token = super::access::generate_token()?;
