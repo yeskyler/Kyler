@@ -60,7 +60,7 @@ impl Tool for MemoryTool {
         "memory"
     }
     fn description(&self) -> &str {
-        "Search active project facts; save only when the user explicitly asks to remember an approved fact. Use propose for inferred lessons/preferences, with applicability conditions and evidence. Candidates are excluded from automatic context until the user reviews their exact revision with the local learning CLI. List inspects scoped entries; delete requires expected_revision. draft_skill turns exact source memory revisions into an uninstalled user skill draft: provide complete SKILL.md as instructions, name and sources. It never enables or executes the draft. Never persist credentials, sensitive data, temporary progress or claims of verification without evidence."
+        "Search active project facts; save only when the user explicitly asks to remember an approved fact. Use propose for inferred lessons/preferences, with applicability conditions and evidence. Candidates are excluded from automatic context until the user reviews their exact revision in Memory or with the local learning CLI. List inspects scoped entries; delete requires expected_revision. draft_skill turns exact source memory revisions into an uninstalled user skill draft: provide complete SKILL.md as instructions, name and sources. It never enables or executes the draft. Never persist credentials, sensitive data, temporary progress or claims of verification without evidence."
     }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{
@@ -126,7 +126,7 @@ impl Tool for MemoryTool {
                     expected_fingerprint: args.expected_fingerprint,
                 })
                 .await?;
-            return Ok(json!({"draft":draft,"note":"Draft is not installed or enabled. Review it with kyler learning drafts show, then publish its exact fingerprint."}).to_string());
+            return Ok(json!({"draft":draft,"note":"Draft is not installed or enabled. The conversation displays a skill review card. Ask the user to inspect its files and choose Install skill, Request changes, or Discard. Never publish without their confirmation. The local kyler learning drafts CLI is also available."}).to_string());
         }
         tokio::task::spawn_blocking(move || {
             local_action(&store, &scope, &session, &execution, &call, args)

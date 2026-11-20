@@ -34,6 +34,7 @@ pub struct SkillManager {
     pub settings: SkillSettings,
     pub(super) catalogs: Mutex<BTreeMap<Option<PathBuf>, Arc<Mutex<Option<CachedCatalog>>>>>,
     pub(super) writes: Mutex<()>,
+    pub(super) reviews: Mutex<()>,
 }
 #[derive(Clone)]
 pub struct SkillSnapshot {
@@ -104,6 +105,7 @@ impl SkillManager {
             settings,
             catalogs: Mutex::new(BTreeMap::new()),
             writes: Mutex::new(()),
+            reviews: Mutex::new(()),
         })
     }
     pub(super) async fn catalog(

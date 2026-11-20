@@ -100,6 +100,10 @@ pub fn router(state: AppState) -> Router {
             "/v1/sessions/{session}/skills/drafts/{name}/publish",
             post(skills::publish),
         )
+        .route(
+            "/v1/sessions/{session}/skills/drafts/{name}/discard",
+            post(skills::discard),
+        )
         .route("/v1/sessions/{id}/tasks", get(tasks::list))
         .route(
             "/v1/sessions/{session}/tasks/{kind}/{id}",

@@ -110,6 +110,8 @@ pub struct DraftReviewDetails {
     pub scope: String,
     pub draft: SkillDraftDetails,
     pub installed_fingerprint: Option<String>,
+    #[serde(default)]
+    pub review_status: SkillDraftReviewStatus,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,4 +119,20 @@ pub struct PublishDraftRequest {
     pub expected_scope: String,
     pub fingerprint: String,
     pub expected_installed: Option<String>,
+}
+
+/// Review decisions are bound to the exact package fingerprint.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillDraftReviewStatus {
+    #[default]
+    Pending,
+    Installed,
+    Discarded,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscardDraftRequest {
+    pub expected_scope: String,
+    pub fingerprint: String,
 }

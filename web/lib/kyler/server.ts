@@ -118,7 +118,7 @@ export function permittedPath(path: string, method: string) {
     ["POST", `sessions/${id}/memory/review`],
     ["GET", `sessions/${id}/skills/drafts`],
     ["GET", `sessions/${id}/skills/drafts/[a-z0-9-]+`],
-    ["POST", `sessions/${id}/skills/drafts/[a-z0-9-]+/publish`],
+    ["POST", `sessions/${id}/skills/drafts/[a-z0-9-]+/(?:publish|discard)`],
     ["GET", `sessions/${id}/skills`],
     ["POST", `sessions/${id}/skills`],
     ["POST", `sessions/${id}/skills/reload`],

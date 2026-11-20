@@ -119,8 +119,8 @@ flowchart LR
 - Publication checks the draft fingerprint and, for replacements, the installed
   fingerprint. User skills can be available across sessions under existing
   enable/disable rules; memory remains bound to its resolved scope.
-- Web review lives in **Memory** and **Plugins → Skills → Drafts**. There is no
-  separate Learning page. The local CLI retains the `learning` command.
+- Memory review lives in **Memory**; skill proposals are reviewed in assistant-message
+  cards. There is no separate Learning page. The local CLI retains the `learning` command.
 
 Automatic semantic deduplication, source-change invalidation, full revision rollback,
 background learning jobs and automatic promotion/publication are not implemented.

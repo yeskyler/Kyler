@@ -12,10 +12,19 @@ use anyhow::{Context, Result, ensure};
 
 use kyler_config::SkillSettings;
 use kyler_protocol::api::skills::{
-    InstallSkillRequest, SaveSkillRequest, SkillInfo, SkillScope, SkillSource,
+    InstallSkillRequest, SaveSkillRequest, SkillDraftReviewStatus, SkillInfo, SkillScope,
+    SkillSource,
 };
 
 pub use kyler_protocol::api::skills::{SkillDraft, SkillDraftDetails};
+fn review_path(root: &Path, fingerprint: &str) -> Result<PathBuf> {
+    ensure!(
+        fingerprint.len() == 64 && fingerprint.bytes().all(|c| c.is_ascii_hexdigit()),
+        "Invalid skill review fingerprint"
+    );
+    let directory = root.join(".draft-reviews");
+    Ok(directory.join(format!("{fingerprint}.json")))
+}
 fn read_draft(root: &Path, name: &str, settings: &SkillSettings) -> Result<SkillDraftDetails> {
     ensure!(loader::safe_name(name), "invalid skill draft name");
     checked_directory(root)?;
@@ -56,6 +65,7 @@ fn read_draft(root: &Path, name: &str, settings: &SkillSettings) -> Result<Skill
 impl SkillManager {
     /// Drafts live outside discovery and cannot shadow or enable installed skills.
     pub async fn save_draft(&self, request: SaveSkillRequest) -> Result<SkillDraft> {
+        let _review = self.reviews.lock().await;
         ensure!(
             request.scope == SkillScope::User,
             "Skill drafts currently use user scope only"
@@ -121,21 +131,79 @@ impl SkillManager {
         fingerprint: &str,
         expected_installed: Option<String>,
     ) -> Result<SkillInfo> {
+        let _review = self.reviews.lock().await;
+        let draft = self.draft_details(name).await?;
+        ensure!(
+            self.draft_review_status(fingerprint).await? != SkillDraftReviewStatus::Discarded,
+            "Skill proposal was discarded"
+        );
+        ensure!(
+            draft.info.fingerprint == fingerprint,
+            "Skill draft changed; review the current fingerprint"
+        );
+        let info = self
+            .save(
+                None,
+                SaveSkillRequest {
+                    name: name.into(),
+                    scope: SkillScope::User,
+                    files: draft.files,
+                    expected_fingerprint: expected_installed,
+                },
+            )
+            .await?;
+        self.record_draft_review(fingerprint, SkillDraftReviewStatus::Installed)
+            .await?;
+        Ok(info)
+    }
+    pub async fn draft_review_status(&self, fingerprint: &str) -> Result<SkillDraftReviewStatus> {
+        let path = review_path(&self.destination(None, SkillScope::User)?, fingerprint)?;
+        tokio::task::spawn_blocking(move || {
+            checked_directory(path.parent().context("Missing skill review directory")?)?;
+            match fs::symlink_metadata(&path) {
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    return Ok(SkillDraftReviewStatus::Pending);
+                }
+                Err(error) => return Err(error.into()),
+                Ok(meta) => ensure!(
+                    meta.is_file() && !meta.file_type().is_symlink() && meta.len() < 64,
+                    "Invalid skill review record"
+                ),
+            }
+            Ok(serde_json::from_slice(&fs::read(path)?)?)
+        })
+        .await?
+    }
+    async fn record_draft_review(
+        &self,
+        fingerprint: &str,
+        status: SkillDraftReviewStatus,
+    ) -> Result<()> {
+        let path = review_path(&self.destination(None, SkillScope::User)?, fingerprint)?;
+        tokio::task::spawn_blocking(move || {
+            let root = path.parent().context("Missing skill review directory")?;
+            checked_directory(root)?;
+            let mut stage = tempfile::NamedTempFile::new_in(root)?;
+            stage.write_all(&serde_json::to_vec(&status)?)?;
+            stage.as_file().sync_all()?;
+            stage.persist(path)?;
+            Ok(())
+        })
+        .await?
+    }
+    pub async fn discard_draft(&self, name: &str, fingerprint: &str) -> Result<()> {
+        let _review = self.reviews.lock().await;
         let draft = self.draft_details(name).await?;
         ensure!(
             draft.info.fingerprint == fingerprint,
             "Skill draft changed; review the current fingerprint"
         );
-        self.save(
-            None,
-            SaveSkillRequest {
-                name: name.into(),
-                scope: SkillScope::User,
-                files: draft.files,
-                expected_fingerprint: expected_installed,
-            },
-        )
-        .await
+        ensure!(
+            self.draft_review_status(fingerprint).await? != SkillDraftReviewStatus::Installed,
+            "Skill proposal was already installed"
+        );
+        self.record_draft_review(fingerprint, SkillDraftReviewStatus::Discarded)
+            .await
     }
     /// Install one user package without overwriting an existing skill.
     pub async fn install_archive(&self, bytes: Vec<u8>) -> Result<SkillInfo> {

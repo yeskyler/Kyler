@@ -46,6 +46,8 @@ import { CompactionSeparator } from "./compaction-separator";
 
 import { parsePatchResult } from "@/lib/kyler/patch-changes";
 import { PatchFiles, PatchSummary } from "./patch-changes";
+import { skillProposal } from "@/lib/kyler/plugins";
+import { SkillReview } from "./skill-review";
 
 function ActivityTool(props: ToolCallMessagePartProps) {
   if (props.toolName === "ask_question")
@@ -361,6 +363,7 @@ const components = {
 };
 
 export function AssistantMessage() {
+  const { session } = useChatSettings();
   const pendingQuestion = usePendingQuestion();
   const message = useAuiState((state) => state.message);
   const running = message.status?.type === "running";
@@ -483,6 +486,16 @@ export function AssistantMessage() {
           <MessagePrimitive.PartByIndex key={index} index={index} components={components} />
         ))}
       </div>
+      {message.content.map((part) => {
+        const proposal = skillProposal(part);
+        return proposal && part.type === "tool-call" ? (
+          <SkillReview
+            key={`${session.session_id}:${part.toolCallId}:${proposal.fingerprint}`}
+            proposal={proposal}
+            callId={part.toolCallId}
+          />
+        ) : null;
+      })}
       <MessageQuestion />
       <MessagePrimitive.Error>
         <ErrorPrimitive.Root

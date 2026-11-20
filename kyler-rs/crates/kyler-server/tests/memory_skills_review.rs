@@ -305,6 +305,91 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
             .status(),
         409
     );
+    let discard_url = format!("{prefix_a}/skills/drafts/workflow/discard");
+    for (url, scope, fingerprint, expected) in [
+        (discard_url.clone(), &scope_b, &revised.fingerprint, 409),
+        (
+            format!("{prefix_b}/skills/drafts/workflow/discard"),
+            &scope_b,
+            &revised.fingerprint,
+            404,
+        ),
+        (discard_url.clone(), &scope_a, &draft.fingerprint, 409),
+    ] {
+        assert_eq!(
+            http.post(url)
+                .bearer_auth("fixture-token")
+                .json(&json!({"expected_scope":scope,"fingerprint":fingerprint}))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            expected
+        );
+    }
+    assert_eq!(
+        http.post(&discard_url)
+            .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    http.post(&discard_url)
+        .bearer_auth("fixture-token")
+        .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let discarded: Value = http
+        .get(format!("{prefix_a}/skills/drafts/workflow"))
+        .bearer_auth("fixture-token")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(discarded["review_status"], "discarded");
+    let reloaded = SkillManager::new(config.skills.clone()).unwrap();
+    assert_eq!(
+        reloaded
+            .draft_review_status(&revised.fingerprint)
+            .await
+            .unwrap(),
+        kyler_protocol::api::skills::SkillDraftReviewStatus::Discarded
+    );
+    assert_eq!(
+        http.post(format!("{prefix_a}/skills/drafts/workflow/publish"))
+            .bearer_auth("fixture-token")
+            .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+    assert!(!config.skills.user_directory.join("workflow").exists());
+    let revised = manager
+        .save_draft(request(
+            "Updated proposal after discard",
+            Some(revised.fingerprint.clone()),
+        ))
+        .await
+        .unwrap();
+    let pending: Value = http
+        .get(format!("{prefix_a}/skills/drafts/workflow"))
+        .bearer_auth("fixture-token")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(pending["review_status"], "pending");
     http.post(format!("{prefix_a}/skills/drafts/workflow/publish"))
         .bearer_auth("fixture-token")
         .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
@@ -323,6 +408,24 @@ async fn review_is_authenticated_scoped_and_rejects_stale_memory_and_draft_versi
         .await
         .unwrap();
     assert_eq!(installed["installed_fingerprint"], revised.fingerprint);
+    assert_eq!(installed["review_status"], "installed");
+    assert_eq!(
+        reloaded
+            .draft_review_status(&revised.fingerprint)
+            .await
+            .unwrap(),
+        kyler_protocol::api::skills::SkillDraftReviewStatus::Installed
+    );
+    assert_eq!(
+        http.post(&discard_url)
+            .bearer_auth("fixture-token")
+            .json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
     assert_eq!(http.post(format!("{prefix_a}/skills/drafts/workflow/publish")).bearer_auth("fixture-token").json(&json!({"expected_scope":scope_a,"fingerprint":revised.fingerprint,"expected_installed":"stale"})).send().await.unwrap().status(),409);
     assert!(
         manager

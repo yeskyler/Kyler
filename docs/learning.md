@@ -98,10 +98,20 @@ candidates; inspect content, conditions, evidence and host-recorded provenance
 before activating, rejecting or invalidating an entry. Recorded evidence still
 requires independent review. Sensitive or expired entries cannot be activated.
 
-In **Plugins → Skills**, switch between **Installed** and **Drafts**. Drafts are
-shown only when every provenance source belongs to the session's memory scope. Open every package file and confirm review before publishing.
+Skill proposals appear as review cards in the originating assistant message, outside
+its collapsed execution details. They remain available when conversation history is
+reloaded. Cards bind the package fingerprint to its originating session and tool
+call; changed packages require review of the newer proposal. Every provenance
+source must belong to the session's memory scope.
+
+Open every package file and confirm review, then choose **Install skill**. **Request
+changes** adds an editable request with exact source revisions to the composer;
+send it to generate a new version for review. **Discard** records a decision for
+that exact version without installing it. Installation and discard decisions are
+persisted in the user skill directory's hidden `.draft-reviews/` folder.
 Publication installs a user skill available across sessions, subject to existing
-enable/disable settings. It does not execute package scripts.
+enable/disable settings. It does not execute package scripts. **Plugins → Skills**
+only manages installed skills; there is no Drafts tab.
 
 Review remains part of Memory and Skills; there is no separate Learning page.
 The authenticated HTTP endpoints are:
@@ -112,6 +122,7 @@ The authenticated HTTP endpoints are:
 - `GET /v1/sessions/{id}/skills/drafts` (cursor and limit).
 - `GET /v1/sessions/{id}/skills/drafts/{name}`.
 - `POST /v1/sessions/{id}/skills/drafts/{name}/publish`.
+- `POST /v1/sessions/{id}/skills/drafts/{name}/discard`.
 
 Scope is derived from the stored session, never selected by client input. Review
 requires the inspected scope and exact revision; publication requires the exact

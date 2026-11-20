@@ -11,8 +11,9 @@ use axum::{
 
 use kyler_core::{Agent, memory::MemoryStore};
 use kyler_protocol::api::skills::{
-    DraftReviewDetails, DraftReviewPage, PublishDraftRequest, SaveSkillRequest, SkillAction,
-    SkillActionRequest, SkillDetails, SkillDraftDetails, SkillInfo, SkillScope, SkillSource,
+    DiscardDraftRequest, DraftReviewDetails, DraftReviewPage, PublishDraftRequest,
+    SaveSkillRequest, SkillAction, SkillActionRequest, SkillDetails, SkillDraftDetails,
+    SkillDraftReviewStatus, SkillInfo, SkillScope, SkillSource,
 };
 
 async fn binding(state: &AppState, id: &str) -> Result<Agent, ApiError> {
@@ -213,7 +214,15 @@ pub async fn draft(
         .into_iter()
         .find(|skill| skill.name == name && skill.source == SkillSource::User)
         .map(|skill| skill.fingerprint);
+    let mut review_status = manager
+        .draft_review_status(&draft.info.fingerprint)
+        .await
+        .map_err(|_| ApiError::internal())?;
+    if installed_fingerprint.as_deref() == Some(draft.info.fingerprint.as_str()) {
+        review_status = SkillDraftReviewStatus::Installed;
+    }
     Ok(Json(DraftReviewDetails {
+        review_status,
         scope,
         draft,
         installed_fingerprint,
@@ -240,4 +249,27 @@ pub async fn publish(
         .await
         .map(Json)
         .map_err(|_| changed())
+}
+
+pub async fn discard(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+    Json(request): Json<DiscardDraftRequest>,
+) -> ApiResult<StatusCode> {
+    let (scope, agent) = draft_binding(&state, &id).await?;
+    if scope != request.expected_scope {
+        return Err(changed());
+    }
+    let manager = agent
+        .skill_manager()
+        .ok_or_else(|| ApiError::bad("Skills are disabled."))?;
+    let draft = scoped_draft(manager, &name, &scope).await?;
+    if draft.info.fingerprint != request.fingerprint {
+        return Err(changed());
+    }
+    manager
+        .discard_draft(&name, &request.fingerprint)
+        .await
+        .map_err(|_| changed())?;
+    Ok(StatusCode::NO_CONTENT)
 }
