@@ -14,7 +14,7 @@ export const thinkingLabels: Record<ThinkingLevel, string> = {
   low: "Low",
   medium: "Medium",
   high: "High",
-  xhigh: "Extra high",
+  xhigh: "Xhigh",
   max: "Max",
   ultra: "Ultra",
 };
