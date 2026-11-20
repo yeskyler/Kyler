@@ -120,6 +120,7 @@ Build the CLI before running installer tests so integration cases are not skippe
 
 ```sh
 cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
+cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-cli --lib commands::install
 python3 scripts/tests/test_install.py
 python3 scripts/tests/test_release.py
 python3 scripts/tests/test_package.py
@@ -127,7 +128,10 @@ sh -n scripts/install.sh scripts/package.sh scripts/release.sh
 ```
 
 The installer tests use temporary homes and ports. Node.js is needed for the
-complete-bundle fixture tests. Installer tests verify package activation, configuration
+complete-bundle fixture tests. Rust tests exercise dependency plans with a closed
+PATH and fake package managers; they never install host packages. Shell tests cover
+bootstrap download/verification and delegate activation to the real CLI. Installer
+tests verify package activation, configuration
 preservation, service startup, and rollback. Release validation also requires a
 standalone Web startup check against the native bundle.
 

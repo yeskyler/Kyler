@@ -23,8 +23,11 @@ it downloads both files again from GitHub for the same version. Checksum failure
 stop installation; they do not silently switch sources. `--version VERSION` skips
 latest-version discovery.
 
-Six numbered steps cover system compatibility, runtime dependencies, download and
-verification, native self-checks, configuration and installation, then service startup.
+The shell bootstrap identifies the platform, downloads or opens a bundle, verifies
+its checksums, and starts the bundle's `kyler install` command. The CLI owns five
+installation stages: environment/dependencies, application and sandbox checks,
+configuration, activation, and service startup. It verifies a private staged copy
+before executing package binaries.
 Downloads show the source, file, size, speed, and remaining time. Failed downloads
 display manual download and local installation commands. Local bundles skip release
 downloads but still undergo compatibility and sandbox checks.
@@ -39,14 +42,15 @@ configuration or startup failures.
 
 The installer recognizes macOS/Linux and x86_64/ARM64. A release must contain the
 matching architecture. Current Linux download targets use glibc; musl-based systems
-such as Alpine are rejected before downloading and require a separate compatible
-build. `/etc/os-release` is read for display, not executed. A detected glibc version
+such as Alpine require a separate compatible build. The CLI checks glibc before
+installing prerequisites; an incompatible binary may fail during bootstrap before
+it can produce that diagnostic. A detected glibc version
 is informational: execution of both the bundled Kyler and Node.js is the final ABI
 compatibility check. There is no universal minimum glibc guarantee across locally
 built bundles, and the installer does not upgrade system libraries.
 
 On Linux, Bubblewrap >= 0.5.0 and the networking tools required by the pinned MXC
-adapter are checked before download: `slirp4netns`, `ip`, `unshare`, `nsenter`,
+adapter are checked by the CLI before activation: `slirp4netns`, `ip`, `unshare`, `nsenter`,
 `iptables`, `ip6tables`, their `-restore` commands, `sh`, and `sleep`. Compatible
 installed tools are reused. Missing dependencies use the first available supported
 package manager:
@@ -68,13 +72,13 @@ Package-manager recognition is not a certification of every distribution/version
 
 macOS uses the system Seatbelt sandbox without downloading a separate sandbox runtime.
 Both macOS and Linux require ripgrep (`rg`). Existing working installations are
-reused. On macOS, missing ripgrep or curl is installed using an existing Homebrew;
+reused. On macOS, missing ripgrep is installed using an existing Homebrew;
 if Homebrew is absent, the installer stops with the Homebrew URL and manual command.
 Homebrew is never installed automatically or run through sudo. Standard Apple
 Silicon and Intel Homebrew binary directories are included in the installer PATH.
-On Linux, only packages for missing/outdated sandbox tools, ripgrep, curl and SHA256
-utilities are requested from the supported system package manager. Package output
-is retained, and missing packages or an outdated repository stop installation with
+On Linux, only packages for missing/outdated sandbox tools and ripgrep
+are requested from the supported system package manager. Package output
+is displayed, and missing packages or an outdated repository stop installation with
 manual retry instructions. The installer does not add repositories or alter host
 security settings. Basic shell, archive and text utilities must already be present.
 Release bundles include Node.js; installing Kyler does not require Rust or a separate
@@ -110,8 +114,8 @@ kyler doctor
 kyler --json doctor
 ```
 
-Older bundles without `doctor` cannot pass this installer; use a newly built complete
-bundle. Updating only `install.sh` does not update an existing release binary.
+Bundles must provide both `install` and `doctor`; use a newly built complete
+bundle. The new bootstrap does not fall back to legacy Shell installation logic. Updating only `install.sh` does not update an existing release binary.
 
 Unauthenticated download URLs require a publicly accessible repository. Private release
 assets require authenticated download followed by local bundle installation.
@@ -129,6 +133,17 @@ On macOS Apple Silicon, the generated archive is installed with:
 ```sh
 sh scripts/install.sh --bundle ./dist/kyler-v0.1.0-aarch64-apple-darwin.tar.gz
 ```
+
+An already unpacked bundle can be installed without the shell bootstrap:
+
+```sh
+./path/to/bundle/bin/kyler install --bundle ./path/to/bundle
+```
+
+The CLI accepts an unpacked directory. Use `install.sh --bundle` for `.tar.gz`
+archives. Both paths run the same CLI installation transaction. The bootstrap needs
+`tar`, SHA256 tools and, for remote downloads, `curl`; missing bootstrap utilities
+must be installed before it can launch the CLI.
 
 Archive names follow `kyler-v<version>-<target>.tar.gz`. The target identifies the
 operating system and architecture. [Release management](releasing.md) defines packaging
@@ -271,9 +286,11 @@ candidate configuration before activating the new version. Existing configuratio
 sessions, skills, and project files are preserved.
 
 If startup fails, the installer attempts to stop the new services and restore the
-previous installation, configuration, and service state. When cleanup cannot be
+previous installation, configuration, shell startup content, and service state. When cleanup cannot be
 verified, installation reports the failure for inspection. Version directories remain
-available for recovery. [Troubleshooting](troubleshooting.md) covers service diagnostics
+available for recovery. A local installation lock prevents simultaneous activations.
+Cancellation during activation also invokes recovery; cancellation during setup
+does not publish the candidate configuration. [Troubleshooting](troubleshooting.md) covers service diagnostics
 and recovery.
 
 ## Installation options
@@ -294,6 +311,11 @@ Advanced options support automation and maintenance:
 | `--no-start` | Install without starting services; existing managed services are stopped during upgrades |
 | `--no-configure` | Skip the configuration wizard; create defaults only when configuration is absent |
 | `--non-interactive` | Use saved configuration and process environment without prompts |
+
+The three advanced options are also available on `kyler install`. The CLI accepts
+`--config` for a separate configuration path and rejects `--server` and `--json`.
+Non-interactive dependency installation uses non-prompting `sudo`; prepare system
+packages first when privileges are unavailable.
 
 Non-interactive setup accepts the environment overrides listed in
 [configuration](configuration.md). Installations always include the backend, Web UI,

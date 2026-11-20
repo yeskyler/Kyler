@@ -21,6 +21,18 @@ pub struct Args {
 }
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Install a verified, unpacked release bundle and configure local services.
+    Install {
+        /// Unpacked bundle containing bin/kyler, runtime/node, web/server.js and SHA256SUMS.
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        no_start: bool,
+        #[arg(long)]
+        no_configure: bool,
+        #[arg(long)]
+        non_interactive: bool,
+    },
     /// Review local learning candidates or publish an inspected skill draft; no model call.
     Learning {
         #[command(subcommand)]

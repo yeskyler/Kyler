@@ -43,6 +43,15 @@ def local_bundle(root, binary):
     for folder in ("bin", "runtime", "web"):
         (bundle / folder).mkdir()
     if binary.is_file():
+        # Shell fixtures delegate only the installer command to the real CLI.
+        # Their version, doctor and lifecycle behavior remains independently fake.
+        with binary.open("rb") as stream:
+            prefix = stream.read(32)
+        if prefix.startswith(b"#!/bin/sh") and b"KYLER_INSTALL_TEST_DELEGATE" not in binary.read_bytes():
+            text = binary.read_text()
+            first, rest = text.split("\n", 1)
+            delegate = '# KYLER_INSTALL_TEST_DELEGATE\ncase " $* " in *" install "*) exec ' + shlex.quote(str(KYLER_BINARY)) + ' "$@" ;; esac\n'
+            binary.write_text(first + "\n" + delegate + rest)
         shutil.copy2(binary, bundle / "bin/kyler")
     node = shutil.which("node")
     if not node:
@@ -144,9 +153,69 @@ else:
         self.assertTrue(all(url.startswith("https://www.kyler.work/releases/") for url in urls))
         self.assertEqual(len(urls), 3)
         self.assertNotIn("--silent", requests[1])
-        for number in range(1, 7): self.assertIn(f"[{number}/6]", result.stdout)
+        for number in range(1, 6): self.assertIn(f"[{number}/5]", result.stdout)
+        self.assertIn("[2/2] Download and verify bundle", result.stdout)
         self.assertIn("sh install.sh --bundle", result.stdout)
         self.assertIn("Installation complete", result.stdout)
+
+    def test_cli_installs_without_bootstrap_and_rejects_modified_bundles(self):
+        bundle = local_bundle(self.root, self.source)
+        command = [str(KYLER_BINARY), "install", "--bundle", str(bundle), "--no-start", "--no-configure"]
+        result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[4/5] Activate installation", result.stdout)
+        self.assertNotIn("[2/2]", result.stdout)
+        config = self.home / ".kyler/config.toml"
+        binary = self.home / ".local/bin/kyler"
+        before = (config.read_bytes(), binary.resolve())
+        (bundle / "web/server.js").write_text("unverified")
+        failed = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertIn("checksum mismatch", failed.stderr)
+        self.assertEqual(before, (config.read_bytes(), binary.resolve()))
+
+    @unittest.skipUnless(os.name == "posix", "requires Unix file locks")
+    def test_cli_install_lock_prevents_concurrent_activation(self):
+        import fcntl
+        bundle = local_bundle(self.root, self.source)
+        lock_path = self.home / ".local/share/kyler/install.lock"
+        lock_path.parent.mkdir(parents=True)
+        with lock_path.open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = subprocess.run([str(KYLER_BINARY), "install", "--bundle", str(bundle), "--no-start", "--no-configure"], env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another installation", result.stderr)
+        self.assertFalse((self.home / ".kyler/config.toml").exists())
+        self.assertFalse((self.home / ".local/bin/kyler").exists())
+
+    @unittest.skipUnless(os.name == "posix", "requires Unix signals")
+    def test_termination_during_activation_restores_entry_config_and_shell_content(self):
+        import signal
+        gate = self.root / "startup-gate"
+        os.mkfifo(gate)
+        marker = self.root / "service-starting"
+        self.source.write_text('#!/bin/sh\ncase "$*" in\n*--version*) echo "kyler 0.1.0" ;;\n*doctor*|*service*stop*) exit 0 ;;\n*service*start*) : > '+shlex.quote(str(marker))+'; read line < '+shlex.quote(str(gate))+' ;;\n*) exit 1 ;;\nesac\n')
+        bundle = local_bundle(self.root, self.source)
+        startup = self.home / ".zshrc"
+        startup.write_text("# user shell content\n")
+        process = subprocess.Popen([str(KYLER_BINARY), "install", "--bundle", str(bundle), "--no-configure"], env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic()+20
+            while not marker.exists() and process.poll() is None and time.monotonic()<deadline:
+                time.sleep(0.02)
+            self.assertTrue(marker.exists(), "Installer never activated the service")
+            process.send_signal(signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=20)
+            self.assertEqual(process.returncode, 143, stderr)
+            self.assertIn("Previous installation restored", stderr)
+            self.assertEqual(startup.read_text(), "# user shell content\n")
+            self.assertFalse((self.home / ".local/bin/kyler").is_symlink())
+            self.assertFalse((self.home / ".local/share/kyler/current").is_symlink())
+            self.assertFalse((self.home / ".kyler/config.toml").exists())
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
 
     def test_failed_server_lookup_uses_github_and_pins_download_version(self):
         result, urls, _ = self.remote_install("fallback")
@@ -562,6 +631,16 @@ else:
             self.assertIn(marker, output)
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_cancelled_first_install_does_not_publish_default_configuration(self):
+        self.interactive_install([
+            ("◆ Provider".encode(), b"Custom\r"),
+            ("◆ API URL".encode(), b"http://127.0.0.1:1/v1\r"),
+            ("◆ API key".encode(), b"\x03"),
+        ], native=True, complete=False, expected=130)
+        self.assertFalse((self.home / ".kyler/config.toml").exists())
+        self.assertFalse((self.home / ".local/bin/kyler").exists())
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
     def test_official_providers_skip_url_and_back_returns_to_provider(self):
         self.install()
         config = self.home / ".kyler/config.toml"
@@ -971,7 +1050,7 @@ output_tokens = 8192
         result = self.install(success=False)
         self.assertIn("Sandbox self-check failed", result.stderr)
         self.assertEqual(before, (installed.resolve(), current.resolve(), config.read_bytes()))
-        self.assertNotIn("[5/6]", result.stdout)
+        self.assertNotIn("[3/5]", result.stdout)
 
     def test_failed_doctor_on_first_install_does_not_create_configuration(self):
         self.source.write_text('#!/bin/sh\nif [ "$1" = doctor ]; then exit 1; fi\nprintf "kyler 0.1.0\\n"\n')
@@ -1129,7 +1208,7 @@ class SystemCompatibilityTests(unittest.TestCase):
                 path.write_text("#!/bin/sh\n" + body + "\n")
                 path.chmod(0o755)
             text = INSTALLER.read_text()
-            function = text[text.index("check_system() {"):text.index("prepare_runtime_dependencies() {")]
+            function = text[text.index("check_system() {"):text.index("transfer() {")]
             env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ["PATH"], TEST_SYSTEM=system, TEST_ARCH=architecture, TEST_LIBC=libc)
             return subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\ncheck_system'], env=env, capture_output=True, text=True, timeout=5)
 
@@ -1139,140 +1218,11 @@ class SystemCompatibilityTests(unittest.TestCase):
                 result = self.check(system, architecture)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_musl_or_unidentified_runtime_stops_before_download(self):
-        for libc in ("musl", ""):
-            result = self.check(libc=libc)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("require glibc", result.stderr)
-
     def test_unsupported_host_or_architecture_stops(self):
         for kwargs in ({"system": "FreeBSD"}, {"architecture": "armv7l"}):
             result = self.check(**kwargs)
             self.assertNotEqual(result.returncode, 0)
 
-
-class SandboxSetupTests(unittest.TestCase):
-    def check(self, version="0.9.0", manager="apt-get", root_user=False, sudo=True, fail_install=False, missing_network=False, upgrade=True, system="Linux", missing_rg=False):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            tools = root / "bin"
-            tools.mkdir()
-            log = root / "commands"
-            marker = root / "installed"
-            scripts = {
-                "uname": "echo " + system,
-                "curl": "exit 0",
-                "sha256sum": "exit 0",
-                "rg": 'if [ "$MISSING_RG" = yes ]; then [ -f "$SANDBOX_MARKER" ] && [ "$UPGRADE" = yes ] || exit 1; fi; echo "ripgrep 14.1.0"',
-                "id": "echo " + ("0" if root_user else "1000"),
-                "bwrap": 'if [ -f "$SANDBOX_MARKER" ] && [ "$UPGRADE" = yes ]; then echo "bubblewrap 0.9.0"; else echo "bubblewrap $SANDBOX_VERSION"; fi',
-                "sudo": 'printf "sudo %s\\n" "$*" >> "$SANDBOX_LOG"; exec "$@"',
-            }
-            if manager:
-                scripts[manager] = 'printf "%s %s\\n" "${0##*/}" "$*" >> "$SANDBOX_LOG"; [ "$FAIL_INSTALL" != yes ] || exit 1; touch "$SANDBOX_MARKER"'
-            for tool in ("slirp4netns", "ip", "unshare", "nsenter", "iptables", "ip6tables", "iptables-restore", "ip6tables-restore", "sleep"):
-                if not missing_network: scripts[tool] = "exit 0"
-            for name, body in scripts.items():
-                if name == "sudo" and not sudo: continue
-                path = tools / name
-                path.write_text("#!/bin/sh\n" + body + "\n")
-                path.chmod(0o755)
-            # A closed PATH ensures tests can never invoke the host package manager or sudo.
-            for utility in ("awk", "touch", "sh", "head") + (("sleep",) if missing_network else ()):
-                (tools / utility).symlink_to(shutil.which(utility))
-            text = INSTALLER.read_text()
-            function = text[text.index("show_rg_version() {"):text.index("checksum() {")] + text[text.index("prepare_runtime_dependencies() {"):text.index("transfer() {")]
-            env = dict(os.environ, diagnostic_log=str(root / "environment.log"), PATH=str(tools), SANDBOX_VERSION=version, SANDBOX_MARKER=str(marker), SANDBOX_LOG=str(log), FAIL_INSTALL="yes" if fail_install else "no", UPGRADE="yes" if upgrade else "no", MISSING_RG="yes" if missing_rg else "no")
-            result = subprocess.run(["/bin/sh", "-c", 'set -eu; fail() { echo "$*" >&2; exit 1; }; ' + function + '\nprepare_runtime_dependencies'], env=env, capture_output=True, text=True, timeout=10)
-            return result, log.read_text() if log.exists() else ""
-
-    def test_recent_bubblewrap_and_network_tools_are_reused(self):
-        result, commands = self.check()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(commands, "")
-        self.assertIn("Reusing installed Bubblewrap", result.stdout)
-
-    def test_package_managers_upgrade_and_recheck(self):
-        for manager in ("apt-get", "dnf", "yum", "pacman", "zypper"):
-            with self.subTest(manager=manager):
-                result, commands = self.check("0.4.0", manager=manager)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("sudo " + manager, commands)
-                self.assertIn("bubblewrap", commands)
-                self.assertNotIn("slirp4netns", commands)
-                self.assertIn("bubblewrap 0.9.0", result.stdout)
-                if manager == "apt-get": self.assertIn("sudo apt-get update", commands)
-                if manager == "pacman": self.assertNotIn("-Sy", commands)
-
-    def test_root_does_not_require_sudo(self):
-        result, commands = self.check("0.4.0", root_user=True, sudo=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("sudo", commands)
-
-    def test_failed_package_install_stops_with_manual_commands(self):
-        result, commands = self.check("0.4.0", fail_install=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("apt-get update", result.stderr)
-        self.assertNotIn("apt-get install", commands)
-
-    def test_unsupported_manager_or_missing_privileges_stop(self):
-        for kwargs in ({"manager": None}, {"sudo": False}):
-            result, commands = self.check("0.4.0", **kwargs)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(commands, "")
-            self.assertIn("administrator", result.stderr.lower())
-
-    def test_old_repository_and_missing_network_tools_fail_recheck(self):
-        for kwargs in ({"version": "0.4.0", "upgrade": False}, {"missing_network": True}):
-            result, commands = self.check(**kwargs)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("remain unavailable", result.stderr)
-            self.assertIn("install", commands)
-
-    def test_only_missing_ripgrep_is_installed_on_linux(self):
-        for manager in ("apt-get", "dnf", "yum", "pacman", "zypper"):
-            with self.subTest(manager=manager):
-                result, commands = self.check(manager=manager, missing_rg=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("ripgrep", commands)
-                self.assertNotIn("bubblewrap", commands)
-                self.assertIn("ripgrep 14.1.0", result.stdout)
-
-    def test_macos_reuses_existing_dependencies_without_homebrew(self):
-        result, commands = self.check(system="Darwin", manager=None)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(commands, "")
-        self.assertIn("Seatbelt", result.stdout)
-
-    def test_macos_installs_ripgrep_with_homebrew_without_sudo(self):
-        result, commands = self.check(system="Darwin", manager="brew", missing_rg=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("brew install ripgrep", commands)
-        self.assertNotIn("sudo", commands)
-
-    def test_ripgrep_is_rechecked_after_installation(self):
-        for system, manager in (("Linux", "apt-get"), ("Darwin", "brew")):
-            result, commands = self.check(system=system, manager=manager, missing_rg=True, upgrade=False)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("ripgrep", commands)
-            self.assertTrue("unavailable" in result.stderr or "unavailable" in result.stdout)
-
-    def test_macos_package_failure_shows_retry_command(self):
-        result, commands = self.check(system="Darwin", manager="brew", missing_rg=True, fail_install=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Retry: brew install ripgrep", result.stderr)
-
-    def test_macos_missing_homebrew_stops_with_instructions(self):
-        result, commands = self.check(system="Darwin", manager=None, missing_rg=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(commands, "")
-        self.assertIn("https://brew.sh", result.stderr)
-        self.assertIn("brew install ripgrep", result.stderr)
-
-    def test_invalid_bubblewrap_version_is_not_accepted(self):
-        result, commands = self.check("unknown", manager=None)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(commands, "")
 
 
 if __name__ == "__main__":

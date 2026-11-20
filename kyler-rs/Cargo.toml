@@ -87,3 +87,7 @@ libc = "0.2"
 rusqlite = { version = "0.38", features = ["bundled"] }
 chrono-tz = "0.10"
 croner = "4"
+
+# Installer validation hashes complete release bundles, including debug binaries.
+[profile.dev.package.sha2]
+opt-level = 3

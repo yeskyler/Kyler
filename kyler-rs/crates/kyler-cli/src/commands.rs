@@ -4,6 +4,7 @@ mod chat;
 mod configure;
 mod doctor;
 mod eval;
+mod install;
 mod learning;
 mod logs;
 mod run;
@@ -37,6 +38,28 @@ pub async fn execute(args: Args) -> Result<()> {
             2,
             "--final-only cannot be combined with --json",
         ));
+    }
+    if let Some(Command::Install {
+        bundle,
+        no_start,
+        no_configure,
+        non_interactive,
+    }) = &args.command
+    {
+        if args.json || args.server.is_some() {
+            return Err(CliError::new(
+                2,
+                "install runs locally with terminal progress; --json and --server are not supported",
+            ));
+        }
+        return install::execute(
+            args.config.as_deref(),
+            bundle,
+            *no_start,
+            *no_configure,
+            *non_interactive,
+        )
+        .await;
     }
     if let Some(Command::Configure {
         advanced,
@@ -116,7 +139,9 @@ pub async fn execute(args: Args) -> Result<()> {
     match args.command.unwrap_or(Command::Chat { session: None }) {
         Command::Skills { command } => skills::execute(&client, command, args.json).await,
         Command::Eval { suite, report } => eval::run(&client, &suite, &report).await,
-        Command::Tui { .. } | Command::Acp | Command::Learning { .. } => unreachable!(),
+        Command::Install { .. } | Command::Tui { .. } | Command::Acp | Command::Learning { .. } => {
+            unreachable!()
+        }
         Command::Chat { session } => chat::chat(&client, session, args.json).await,
         Command::Run {
             session,
