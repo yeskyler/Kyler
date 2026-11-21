@@ -24,13 +24,11 @@ Kyler 是一个面向编码、研究与日常工作的 AI 助手。支持 Web、
 
 ## 演示
 
-在 Kyler Web 界面中使用中文对话：
-
-![Kyler Web 中文对话演示](demo/example-1.png)
+![Kyler Web 界面演示](demo/example.png)
 
 ## 架构
 
-![Kyler Agent 以运行时为中心的架构图](docs/assets/agent-architecture.svg)
+![Kyler Agent 系统全景图](docs/assets/agent-architecture.svg)
 
 ## 安装
 
@@ -39,9 +37,16 @@ Kyler 是一个面向编码、研究与日常工作的 AI 助手。支持 Web、
 Linux 使用系统安装的 Bubblewrap 和网络工具，见 [Linux 依赖说明](docs/linux-sandbox.md)。
 两个平台均内置 ripgrep；macOS 使用系统 Seatbelt。
 
+如果安装域名显示备案提示，请直接从 [GitHub Releases](https://github.com/yeskyler/Kyler/releases) 下载。
+
+1. 在同一版本的 **Assets** 中下载适合本机的平台发行包
+   （`kyler-vVERSION-TARGET.tar.gz`）、对应的 `kyler-installer-vVERSION-TARGET`
+   和 `SHA256SUMS`，放在同一个目录。
+2. 将 [`scripts/install.sh`](scripts/install.sh) 保存到该目录并命名为 `install.sh`。
+   把命令中的示例文件名换成实际下载的发行包名称。
+
 ```sh
-curl -fsSL http://www.kyler.work/install.sh -o install.sh
-sh install.sh
+sh install.sh --bundle ./kyler-vVERSION-TARGET.tar.gz
 ```
 
 安装的最后一步会引导配置模型与访问方式，选择“Save and start”即可启动。后续可运行 `kyler configure` 重新配置。打开显示的 Web 地址，使用自动生成的 token 登录。

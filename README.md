@@ -25,11 +25,11 @@ Use it through Web, TUI, or CLI.
 
 ## Demo
 
-![Kyler Web interface with an English conversation](demo/example.png)
+![Kyler Web interface](demo/example.png)
 
 ## Architecture
 
-![Kyler Agent runtime-centered architecture](docs/assets/agent-architecture.svg)
+![Kyler Agent system overview](docs/assets/agent-architecture.svg)
 
 ## Installation
 
@@ -39,12 +39,21 @@ and Node.js runtime.
 Linux requires system Bubblewrap and network tools; see [Linux dependencies](docs/linux-sandbox.md).
 Ripgrep is bundled on both platforms; macOS uses system Seatbelt.
 
+The installation domain may show an ICP filing notice. Download the release directly from
+[GitHub Releases](https://github.com/yeskyler/Kyler/releases) if that happens.
+
+1. In the release's **Assets**, download the bundle for your platform
+   (`kyler-vVERSION-TARGET.tar.gz`), the matching `kyler-installer-vVERSION-TARGET`,
+   and `SHA256SUMS` from the same release. Keep them in the same directory.
+2. Save [`scripts/install.sh`](scripts/install.sh) as `install.sh` in that directory.
+   Replace the example archive name below with the file you downloaded.
+
 ```sh
-curl -fsSL http://www.kyler.work/install.sh -o install.sh
-sh install.sh
+sh install.sh --bundle ./kyler-vVERSION-TARGET.tar.gz
 ```
 
-Run `kyler configure` to configure the model and access scope, then choose **Save and start**. Open the displayed Web address
+The final installation step opens the configuration wizard. Choose **Save and start**
+to start the service, or run `kyler configure` later. Open the displayed Web address
 and sign in with the generated token, or run `kyler` (equivalent to `kyler tui`) for the local terminal interface.
 Use `kyler chat` for interactive chat through the backend service.
 

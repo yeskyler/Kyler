@@ -1,113 +1,320 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1280" viewBox="0 0 1680 1280" role="img" aria-labelledby="title desc"><title id="title">Kyler Agent: Runtime-Centered Architecture</title><desc id="desc">Agent Runtime is central. Its execution loop assembles context, invokes a model, dispatches authorized tools, records results and repeats. Interfaces enter through ThreadManager. Model providers, MCP, Skills, scoped memory, sandbox workers and persistence connect around the runtime. Reviewed experience feeds future context and skills.</desc><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#526783"/></marker><marker id="blue" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9" fill="#2563eb"/></marker><marker id="green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="#168365"/></marker></defs><style>text{font-family:Arial,Helvetica,sans-serif;fill:#18304e}.heading{font-size:18px;font-weight:700}.label{font-size:12px;font-weight:700;letter-spacing:1.5px;fill:#667b94}.body{font-size:14px;fill:#526783}.edge{fill:none;stroke:#526783;stroke-width:1.7;marker-end:url(#arrow)}.loop{fill:none;stroke:#2563eb;stroke-width:3;marker-end:url(#blue)}.feedback{fill:none;stroke:#168365;stroke-width:2;stroke-dasharray:7 5;marker-end:url(#green)}.caption{font-size:12px;fill:#526783;paint-order:stroke;stroke:#fff;stroke-width:5;stroke-linejoin:round}</style><rect width="1680" height="1280" fill="#fff"/>
-<text x="40" y="42" class="heading">KYLER AGENT — RUNTIME-CENTERED ARCHITECTURE</text>
-<text x="40" y="68" class="body">One shared execution loop · multiple interfaces · bounded tools · reviewed experience reuse</text>
-<rect x="414" y="99" width="852" height="64" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="840.0" y="128" class="heading" text-anchor="middle">Web  /  CLI  /  TUI  /  Editor (ACP)</text>
-<text x="840.0" y="153" class="body" text-anchor="middle">HTTP &amp; SSE adapters · in-process TUI · official ACP Rust SDK / stdio</text>
-<rect x="540" y="201" width="600" height="76" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="840.0" y="230" class="heading" text-anchor="middle">ThreadManager</text>
-<text x="840.0" y="255" class="body" text-anchor="middle">Session lifecycle · turn operations · cancellation · event channels</text>
-<path d="M840,163 L840,201" class="edge"/>
-<text x="850" y="186" class="caption">user turn</text>
-<rect x="400" y="327" width="880" height="579" rx="16" fill="#eff6ff" stroke="#7ca6e3" stroke-width="1.5"/>
-<text x="840" y="372" class="heading" text-anchor="middle">AGENT RUNTIME</text>
-<text x="840" y="399" class="body" text-anchor="middle">kyler-core / one admitted turn</text>
-<path d="M840,277 L840,327" class="edge"/>
-<text x="852" y="307" class="caption">admit / resume</text>
-<rect x="453" y="452" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
-<text x="606.5" y="481" class="heading" text-anchor="middle">1  Assemble Context</text>
-<text x="606.5" y="506" class="body" text-anchor="middle">History + summaries + active memory</text>
-<text x="606.5" y="527" class="body" text-anchor="middle">Loaded skills + advertised schemas</text>
-<text x="606.5" y="548" class="body" text-anchor="middle">Token budget / compaction</text>
-<rect x="920" y="452" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
-<text x="1073.5" y="481" class="heading" text-anchor="middle">2  Model Inference</text>
-<text x="1073.5" y="506" class="body" text-anchor="middle">Model snapshot + thinking preference</text>
-<text x="1073.5" y="527" class="body" text-anchor="middle">Stream text and complete tool calls</text>
-<text x="1073.5" y="548" class="body" text-anchor="middle">Usage and cancellation</text>
-<rect x="920" y="727" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
-<text x="1073.5" y="756" class="heading" text-anchor="middle">3  Dispatch Tools</text>
-<text x="1073.5" y="781" class="body" text-anchor="middle">Validate → authorize → schedule</text>
-<text x="1073.5" y="802" class="body" text-anchor="middle">Parallel / Exclusive / Wait lanes</text>
-<text x="1073.5" y="823" class="body" text-anchor="middle">Execute tools and child tasks</text>
-<rect x="453" y="727" width="307" height="115" rx="8" fill="#fff" stroke="#a8c4e9" stroke-width="1.5"/>
-<text x="606.5" y="756" class="heading" text-anchor="middle">4  Record Results</text>
-<text x="606.5" y="781" class="body" text-anchor="middle">Associate by call_id · checkpoint</text>
-<text x="606.5" y="802" class="body" text-anchor="middle">Retain original / compress model view</text>
-<text x="606.5" y="823" class="body" text-anchor="middle">Emit structured progress events</text>
-<path d="M760,510 L920,510" class="loop"/>
-<text x="790" y="498" class="caption">model request</text>
-<path d="M1074,567 L1074,727" class="loop"/>
-<text x="1087" y="648" class="caption">tool calls</text>
-<path d="M920,785 L760,785" class="loop"/>
-<text x="791" y="773" class="caption">tool results</text>
-<path d="M606,727 L606,567" class="loop"/>
-<text x="469" y="650" class="caption">next step</text>
-<text x="840" y="616" class="label" text-anchor="middle">EXECUTE → OBSERVE → CONTINUE</text>
-<text x="840" y="648" class="body" text-anchor="middle">Repeat until final answer, cancellation</text>
-<text x="840" y="671" class="body" text-anchor="middle">or an execution limit is reached.</text>
-<text x="840" y="880" class="body" text-anchor="middle">Complete tool arguments only · host limits remain authoritative</text>
-<text x="40" y="354" class="label">CONTEXT &amp; KNOWLEDGE</text>
-<rect x="40" y="382" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="195.0" y="411" class="heading" text-anchor="middle">Scoped Memory</text>
-<text x="195.0" y="436" class="body" text-anchor="middle">Facts · preferences · lessons</text>
-<text x="195.0" y="457" class="body" text-anchor="middle">Candidate / active / rejected / invalid</text>
-<text x="195.0" y="478" class="body" text-anchor="middle">Provenance · expiry · revisions</text>
-<rect x="40" y="534" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="195.0" y="563" class="heading" text-anchor="middle">kyler-skills</text>
-<text x="195.0" y="588" class="body" text-anchor="middle">Directory → load_skill → resources</text>
-<text x="195.0" y="609" class="body" text-anchor="middle">Built-in / user / project packages</text>
-<text x="195.0" y="630" class="body" text-anchor="middle">Fingerprint review and hidden drafts</text>
-<path d="M350,434 L378,434 L378,477 L453,477" class="edge"/>
-<text x="353" y="420" class="caption">eligible records</text>
-<path d="M350,586 L388,586 L388,541 L453,541" class="edge"/>
-<rect x="40" y="703" width="310" height="139" rx="8" fill="#fffbef" stroke="#e2c77c" stroke-width="1.5"/>
-<text x="195.0" y="732" class="heading" text-anchor="middle">Host Control Plane</text>
-<text x="195.0" y="757" class="body" text-anchor="middle">Sandbox policy + tool approvals</text>
-<text x="195.0" y="778" class="body" text-anchor="middle">Filesystem / network / process limits</text>
-<text x="195.0" y="799" class="body" text-anchor="middle">Scheduler: cron / zones / leases</text>
-<text x="195.0" y="820" class="body" text-anchor="middle">Immutable run snapshots</text>
-<path d="M350,771 L379,771 L379,925 L1244,925 L1244,811 L1227,811" class="feedback"/>
-<text x="691" y="939" class="caption">policy constrains every tool call</text>
-<text x="1330" y="354" class="label">MODELS &amp; EXECUTION</text>
-<rect x="1330" y="382" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="1485.0" y="411" class="heading" text-anchor="middle">Model Provider</text>
-<text x="1485.0" y="436" class="body" text-anchor="middle">Configured inference service</text>
-<text x="1485.0" y="457" class="body" text-anchor="middle">Streaming response and usage</text>
-<text x="1485.0" y="478" class="body" text-anchor="middle">Credentials remain server-side</text>
-<path d="M1227,477 L1302,477 L1302,434 L1330,434" class="edge"/>
-<text x="1237" y="462" class="caption">inference</text>
-<rect x="1330" y="544" width="310" height="105" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="1485.0" y="573" class="heading" text-anchor="middle">Tools &amp; Sandbox</text>
-<text x="1485.0" y="598" class="body" text-anchor="middle">Files / patches / shell / processes</text>
-<text x="1485.0" y="619" class="body" text-anchor="middle">Plans / questions / artifacts / images</text>
-<text x="1485.0" y="640" class="body" text-anchor="middle">MXC worker + managed processes</text>
-<rect x="1330" y="703" width="310" height="139" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="1485.0" y="732" class="heading" text-anchor="middle">kyler-mcp</text>
-<text x="1485.0" y="757" class="body" text-anchor="middle">Nonblocking stdio / HTTP connectors</text>
-<text x="1485.0" y="778" class="body" text-anchor="middle">Versioned tool metadata catalogs</text>
-<text x="1485.0" y="799" class="body" text-anchor="middle">search_tool_bm25 → next request</text>
-<text x="1485.0" y="820" class="body" text-anchor="middle">Local BM25 → authorized MCP call</text>
-<path d="M1227,756 L1307,756 L1307,597 L1330,597" class="edge"/>
-<path d="M1227,785 L1330,785" class="edge"/>
-<text x="1262" y="773" class="caption">call</text>
-<rect x="453" y="978" width="774" height="91" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="840.0" y="1007" class="heading" text-anchor="middle">Session State &amp; Persistence</text>
-<text x="840.0" y="1032" class="body" text-anchor="middle">Rollout + checkpoints + run manifests + artifact snapshots</text>
-<text x="840.0" y="1053" class="body" text-anchor="middle">kyler-store: application SQLite indexes / preferences · scheduler-owned database</text>
-<path d="M606,842 L606,978" class="edge"/>
-<text x="618" y="958" class="caption">durable results</text>
-<rect x="1330" y="978" width="310" height="91" rx="8" fill="#fff" stroke="#bfccdc" stroke-width="1.5"/>
-<text x="1485.0" y="1007" class="heading" text-anchor="middle">User-visible Results</text>
-<text x="1485.0" y="1032" class="body" text-anchor="middle">Text · tool events · approvals</text>
-<text x="1485.0" y="1053" class="body" text-anchor="middle">Artifacts · previews · inspectors</text>
-<path d="M1227,1023 L1330,1023" class="edge"/>
-<text x="1257" y="1011" class="caption">project</text>
-<rect x="40" y="1122" width="1600" height="103" rx="8" fill="#edf9f3" stroke="#9dcdb6" stroke-width="1.5"/>
-<text x="840" y="1151" class="label" text-anchor="middle">REVIEWED EXPERIENCE FEEDBACK</text>
-<text x="840" y="1180" class="body" text-anchor="middle">Task experience → candidate memory → human review → active context or hidden skill draft → reviewed publication → future reuse</text>
-<text x="840" y="1205" class="body" text-anchor="middle">Memory review: exact revision  •  Skill publication: exact fingerprints  •  No automatic prompt/code rewriting or inferred-skill publication</text>
-<path d="M840,1069 L840,1122" class="feedback"/>
-<path d="M40,1174 L20,1174 L20,434 L40,434" class="feedback"/>
-<text x="40" y="1257" class="body">Foundations: kyler-protocol · kyler-config · kyler-logging · kyler-evals</text>
-<text x="1640" y="1257" class="caption" text-anchor="end">Solid: calls / data    Blue: runtime loop    Dashed green: constraints / feedback</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1568" height="882" viewBox="0 0 1568 882" role="img" aria-labelledby="title desc">
+<title id="title">Kyler Agent System Overview</title>
+<desc id="desc">Architecture overview showing channels, a clockwise agent execution loop, tools, model capabilities, persistence, safeguards, and human-reviewed experience.</desc>
+<defs>
+  <radialGradient id="hub" cx=".42" cy=".28" r=".8"><stop stop-color="#2378c8"/><stop offset="1" stop-color="#062a78"/></radialGradient>
+  <linearGradient id="wash" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#f2f9fb"/></linearGradient>
+  <marker id="flow" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><path d="M0 0L7 3L0 6Z" fill="#0752ad"/></marker>
+  <marker id="tool" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><path d="M0 0L7 3L0 6Z" fill="#08776e"/></marker>
+  <marker id="feedback" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><path d="M0 0L7 3L0 6Z" fill="#6940a3"/></marker>
+</defs>
+<style>
+text{font-family:Arial,Helvetica,sans-serif;fill:#12274a}
+.title{font-weight:700;font-size:53px;fill:#092864}
+.tab{font-size:16px;font-weight:700;fill:white}
+.label{font-size:13px;font-weight:700}
+.body{font-size:11px;fill:#334c69}
+.note{font-size:12px;font-weight:700;fill:#10477f}
+.number{font-size:11px;font-weight:700;fill:white}
+.hub{font-size:18px;font-weight:700;fill:white}
+</style>
+<!-- Lucide icon attribution
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+—-
+
+The following Lucide icons are derived from the Feather project:
+
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-->
+<rect width="1568" height="882" fill="#fff"/>
+<text x="784" y="54" class="title" text-anchor="middle">Kyler Agent System Overview</text>
+<rect x="201" y="72" width="1136" height="108" rx="13" fill="url(#wash)" stroke="#0752ad" stroke-width="1.25"/>
+<rect x="211" y="60" width="195" height="32" rx="8" fill="#0752ad" stroke="#0752ad" stroke-width="1.25"/>
+<text x="222" y="81" class="tab" text-anchor="start">1. Users &amp; channels</text>
+<text x="1002" y="94" class="note" text-anchor="middle">HTTP and local host entry points</text>
+<rect x="218" y="103" width="1102" height="69" rx="12" fill="#f7fbfc" stroke="#9cb3cb" stroke-width="1.25"/>
+<g transform="translate(295.8333333333333 109) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></g>
+<text x="309.8333333333333" y="151" class="label" text-anchor="middle">Project users</text>
+<text x="309.8333333333333" y="164" class="body" text-anchor="middle">Workspaces</text>
+<path d="M401.667 111V164" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(479.5 109) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m10 9-3 3 3 3"></path><path d="m14 15 3-3-3-3"></path><rect x="3" y="3" width="18" height="18" rx="2"></rect></g>
+<text x="493.5" y="151" class="label" text-anchor="middle">Developers</text>
+<text x="493.5" y="164" class="body" text-anchor="middle">Editor and terminal</text>
+<path d="M585.333 111V164" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(663.1666666666666 109) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></g>
+<text x="677.1666666666666" y="151" class="label" text-anchor="middle">Web</text>
+<text x="677.1666666666666" y="164" class="body" text-anchor="middle">Next.js proxy</text>
+<path d="M769 111V164" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(846.8333333333333 109) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"></path></g>
+<text x="860.8333333333333" y="151" class="label" text-anchor="middle">CLI / API</text>
+<text x="860.8333333333333" y="164" class="body" text-anchor="middle">kyler-client</text>
+<path d="M952.667 111V164" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(1030.5 109) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></g>
+<text x="1044.5" y="151" class="label" text-anchor="middle">TUI</text>
+<text x="1044.5" y="164" class="body" text-anchor="middle">In-process</text>
+<path d="M1136.33 111V164" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(1214.1666666666665 109) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"></path><path d="M15 8V2"></path><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"></path><path d="M9 8V2"></path></g>
+<text x="1228.1666666666665" y="151" class="label" text-anchor="middle">Editors / IDEs</text>
+<text x="1228.1666666666665" y="164" class="body" text-anchor="middle">ACP over stdio</text>
+<path d="M769 180V227" fill="none" stroke="#0752ad" stroke-width="2" marker-end="url(#flow)"/>
+<rect x="12" y="98" width="145" height="478" rx="13" fill="url(#wash)" stroke="#6940a3" stroke-width="1.25"/>
+<rect x="22" y="86" width="126" height="32" rx="8" fill="#6940a3" stroke="#6940a3" stroke-width="1.25"/>
+<text x="33" y="107" class="tab" text-anchor="start">Extensions</text>
+<rect x="1409" y="98" width="147" height="462" rx="13" fill="url(#wash)" stroke="#6940a3" stroke-width="1.25"/>
+<rect x="1419" y="86" width="127" height="32" rx="8" fill="#6940a3" stroke="#6940a3" stroke-width="1.25"/>
+<text x="1430" y="107" class="tab" text-anchor="start">Review &amp; reuse</text>
+<g transform="translate(24 157) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"></path><path d="M15 8h-5"></path><path d="M19 17V5a2 2 0 0 0-2-2H4"></path><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"></path></g>
+<text x="62" y="170" class="label" text-anchor="start">Prompts</text>
+<text x="62" y="189" class="body" text-anchor="start">System guidance</text>
+<path d="M21 239H147" fill="none" stroke="#c7b9db" stroke-width="1" stroke-linejoin="round"/>
+<g transform="translate(24 255) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2"></path><rect x="14" y="2" width="8" height="8" rx="1"></rect></g>
+<text x="62" y="268" class="label" text-anchor="start">Skills</text>
+<text x="62" y="287" class="body" text-anchor="start">Package metadata</text>
+<path d="M21 337H147" fill="none" stroke="#c7b9db" stroke-width="1" stroke-linejoin="round"/>
+<g transform="translate(24 353) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"></path><path d="M12 22V12"></path><polyline points="3.29 7 12 12 20.71 7"></polyline><path d="m7.5 4.27 9 5.15"></path></g>
+<text x="62" y="366" class="label" text-anchor="start">MCP</text>
+<text x="62" y="385" class="body" text-anchor="start">Tool discovery</text>
+<path d="M21 435H147" fill="none" stroke="#c7b9db" stroke-width="1" stroke-linejoin="round"/>
+<g transform="translate(24 451) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></g>
+<text x="62" y="464" class="label" text-anchor="start">Subagents</text>
+<text x="62" y="483" class="body" text-anchor="start">Scoped tasks</text>
+<g transform="translate(1421 157) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21v-6"></path><path d="M12 21V9"></path><path d="M19 21V3"></path></g>
+<text x="1459" y="170" class="label" text-anchor="start">Evaluations</text>
+<text x="1459" y="189" class="body" text-anchor="start">Offline cases</text>
+<path d="M1418 239H1544" fill="none" stroke="#c7b9db" stroke-width="1" stroke-linejoin="round"/>
+<g transform="translate(1421 255) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m16 9-5.5 5.5L8 12"></path></g>
+<text x="1459" y="268" class="label" text-anchor="start">Human review</text>
+<text x="1459" y="287" class="body" text-anchor="start">Memory / skills</text>
+<path d="M1418 337H1544" fill="none" stroke="#c7b9db" stroke-width="1" stroke-linejoin="round"/>
+<g transform="translate(1421 353) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></g>
+<text x="1459" y="366" class="label" text-anchor="start">Inspection</text>
+<text x="1459" y="385" class="body" text-anchor="start">Context / Rollout</text>
+<path d="M1418 435H1544" fill="none" stroke="#c7b9db" stroke-width="1" stroke-linejoin="round"/>
+<g transform="translate(1421 451) scale(1.29167)" fill="none" stroke="#6940a3" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></g>
+<text x="1459" y="464" class="label" text-anchor="start">Reuse</text>
+<text x="1459" y="483" class="body" text-anchor="start">Future turns</text>
+<rect x="201" y="231" width="212" height="376" rx="13" fill="url(#wash)" stroke="#08776e" stroke-width="1.25"/>
+<rect x="211" y="219" width="191" height="32" rx="8" fill="#08776e" stroke="#08776e" stroke-width="1.25"/>
+<text x="222" y="240" class="tab" text-anchor="start">3. Tools &amp; execution</text>
+<rect x="209" y="261" width="196" height="49" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(217 273.5) scale(1)" fill="none" stroke="#08776e" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"></path><path d="M14 2v5a1 1 0 0 0 1 1h5"></path><circle cx="11.5" cy="14.5" r="2.5"></circle><path d="M13.3 16.3 15 18"></path></g>
+<text x="249" y="285.5" class="label" text-anchor="start">File exploration</text>
+<text x="249" y="301.5" class="body" text-anchor="start">List, search, read</text>
+<rect x="209" y="316" width="196" height="49" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(217 328.5) scale(1)" fill="none" stroke="#08776e" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z"></path><path d="M14.487 7.858A1 1 0 0 1 14 7V2"></path><path d="M20 19.645V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l2.516 2.516"></path><path d="M8 18h1"></path></g>
+<text x="249" y="340.5" class="label" text-anchor="start">File updates</text>
+<text x="249" y="356.5" class="body" text-anchor="start">Apply patches</text>
+<rect x="209" y="371" width="196" height="49" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(217 383.5) scale(1)" fill="none" stroke="#08776e" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"></path></g>
+<text x="249" y="395.5" class="label" text-anchor="start">Commands</text>
+<text x="249" y="411.5" class="body" text-anchor="start">Managed processes</text>
+<rect x="209" y="426" width="196" height="49" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(217 438.5) scale(1)" fill="none" stroke="#08776e" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"></path><path d="M15 8V2"></path><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"></path><path d="M9 8V2"></path></g>
+<text x="249" y="450.5" class="label" text-anchor="start">MCP connectors</text>
+<text x="249" y="466.5" class="body" text-anchor="start">Stdio / HTTP · BM25</text>
+<rect x="209" y="481" width="196" height="49" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(217 493.5) scale(1)" fill="none" stroke="#08776e" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v16"></path><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"></path></g>
+<text x="249" y="505.5" class="label" text-anchor="start">Skills &amp; resources</text>
+<text x="249" y="521.5" class="body" text-anchor="start">Load on demand</text>
+<rect x="209" y="536" width="196" height="49" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(217 548.5) scale(1)" fill="none" stroke="#08776e" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></g>
+<text x="249" y="560.5" class="label" text-anchor="start">MXC sandbox</text>
+<text x="249" y="576.5" class="body" text-anchor="start">Seatbelt / Bubblewrap</text>
+<path d="M159 374H198" fill="none" stroke="#6940a3" stroke-width="2" stroke-linejoin="miter" marker-start="url(#feedback)" marker-end="url(#feedback)" stroke-dasharray="4 4"/>
+<path d="M416 426H455" fill="none" stroke="#08776e" stroke-width="2" stroke-linejoin="miter" marker-start="url(#tool)" marker-end="url(#tool)"/>
+<rect x="457" y="229" width="625" height="372" rx="13" fill="url(#wash)" stroke="#0752ad" stroke-width="1.25"/>
+<rect x="467" y="217" width="251" height="32" rx="8" fill="#0752ad" stroke="#0752ad" stroke-width="1.25"/>
+<text x="478" y="238" class="tab" text-anchor="start">2. Agent Runtime</text>
+<text x="892" y="245" class="note" text-anchor="middle">HTTP gateway or local host → ThreadManager · kyler-core</text>
+<circle cx="769" cy="426" r="87" fill="#d5e9fa" stroke="#9bc7ef" stroke-width="2"/>
+<circle cx="769" cy="426" r="79" fill="url(#hub)" stroke="#2477c5" stroke-width="3"/>
+<g transform="translate(733 367) scale(3)" fill="none" stroke="#92d9ff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18V5"></path><path d="M15 13a4.17 4.17 0 01-3-4 4.17 4.17 0 01-3 4"></path><path d="M17.707 6.294A3 3 0 1012 5a3 3 0 10-5.707 1.294"></path><path d="M17.996 5.125a4 4 0 012.526 5.77"></path><path d="M18 18a4 4 0 002-7.465"></path><path d="M19.967 17.482a4 4 0 11-7.967.517 4 4 0 11-7.967-.517"></path><path d="M6 18a4 4 0 01-2-7.465"></path><path d="M6.004 5.125a4 4 0 00-2.526 5.77"></path></g>
+<text x="769" y="449" class="hub" text-anchor="middle">Agent Runtime</text>
+<text x="769" y="470" class="hub" text-anchor="middle">Execution loop</text>
+<g aria-label="Agent execution loop">
+  <path d="M738 296H800" fill="none" stroke="#0752ad" stroke-width="2" marker-end="url(#flow)"/>
+  <path d="M888 296H919V382" fill="none" stroke="#0752ad" stroke-width="2" marker-end="url(#flow)"/>
+  <path d="M919 470V556H888" fill="none" stroke="#0752ad" stroke-width="2" marker-end="url(#flow)"/>
+  <path d="M800 556H738" fill="none" stroke="#0752ad" stroke-width="2" marker-end="url(#flow)"/>
+  <path d="M650 556H619V470" fill="none" stroke="#0752ad" stroke-width="2" marker-end="url(#flow)"/>
+  <path d="M619 382V296H650" fill="none" stroke="#0752ad" stroke-width="2" marker-end="url(#flow)"/>
+  <circle cx="694" cy="296" r="43" fill="#f7fcfe" stroke="#0752ad" stroke-width="1.5"/>
+  <g transform="translate(685 271) scale(.75)" fill="none" stroke="#0752ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"></path><path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z"></path><path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1"></path></g>
+  <circle cx="659" cy="270" r="9" fill="#0752ad"/>
+  <text x="659" y="274" class="number" text-anchor="middle">1</text>
+  <text x="694" y="304" class="label" text-anchor="middle">Assemble<tspan x="694" dy="15">context</tspan></text>
+  <circle cx="844" cy="296" r="43" fill="#f7fcfe" stroke="#0752ad" stroke-width="1.5"/>
+  <g transform="translate(835 271) scale(.75)" fill="none" stroke="#0752ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M11 9h4a2 2 0 0 0 2-2V3"></path><circle cx="9" cy="9" r="2"></circle><path d="M7 21v-4a2 2 0 0 1 2-2h4"></path><circle cx="15" cy="15" r="2"></circle></g>
+  <circle cx="809" cy="270" r="9" fill="#0752ad"/>
+  <text x="809" y="274" class="number" text-anchor="middle">2</text>
+  <text x="844" y="304" class="label" text-anchor="middle">Model<tspan x="844" dy="15">inference</tspan></text>
+  <circle cx="919" cy="426" r="43" fill="#f7fcfe" stroke="#0752ad" stroke-width="1.5"/>
+  <g transform="translate(910 401) scale(.75)" fill="none" stroke="#0752ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"></path><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"></circle></g>
+  <circle cx="884" cy="400" r="9" fill="#0752ad"/>
+  <text x="884" y="404" class="number" text-anchor="middle">3</text>
+  <text x="919" y="434" class="label" text-anchor="middle">Authorize<tspan x="919" dy="15">calls</tspan></text>
+  <circle cx="844" cy="556" r="43" fill="#f7fcfe" stroke="#0752ad" stroke-width="1.5"/>
+  <g transform="translate(835 531) scale(.75)" fill="none" stroke="#0752ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></g>
+  <circle cx="809" cy="530" r="9" fill="#0752ad"/>
+  <text x="809" y="534" class="number" text-anchor="middle">4</text>
+  <text x="844" y="564" class="label" text-anchor="middle">Dispatch<tspan x="844" dy="15">tools</tspan></text>
+  <circle cx="694" cy="556" r="43" fill="#f7fcfe" stroke="#0752ad" stroke-width="1.5"/>
+  <g transform="translate(685 531) scale(.75)" fill="none" stroke="#0752ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5V19A9 3 0 0 0 21 19V5"></path><path d="M3 12A9 3 0 0 0 21 12"></path></g>
+  <circle cx="659" cy="530" r="9" fill="#0752ad"/>
+  <text x="659" y="534" class="number" text-anchor="middle">5</text>
+  <text x="694" y="564" class="label" text-anchor="middle">Record<tspan x="694" dy="15">results</tspan></text>
+  <circle cx="619" cy="426" r="43" fill="#f7fcfe" stroke="#0752ad" stroke-width="1.5"/>
+  <g transform="translate(610 401) scale(.75)" fill="none" stroke="#0752ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"></path></g>
+  <circle cx="584" cy="400" r="9" fill="#0752ad"/>
+  <text x="584" y="404" class="number" text-anchor="middle">6</text>
+  <text x="619" y="434" class="label" text-anchor="middle">Continue<tspan x="619" dy="15">or finish</tspan></text>
+</g>
+<path d="M1085 390H1164" fill="none" stroke="#0752ad" stroke-width="2" stroke-linejoin="miter" marker-start="url(#flow)" marker-end="url(#flow)"/>
+<path d="M1365 390H1406" fill="none" stroke="#6940a3" stroke-width="2" stroke-linejoin="miter" marker-start="url(#feedback)" marker-end="url(#feedback)" stroke-dasharray="4 4"/>
+<rect x="1167" y="231" width="194" height="354" rx="13" fill="url(#wash)" stroke="#0752ad" stroke-width="1.25"/>
+<rect x="1177" y="219" width="177" height="32" rx="8" fill="#0752ad" stroke="#0752ad" stroke-width="1.25"/>
+<text x="1188" y="240" class="tab" text-anchor="start">4. Model providers</text>
+<rect x="1174" y="262" width="180" height="51" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(1182 275.5) scale(1)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18V5"></path><path d="M15 13a4.17 4.17 0 01-3-4 4.17 4.17 0 01-3 4"></path><path d="M17.707 6.294A3 3 0 1012 5a3 3 0 10-5.707 1.294"></path><path d="M17.996 5.125a4 4 0 012.526 5.77"></path><path d="M18 18a4 4 0 002-7.465"></path><path d="M19.967 17.482a4 4 0 11-7.967.517 4 4 0 11-7.967-.517"></path><path d="M6 18a4 4 0 01-2-7.465"></path><path d="M6.004 5.125a4 4 0 00-2.526 5.77"></path></g>
+<text x="1214" y="287.5" class="label" text-anchor="start">OpenAI</text>
+<text x="1214" y="303.5" class="body" text-anchor="start">Configured models</text>
+<rect x="1174" y="322" width="180" height="51" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(1182 335.5) scale(1)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"></rect><rect x="2" y="16" width="6" height="6" rx="1"></rect><rect x="9" y="2" width="6" height="6" rx="1"></rect><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path><path d="M12 12V8"></path></g>
+<text x="1214" y="347.5" class="label" text-anchor="start">SiliconFlow</text>
+<text x="1214" y="363.5" class="body" text-anchor="start">Configured models</text>
+<rect x="1174" y="382" width="180" height="51" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(1182 395.5) scale(1)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"></path></g>
+<text x="1214" y="407.5" class="label" text-anchor="start">Custom</text>
+<text x="1214" y="423.5" class="body" text-anchor="start">Configured endpoint</text>
+<rect x="1174" y="442" width="180" height="51" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(1182 455.5) scale(1)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5h8"></path><path d="M13 12h8"></path><path d="M13 19h8"></path><path d="m3 17 2 2 4-4"></path><path d="m3 7 2 2 4-4"></path></g>
+<text x="1214" y="467.5" class="label" text-anchor="start">Model catalog</text>
+<text x="1214" y="483.5" class="body" text-anchor="start">Discovery and profiles</text>
+<rect x="1174" y="502" width="180" height="51" rx="8" fill="#ffffff" stroke="#c5d5e2" stroke-width="1.25"/>
+<g transform="translate(1182 515.5) scale(1)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M11 9h4a2 2 0 0 0 2-2V3"></path><circle cx="9" cy="9" r="2"></circle><path d="M7 21v-4a2 2 0 0 1 2-2h4"></path><circle cx="15" cy="15" r="2"></circle></g>
+<text x="1214" y="527.5" class="label" text-anchor="start">Protocol adapters</text>
+<text x="1214" y="543.5" class="body" text-anchor="start">Responses / Completions</text>
+<path d="M1410 549H1379V615H800V604" fill="none" stroke="#6940a3" stroke-width="1.6" stroke-linejoin="miter" marker-end="url(#feedback)" stroke-dasharray="4 4"/>
+<path d="M769 604V636" fill="none" stroke="#0752ad" stroke-width="2" stroke-linejoin="miter" marker-start="url(#flow)" marker-end="url(#flow)"/>
+<path d="M273 610V636" fill="none" stroke="#0752ad" stroke-width="2" stroke-linejoin="miter" marker-start="url(#flow)" marker-end="url(#flow)"/>
+<rect x="201" y="643" width="1136" height="90" rx="13" fill="url(#wash)" stroke="#0752ad" stroke-width="1.25"/>
+<rect x="211" y="631" width="216" height="32" rx="8" fill="#0752ad" stroke="#0752ad" stroke-width="1.25"/>
+<text x="222" y="652" class="tab" text-anchor="start">5. Data &amp; knowledge</text>
+<rect x="217" y="668" width="1103" height="61" rx="12" fill="#f7fbfc" stroke="#9cb3cb" stroke-width="1.25"/>
+<g transform="translate(294.9166666666667 674) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5V19A9 3 0 0 0 21 19V5"></path><path d="M3 12A9 3 0 0 0 21 12"></path></g>
+<text x="308.9166666666667" y="716" class="label" text-anchor="middle">SQLite</text>
+<text x="308.9166666666667" y="726" class="body" text-anchor="middle">Indexes and preferences</text>
+<path d="M400.833 676V720" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(478.75 674) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></g>
+<text x="492.75" y="716" class="label" text-anchor="middle">Rollout</text>
+<text x="492.75" y="726" class="body" text-anchor="middle">Journal and checkpoints</text>
+<path d="M584.667 676V720" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(662.5833333333334 674) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v16"></path><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"></path></g>
+<text x="676.5833333333334" y="716" class="label" text-anchor="middle">Scoped memory</text>
+<text x="676.5833333333334" y="726" class="body" text-anchor="middle">Facts and preferences</text>
+<path d="M768.5 676V720" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(846.4166666666667 674) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"></path><path d="M12 22V12"></path><polyline points="3.29 7 12 12 20.71 7"></polyline><path d="m7.5 4.27 9 5.15"></path></g>
+<text x="860.4166666666667" y="716" class="label" text-anchor="middle">Skill packages</text>
+<text x="860.4166666666667" y="726" class="body" text-anchor="middle">Reviewed publication</text>
+<path d="M952.333 676V720" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(1030.25 674) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"></path><path d="M14 2v5a1 1 0 0 0 1 1h5"></path><path d="m9 15 2 2 4-4"></path></g>
+<text x="1044.25" y="716" class="label" text-anchor="middle">Artifacts</text>
+<text x="1044.25" y="726" class="body" text-anchor="middle">Retained snapshots</text>
+<path d="M1136.17 676V720" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(1214.0833333333335 674) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 14v2.2l1.6 1"></path><path d="M16 2v3"></path><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"></path><path d="M3 9h5.859"></path><path d="M8 2v3"></path><circle cx="16" cy="16" r="6"></circle></g>
+<text x="1228.0833333333335" y="716" class="label" text-anchor="middle">Run records</text>
+<text x="1228.0833333333335" y="726" class="body" text-anchor="middle">Admission and recovery</text>
+<rect x="201" y="756" width="1136" height="115" rx="13" fill="url(#wash)" stroke="#0752ad" stroke-width="1.25"/>
+<rect x="211" y="744" width="275" height="32" rx="8" fill="#0752ad" stroke="#0752ad" stroke-width="1.25"/>
+<text x="222" y="765" class="tab" text-anchor="start">6. Infrastructure &amp; governance</text>
+<rect x="217" y="786" width="1103" height="68" rx="12" fill="#f7fbfc" stroke="#9cb3cb" stroke-width="1.25"/>
+<g transform="translate(294.9166666666667 792) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></g>
+<text x="308.9166666666667" y="834" class="label" text-anchor="middle">Workspace policy</text>
+<text x="308.9166666666667" y="847" class="body" text-anchor="middle">Project / isolated</text>
+<path d="M400.833 794V846" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(478.75 792) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"></path><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"></circle></g>
+<text x="492.75" y="834" class="label" text-anchor="middle">Gateway identity</text>
+<text x="492.75" y="847" class="body" text-anchor="middle">Tokens and scopes</text>
+<path d="M584.667 794V846" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(662.5833333333334 792) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></g>
+<text x="676.5833333333334" y="834" class="label" text-anchor="middle">Tool approval</text>
+<text x="676.5833333333334" y="847" class="body" text-anchor="middle">Separate checks</text>
+<path d="M768.5 794V846" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(846.4166666666667 792) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 14v2.2l1.6 1"></path><path d="M16 2v3"></path><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"></path><path d="M3 9h5.859"></path><path d="M8 2v3"></path><circle cx="16" cy="16" r="6"></circle></g>
+<text x="860.4166666666667" y="834" class="label" text-anchor="middle">Automations</text>
+<text x="860.4166666666667" y="847" class="body" text-anchor="middle">kyler-scheduler</text>
+<path d="M952.333 794V846" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(1030.25 792) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"></path><path d="M15 8h-5"></path><path d="M19 17V5a2 2 0 0 0-2-2H4"></path><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"></path></g>
+<text x="1044.25" y="834" class="label" text-anchor="middle">Audit &amp; logs</text>
+<text x="1044.25" y="847" class="body" text-anchor="middle">Local diagnostics</text>
+<path d="M1136.17 794V846" fill="none" stroke="#a1b1c3" stroke-width="1" stroke-linejoin="round" stroke-dasharray="4 4"/>
+<g transform="translate(1214.0833333333335 792) scale(1.16667)" fill="none" stroke="#0752ad" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"></path><circle cx="12" cy="12" r="3"></circle></g>
+<text x="1228.0833333333335" y="834" class="label" text-anchor="middle">Config &amp; protocol</text>
+<text x="1228.0833333333335" y="847" class="body" text-anchor="middle">Shared contracts</text>
+<path d="M550 735V754" fill="none" stroke="#0752ad" stroke-width="2" stroke-linejoin="miter" marker-end="url(#flow)"/>
+<path d="M1110 735V754" fill="none" stroke="#0752ad" stroke-width="2" stroke-linejoin="miter" marker-end="url(#flow)"/>
+<rect x="1375" y="575" width="180" height="205" rx="10" fill="#f8fcff" stroke="#8ba5c5" stroke-width="1.25"/>
+<text x="1465" y="600" class="note" text-anchor="middle">Execution at a glance</text>
+<circle cx="1394" cy="620" r="8" fill="#0752ad"/>
+<text x="1394" y="624" class="number" text-anchor="middle">1</text>
+<text x="1408" y="624" class="body" text-anchor="start">Admit the request</text>
+<circle cx="1394" cy="644" r="8" fill="#0752ad"/>
+<text x="1394" y="648" class="number" text-anchor="middle">2</text>
+<text x="1408" y="648" class="body" text-anchor="start">Assemble context</text>
+<circle cx="1394" cy="668" r="8" fill="#0752ad"/>
+<text x="1394" y="672" class="number" text-anchor="middle">3</text>
+<text x="1408" y="672" class="body" text-anchor="start">Stream model inference</text>
+<circle cx="1394" cy="692" r="8" fill="#0752ad"/>
+<text x="1394" y="696" class="number" text-anchor="middle">4</text>
+<text x="1408" y="696" class="body" text-anchor="start">Authorize and run tools</text>
+<circle cx="1394" cy="716" r="8" fill="#0752ad"/>
+<text x="1394" y="720" class="number" text-anchor="middle">5</text>
+<text x="1408" y="720" class="body" text-anchor="start">Record results and repeat</text>
+<circle cx="1394" cy="740" r="8" fill="#0752ad"/>
+<text x="1394" y="744" class="number" text-anchor="middle">6</text>
+<text x="1408" y="744" class="body" text-anchor="start">Return final response</text>
+<path d="M1384 800H1410" fill="none" stroke="#0752ad" stroke-width="2" stroke-linejoin="miter" marker-end="url(#flow)"/>
+<text x="1418" y="804" class="body" text-anchor="start">Request / execution</text>
+<path d="M1384 824H1410" fill="none" stroke="#08776e" stroke-width="2" stroke-linejoin="miter" marker-end="url(#tool)"/>
+<text x="1418" y="828" class="body" text-anchor="start">Tool calls / results</text>
+<path d="M1384 848H1410" fill="none" stroke="#6940a3" stroke-width="2" stroke-linejoin="miter" marker-end="url(#feedback)" stroke-dasharray="4 4"/>
+<text x="1418" y="852" class="body" text-anchor="start">Reviewed feedback</text>
 </svg>

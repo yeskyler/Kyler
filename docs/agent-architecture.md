@@ -1,18 +1,14 @@
 # Kyler Agent Architecture
 
-Implementation snapshot: **19 November 2026**. This overview describes the current
-workspace, including reviewed memory and skill drafts. Boxes describe ownership
-and data flow; they are not separate deployed services unless stated explicitly.
-The overview centers **Agent Runtime** and shows its clockwise execution loop:
-**Assemble Context → Model Inference → Dispatch Tools → Record Results → Assemble
-Context**. The loop ends on a final answer, cancellation or an execution limit.
+The overview puts **Agent Runtime** at the center of the system. Its clockwise
+loop assembles context, streams model inference, dispatches authorized tools,
+and records results before assembling the next request.
 
-ThreadManager admits turns above the runtime. Memory and Skills supply context on
-the left; model inference, tools, MCP and sandbox execution connect on the right.
-Persistence and user-visible results sit below it. The outer experience feedback
-path returns reviewed knowledge to future turns. Blue arrows mark the execution
-loop, solid gray arrows mark calls/data, and dashed green arrows mark policy or
-reviewed feedback.
+Web and HTTP clients enter through the authenticated service. TUI and ACP use
+in-process host integration. Tools and sandbox execution sit to the left of
+the runtime, with model providers on the right and extension and review
+capabilities in the outer columns. Data and governance span the bottom. The dashed
+purple arrow represents reviewed knowledge returning to future turns.
 
 ![Kyler Agent architecture](assets/agent-architecture.svg)
 
@@ -38,7 +34,8 @@ flowchart TB
     ACP --> Bridge[CLI host bridge]
     TUI --> Threads
     Bridge --> Threads
-    Server --> Threads
+    Server --> Gateway[kyler-gateway: issued tokens, scopes and audit]
+    Gateway --> Threads
     Scheduler[kyler-scheduler: cron, time zones, leases and run snapshots] --> Server
 
     subgraph Core[kyler-core: one execution implementation]
@@ -175,6 +172,8 @@ partial arguments never execute; streaming early execution is not implemented.
 | Area | Current features | Owner |
 | --- | --- | --- |
 | Interfaces | Web chat, TUI, CLI, ACP editor integration | `web/`, `kyler-tui`, `kyler-cli`, `kyler-client`, `kyler-acp` |
+| Gateway | Issued API credentials, role and resource scopes, token lifecycle, and local audit | `kyler-gateway`, HTTP server adapter |
+| Model providers | Provider discovery, model catalog, reasoning preferences, Responses and Chat Completions adapters | `kyler-provider`, core model routing |
 | Runtime | Shared thread operations, streaming loop, cancellation, execution limits, model snapshots and thinking preferences | `kyler-core` |
 | Concurrency | Parallel/exclusive/wait scheduling, independent child sessions, bounded delegation and task review | `kyler-core` |
 | Tools | Focused reads/searches, patches with change statistics, commands, process input/poll/terminate, images and attachments | `kyler-core` |
