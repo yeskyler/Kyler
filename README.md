@@ -42,7 +42,7 @@ Ripgrep is bundled on both platforms; macOS uses system Seatbelt.
 The installation domain may show an ICP filing notice. Download the release directly from
 [GitHub Releases](https://github.com/yeskyler/Kyler/releases) if that happens.
 
-1. From the same release, download the bundle and installer for your platform,
+1. From the same release, download the bundle for your platform,
    along with the checksum file.
 2. Save the [installation script](scripts/install.sh) alongside the downloaded files.
    Run this command from that directory, replacing the placeholder with the downloaded archive filename.

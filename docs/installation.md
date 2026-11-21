@@ -32,10 +32,9 @@ configuration and launch. All stages share inline `indicatif` progress and
 `cliclack` setup controls. Diagnostics are saved to
 private installation logs; failures show a concise reason and the log path.
 
-Packages also provide `kyler-installer-vVERSION-TARGET`, covered by the release's
-`SHA256SUMS`. This currently reuses the full CLI executable rather than maintaining
-a separate installer engine. Keep that executable, `SHA256SUMS` and the archive
-together for offline use. If absent, the bootstrap downloads a verified installer.
+Native packaging also emits a standalone CLI installer for the installation server.
+GitHub Releases provide the complete platform archives and their checksums.
+Pass a downloaded archive with `--bundle` to bootstrap from the CLI inside it.
 For source development or a trusted offline installer, set `KYLER_INSTALLER_BINARY`
 to its executable path. This explicit override is trusted executable code, not a
 replacement for verification of the selected bundle.
@@ -150,8 +149,8 @@ An already unpacked bundle can be installed without the shell bootstrap:
 The CLI accepts unpacked directories and `.tar.gz` archives, or downloads a release:
 
 ```sh
-kyler install --bundle ./kyler-v0.5.0-aarch64-apple-darwin.tar.gz
-kyler install --version 0.5.0
+kyler install --bundle ./kyler-v0.3.0-aarch64-apple-darwin.tar.gz
+kyler install --version 0.3.0
 ```
 
 These paths share the same transaction and UI. Archive links, special files,

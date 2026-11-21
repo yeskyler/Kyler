@@ -60,7 +60,6 @@ def assets(directory, version, revision):
     if not bundles:
         raise ValueError(f"No native bundles for version {version}")
     lines = []
-    installers = []
     for path in bundles:
         match = re.fullmatch(rf"kyler-v{re.escape(version)}-({TARGET})\.tar\.gz", path.name)
         if not match or path.is_symlink() or not path.is_file():
@@ -88,24 +87,7 @@ def assets(directory, version, revision):
                 if source.read() != license_path.read_bytes():
                     raise ValueError("Bundle LICENSE differs from source")
         lines.append(f"{digest.hexdigest()}  {path.name}\n")
-        installer = directory / f"kyler-installer-v{version}-{match[1]}"
-        if installer.exists():
-            if installer.is_symlink() or not installer.is_file():
-                raise ValueError("Invalid installer file type")
-            installer_digest = hashlib.sha256(installer.read_bytes()).hexdigest()
-            if checksums.get(installer.name) != installer_digest:
-                raise ValueError(f"Checksum mismatch: {installer.name}")
-            with tarfile.open(path) as archive:
-                member = archive.getmember(f"{path.name[:-7]}/bin/kyler")
-                if not member.isfile():
-                    raise ValueError("Invalid bundled installer executable")
-                with archive.extractfile(member) as executable:
-                    expected = hashlib.file_digest(executable, "sha256").hexdigest() if hasattr(hashlib, "file_digest") else hashlib.sha256(executable.read()).hexdigest()
-            if installer_digest != expected:
-                raise ValueError("Installer executable differs from its verified bundle")
-            installers.append(installer)
-            lines.append(f"{installer_digest}  {installer.name}\n")
-    return bundles + installers, "".join(lines)
+    return bundles, "".join(lines)
 
 
 def collect_artifacts(source, destination, version, revision):

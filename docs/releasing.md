@@ -185,9 +185,7 @@ falls back to GitHub for the same selected version.
 
 ### CLI installer assets
 
-Native packaging also emits `kyler-installer-vVERSION-TARGET` and includes its
-SHA256 in `SHA256SUMS`. Publish it beside its native archive. Release validation
-checks that it is byte-identical to the archive's `bin/kyler`; artifact collection
-and incremental uploads include both files. The shell bootstrap downloads this
-executable before handing all bundle operations and UI to the CLI. Offline users
-should keep the executable, checksum manifest and archive together.
+Native packaging also emits `kyler-installer-vVERSION-TARGET` for the installation
+server. GitHub release publishing includes only the platform archives and a
+checksum manifest for those archives. For a GitHub download, run the installation
+script with `--bundle` so it can bootstrap from the CLI inside the archive.

@@ -39,7 +39,7 @@ Linux 使用系统安装的 Bubblewrap 和网络工具，见 [Linux 依赖说明
 
 如果安装域名显示备案提示，请直接从 [GitHub Releases](https://github.com/yeskyler/Kyler/releases) 下载。
 
-1. 从同一版本下载适合本机的发行包、对应的安装器和校验文件。
+1. 从同一版本下载适合本机的发行包和校验文件。
 2. 将[安装脚本](scripts/install.sh)与下载的文件放在一起。
    在该目录运行下面的命令，将占位符换成实际下载的压缩包文件名。
 

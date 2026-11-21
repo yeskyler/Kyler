@@ -59,18 +59,15 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Checksum"):
             release.assets(self.dist, "0.1.0", "commit-id")
 
-    def test_installer_is_published_only_when_it_matches_the_bundle(self):
+    def test_standalone_installer_is_excluded_from_github_assets(self):
         installer = self.dist / "kyler-installer-v0.1.0-aarch64-apple-darwin"
         installer.write_bytes(b"fixture-installer")
         sums = self.dist / "SHA256SUMS"
-        sums.write_text(sums.read_text()+hashlib.sha256(installer.read_bytes()).hexdigest()+"  "+installer.name+"\n")
+        with sums.open("a") as manifest:
+            manifest.write(f"{hashlib.sha256(installer.read_bytes()).hexdigest()}  {installer.name}\n")
         assets, manifest = release.assets(self.dist, "0.1.0", "commit-id")
-        self.assertIn(installer, assets)
-        self.assertIn(installer.name, manifest)
-        installer.write_bytes(b"different-installer")
-        sums.write_text(sums.read_text().splitlines()[0]+"\n"+hashlib.sha256(installer.read_bytes()).hexdigest()+"  "+installer.name+"\n")
-        with self.assertRaisesRegex(ValueError, "differs from its verified bundle"):
-            release.assets(self.dist, "0.1.0", "commit-id")
+        self.assertNotIn(installer, assets)
+        self.assertNotIn(installer.name, manifest)
 
     def test_wrong_bundle_version_is_rejected_and_installer_is_not_required(self):
         self.bundle("0.2.0")
