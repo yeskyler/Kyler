@@ -39,15 +39,9 @@ Linux 使用系统安装的 Bubblewrap 和网络工具，见 [Linux 依赖说明
 
 如果安装域名显示备案提示，请直接从 [GitHub Releases](https://github.com/yeskyler/Kyler/releases) 下载。
 
-1. 在同一版本的 **Assets** 中下载适合本机的平台发行包
-   （`kyler-vVERSION-TARGET.tar.gz`）、对应的 `kyler-installer-vVERSION-TARGET`
-   和 `SHA256SUMS`，放在同一个目录。
-2. 将 [`scripts/install.sh`](scripts/install.sh) 保存到该目录并命名为 `install.sh`。
-   把命令中的示例文件名换成实际下载的发行包名称。
-
-```sh
-sh install.sh --bundle ./kyler-vVERSION-TARGET.tar.gz
-```
+1. 从同一版本下载适合本机的发行包、对应的安装器和校验文件。
+2. 将[安装脚本](scripts/install.sh)与下载的文件放在一起。
+   运行脚本时，在 `--bundle` 后传入下载的压缩包文件名。
 
 安装的最后一步会引导配置模型与访问方式，选择“Save and start”即可启动。后续可运行 `kyler configure` 重新配置。打开显示的 Web 地址，使用自动生成的 token 登录。
 也可以运行 `kyler`（等同于 `kyler tui`）打开本地终端界面，无需启动后台服务。

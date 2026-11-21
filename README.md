@@ -42,15 +42,10 @@ Ripgrep is bundled on both platforms; macOS uses system Seatbelt.
 The installation domain may show an ICP filing notice. Download the release directly from
 [GitHub Releases](https://github.com/yeskyler/Kyler/releases) if that happens.
 
-1. In the release's **Assets**, download the bundle for your platform
-   (`kyler-vVERSION-TARGET.tar.gz`), the matching `kyler-installer-vVERSION-TARGET`,
-   and `SHA256SUMS` from the same release. Keep them in the same directory.
-2. Save [`scripts/install.sh`](scripts/install.sh) as `install.sh` in that directory.
-   Replace the example archive name below with the file you downloaded.
-
-```sh
-sh install.sh --bundle ./kyler-vVERSION-TARGET.tar.gz
-```
+1. From the same release, download the bundle and installer for your platform,
+   along with the checksum file.
+2. Save the [installation script](scripts/install.sh) alongside the downloaded files.
+   Run the script with `--bundle` followed by the downloaded archive's filename.
 
 The final installation step opens the configuration wizard. Choose **Save and start**
 to start the service, or run `kyler configure` later. Open the displayed Web address
