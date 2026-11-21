@@ -1,12 +1,14 @@
 "use client";
 
+import { useId } from "react";
 import {
+  Area,
   Bar,
   BarChart,
-  Cell,
   CartesianGrid,
+  Cell,
+  ComposedChart,
   Line,
-  LineChart,
   ReferenceLine,
   Tooltip,
   XAxis,
@@ -46,6 +48,7 @@ export function ContextPanel({
   analytics?: InspectionAnalytics;
   active?: boolean;
 }) {
+  const inputFillId = useId();
   if (!data)
     return (
       <div className="space-y-5">
@@ -316,7 +319,13 @@ export function ContextPanel({
                 label="Input tokens by model request, with compression and model changes"
                 height={260}
               >
-                <LineChart data={trend} margin={{ left: 0, right: 15, top: 15 }}>
+                <ComposedChart data={trend} margin={{ left: 0, right: 15, top: 15 }}>
+                  <defs>
+                    <linearGradient id={inputFillId} x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor={chartColors[0]} stopOpacity={0.2} />
+                      <stop offset="100%" stopColor={chartColors[0]} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" />
                   <XAxis
                     dataKey="name"
@@ -334,12 +343,13 @@ export function ContextPanel({
                     width={52}
                   />
                   <Tooltip content={<ChartTooltip tokens />} />
-                  <Line
+                  <Area
                     dataKey="input"
                     name="Input"
                     type="linear"
                     stroke={chartColors[0]}
                     strokeWidth={2}
+                    fill={`url(#${inputFillId})`}
                     dot={history.length < 20 ? { r: 3 } : false}
                     connectNulls={false}
                     isAnimationActive={false}
@@ -356,7 +366,7 @@ export function ContextPanel({
                     <ReferenceLine
                       key={`compression-${name}-${i}`}
                       x={name}
-                      stroke="var(--chart-2)"
+                      stroke={chartColors[2]}
                       strokeDasharray="3 3"
                       label={{
                         value: "Compressed",
@@ -370,7 +380,7 @@ export function ContextPanel({
                     <ReferenceLine
                       key={`model-${name}`}
                       x={name}
-                      stroke="var(--chart-4)"
+                      stroke={chartColors[4]}
                       label={{
                         value: "Model / budget",
                         position: "insideBottomLeft",
@@ -379,7 +389,7 @@ export function ContextPanel({
                       }}
                     />
                   ))}
-                </LineChart>
+                </ComposedChart>
               </ChartFrame>
             )}
             <ChartKey

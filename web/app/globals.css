@@ -97,11 +97,11 @@
   --border: #e4e4e4;
   --input: #d4d4d4;
   --ring: oklch(0.56 0 0);
-  --chart-1: oklch(0.3 0 0);
-  --chart-2: oklch(0.43 0 0);
-  --chart-3: oklch(0.56 0 0);
-  --chart-4: oklch(0.69 0 0);
-  --chart-5: oklch(0.8 0 0);
+  --chart-1: #2563eb;
+  --chart-2: #0f827a;
+  --chart-3: #b66a08;
+  --chart-4: #7c3aed;
+  --chart-5: #be467e;
   --sidebar: #f5f5f5;
   --sidebar-foreground: oklch(0.32 0 0);
   --sidebar-primary: var(--primary);

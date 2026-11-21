@@ -19,6 +19,12 @@ const series = [
   { key: "compactions", name: "Compressions", color: chartColors[2] },
   { key: "subagents", name: "Subagent updates", color: chartColors[3] },
 ] as const;
+const toolResults = [
+  { key: "succeeded", name: "Succeeded", color: chartColors[1] },
+  { key: "failed", name: "Failed", color: "var(--destructive)" },
+  { key: "pending", name: "No recorded result", color: chartColors[2] },
+];
+
 export function RolloutCharts({
   analytics,
   active,
@@ -144,11 +150,7 @@ export function RolloutCharts({
                     }
                   />
                   <Tooltip content={<ChartTooltip />} />
-                  {[
-                    { key: "succeeded", name: "Succeeded", color: chartColors[0] },
-                    { key: "failed", name: "Failed", color: "var(--destructive)" },
-                    { key: "pending", name: "No recorded result", color: chartColors[3] },
-                  ].map((item) => (
+                  {toolResults.map((item) => (
                     <Bar
                       key={item.key}
                       dataKey={item.key}
@@ -167,13 +169,7 @@ export function RolloutCharts({
                 </BarChart>
               </ChartFrame>
             )}
-            <ChartKey
-              items={[
-                { label: "Succeeded", color: chartColors[0] },
-                { label: "Failed", color: "var(--destructive)" },
-                { label: "No result", color: chartColors[3] },
-              ]}
-            />
+            <ChartKey items={toolResults.map(({ name, color }) => ({ label: name, color }))} />
             <div className="mt-4 flex flex-wrap gap-2">
               {analytics.tools
                 .slice(0, 5)

@@ -159,7 +159,11 @@ export function ChartTooltip({
           .map((entry, i) => (
             <div key={`${entry.name}-${i}`} className="flex items-center justify-between gap-6">
               <span className="inline-flex items-center gap-2 text-muted-foreground">
-                <span className="size-2 rounded-sm" style={{ backgroundColor: entry.color }} />
+                <span
+                  aria-hidden
+                  className="size-2.5 shrink-0 rounded-[3px]"
+                  style={{ backgroundColor: entry.color }}
+                />
                 {entry.name}
               </span>
               <span className="font-medium tabular-nums">
@@ -176,7 +180,11 @@ export function ChartKey({ items }: { items: { label: string; color: string; val
     <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
       {items.map((item) => (
         <span key={item.label} className="inline-flex items-center gap-1.5">
-          <span className="size-2 rounded-sm" style={{ backgroundColor: item.color }} />
+          <span
+            aria-hidden
+            className="size-2.5 shrink-0 rounded-[3px]"
+            style={{ backgroundColor: item.color }}
+          />
           {item.label}
           {item.value && <span className="ml-1 text-foreground tabular-nums">{item.value}</span>}
         </span>
