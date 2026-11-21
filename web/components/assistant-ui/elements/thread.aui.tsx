@@ -222,7 +222,7 @@ const ThreadRoot: FC<{ autoFocus: boolean; composerBefore?: ReactNode }> = ({
       style={{
         ["--thread-max-width" as string]: "50rem",
         ["--composer-bg" as string]: "var(--card)",
-        ["--composer-radius" as string]: "1.5rem",
+        ["--composer-radius" as string]: "1rem",
         ["--composer-padding" as string]: "10px",
       }}
     >
@@ -510,13 +510,13 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   const { ComposerHeader, ComposerFooter } = useContext(ThreadComponentsContext);
   return (
     <PasteComposerRoot className="aui-composer-root relative flex w-full flex-col">
-      <div className="rounded-(--composer-radius) border border-foreground/10 bg-muted/25 shadow-[0_4px_24px_-12px_rgb(0_0_0/0.16)] focus-within:border-foreground/20 dark:shadow-none">
+      <div className="rounded-(--composer-radius) border border-border bg-muted shadow-sm transition-[border-color,box-shadow] focus-within:border-input focus-within:ring-2 focus-within:ring-ring/15">
         {ComposerHeader && <ComposerHeader />}
         <ComposerPrimitive.AttachmentDropzone
           render={
             <div
               data-slot="aui_composer-shell"
-              className="-mx-px -mb-px border-foreground/10 focus-within:border-foreground/20 data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-1.5 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
+              className="-mx-px -mb-px border-border focus-within:border-input data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-1.5 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
             />
           }
         >
@@ -872,7 +872,7 @@ const UserMessage: FC = () => {
       <UserMessageAttachments />
 
       <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
-        <div className="aui-user-message-content peer bg-muted text-foreground rounded-(--composer-radius) px-4 py-2 wrap-break-word empty:hidden">
+        <div className="aui-user-message-content peer bg-secondary text-foreground rounded-(--composer-radius) px-4 py-2 wrap-break-word empty:hidden">
           <MessagePrimitive.Parts components={{ File: UserFilePart, Image: UserImagePart }} />
         </div>
         <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
@@ -904,7 +904,7 @@ const EditComposer: FC = () => {
       data-slot="aui_edit-composer-wrapper"
       className="flex flex-col px-2 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
-      <PasteComposerRoot className="aui-edit-composer-root -mx-px -mb-px border-foreground/10 focus-within:border-foreground/20 ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color]">
+      <PasteComposerRoot className="aui-edit-composer-root -mx-px -mb-px border-border focus-within:border-input ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color]">
         <ComposerAttachments />
         <PasteComposerInput
           className="aui-edit-composer-input text-foreground min-h-14 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none"

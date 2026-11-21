@@ -208,7 +208,7 @@ export function WorkspaceSidebar({
   );
   return (
     <aside
-      className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border/60 bg-sidebar px-3 py-4 text-sidebar-foreground sm:w-72"
+      className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-3 py-4 text-sidebar-foreground sm:w-72"
       aria-label="Workspace navigation"
     >
       <div className="flex items-center gap-2.5 px-3 pt-2 pb-7 text-[28px] font-semibold tracking-tight">
@@ -218,7 +218,7 @@ export function WorkspaceSidebar({
       <nav aria-label="Primary navigation" className="flex flex-col gap-1.5">
         <Button
           variant="ghost"
-          className="h-11 w-full justify-center gap-2 rounded-xl bg-sidebar-accent px-3 text-sm font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent"
+          className="h-11 w-full justify-center gap-2 rounded-lg border border-sidebar-border bg-card px-3 text-sm font-medium text-foreground shadow-xs hover:bg-sidebar-accent"
           aria-current={view === "chat" && session.draft ? "page" : undefined}
           disabled={busy}
           onClick={() => void newChat()}
@@ -228,7 +228,7 @@ export function WorkspaceSidebar({
         <Button
           variant="ghost"
           aria-current={view === "resources" ? "page" : undefined}
-          className="h-11 w-full justify-start gap-3 rounded-xl px-3 text-sm font-medium hover:bg-sidebar-accent/60"
+          className="h-11 w-full justify-start gap-3 rounded-lg px-3 text-sm font-medium hover:bg-sidebar-accent/60 aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground"
           onClick={() => setView("resources")}
         >
           <BlocksIcon className="size-4" />
@@ -237,7 +237,7 @@ export function WorkspaceSidebar({
         <Button
           variant="ghost"
           aria-current={view === "automations" ? "page" : undefined}
-          className="h-11 w-full justify-start gap-3 rounded-xl px-3 text-sm font-medium hover:bg-sidebar-accent/60"
+          className="h-11 w-full justify-start gap-3 rounded-lg px-3 text-sm font-medium hover:bg-sidebar-accent/60 aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground"
           onClick={() => setView("automations")}
         >
           <CalendarClockIcon className="size-4" />
@@ -245,14 +245,14 @@ export function WorkspaceSidebar({
         </Button>
       </nav>
       <div className="mt-8 mb-3 flex items-center justify-between pl-3 pr-1">
-        <span className="text-xs font-medium text-sidebar-foreground/50">Workspaces</span>
+        <span className="text-xs font-medium text-muted-foreground">Workspaces</span>
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon-xs"
             aria-label="Search chats and workspaces"
             aria-pressed={searchOpen}
-            className="text-sidebar-foreground/50"
+            className="text-muted-foreground"
             onClick={() => {
               setSearchOpen((value) => !value);
               setQuery("");
@@ -264,7 +264,7 @@ export function WorkspaceSidebar({
             variant="ghost"
             size="icon-xs"
             aria-label="Refresh history"
-            className="text-sidebar-foreground/50"
+            className="text-muted-foreground"
             onClick={() => setVersion((n) => n + 1)}
           >
             <RefreshCwIcon className="size-3.5" />
@@ -365,7 +365,7 @@ export function WorkspaceSidebar({
                     return (
                       <div
                         key={item.session_id}
-                        className="group flex items-center rounded-xl transition-colors hover:bg-sidebar-accent/70"
+                        className="group flex items-center rounded-lg transition-colors hover:bg-sidebar-accent/60 has-[[aria-current=page]]:bg-sidebar-accent has-[[aria-current=page]]:text-sidebar-accent-foreground"
                       >
                         <button
                           type="button"
@@ -381,7 +381,7 @@ export function WorkspaceSidebar({
                               selectSession(item.session_id);
                             setView("chat");
                           }}
-                          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl py-2.5 pl-3 pr-1 text-left text-[13px] disabled:opacity-50"
+                          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-2.5 pl-3 pr-1 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring aria-[current=page]:font-medium disabled:opacity-50"
                         >
                           <span className="min-w-0 flex-1 truncate">{title}</span>
                           {activity.busy && (
@@ -428,7 +428,7 @@ export function WorkspaceSidebar({
           );
         })}
         {!workspaceGroups.length && (
-          <p className="px-3 py-5 text-xs text-sidebar-foreground/50">
+          <p className="px-3 py-5 text-xs text-muted-foreground">
             Add a workspace to start a chat.
           </p>
         )}
@@ -448,7 +448,7 @@ export function WorkspaceSidebar({
             `${sessionTitle(item.title, item.placeholder)} ${item.project ?? "Default workspace"}`
               .toLowerCase()
               .includes(query.trim().toLowerCase()),
-          ) && <p className="px-3 py-4 text-xs text-sidebar-foreground/50">No matching chats.</p>}
+          ) && <p className="px-3 py-4 text-xs text-muted-foreground">No matching chats.</p>}
       </nav>
       <Button
         variant="ghost"

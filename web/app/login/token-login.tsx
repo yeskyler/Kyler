@@ -50,7 +50,7 @@ export function TokenLogin({ returnTo }: { returnTo: string }) {
       </header>
       <div className="flex flex-1 items-center justify-center py-10 sm:py-14">
         <section
-          className="w-full max-w-[440px] rounded-3xl border border-border/80 bg-card p-6 shadow-[0_12px_48px_-24px_rgb(0_0_0/0.2)] sm:p-9"
+          className="w-full max-w-[440px] rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-9"
           aria-labelledby="login-heading"
         >
           <div className="mb-8">
@@ -95,7 +95,7 @@ export function TokenLogin({ returnTo }: { returnTo: string }) {
                 }}
                 aria-invalid={!!error}
                 aria-describedby={error ? "token-error" : "token-hint"}
-                className="h-12 rounded-xl border-border bg-background pr-12 pl-11 font-mono text-sm tracking-wide shadow-none placeholder:font-sans placeholder:tracking-normal focus-visible:border-foreground/40 focus-visible:ring-3 focus-visible:ring-foreground/8"
+                className="h-12 rounded-xl border-border bg-background pr-12 pl-11 font-mono text-sm tracking-wide shadow-none placeholder:font-sans placeholder:tracking-normal focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
               />
               <Button
                 type="button"
