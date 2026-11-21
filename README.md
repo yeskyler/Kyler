@@ -45,7 +45,11 @@ The installation domain may show an ICP filing notice. Download the release dire
 1. From the same release, download the bundle and installer for your platform,
    along with the checksum file.
 2. Save the [installation script](scripts/install.sh) alongside the downloaded files.
-   Run the script with `--bundle` followed by the downloaded archive's filename.
+   Run this command from that directory, replacing the placeholder with the downloaded archive filename.
+
+```sh
+sh install.sh --bundle "<archive-filename>.tar.gz"
+```
 
 The final installation step opens the configuration wizard. Choose **Save and start**
 to start the service, or run `kyler configure` later. Open the displayed Web address

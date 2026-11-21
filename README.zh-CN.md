@@ -41,7 +41,11 @@ Linux 使用系统安装的 Bubblewrap 和网络工具，见 [Linux 依赖说明
 
 1. 从同一版本下载适合本机的发行包、对应的安装器和校验文件。
 2. 将[安装脚本](scripts/install.sh)与下载的文件放在一起。
-   运行脚本时，在 `--bundle` 后传入下载的压缩包文件名。
+   在该目录运行下面的命令，将占位符换成实际下载的压缩包文件名。
+
+```sh
+sh install.sh --bundle "<archive-filename>.tar.gz"
+```
 
 安装的最后一步会引导配置模型与访问方式，选择“Save and start”即可启动。后续可运行 `kyler configure` 重新配置。打开显示的 Web 地址，使用自动生成的 token 登录。
 也可以运行 `kyler`（等同于 `kyler tui`）打开本地终端界面，无需启动后台服务。
