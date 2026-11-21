@@ -45,7 +45,8 @@ sh install.sh
 ```
 
 安装的最后一步会引导配置模型与访问方式，选择“Save and start”即可启动。后续可运行 `kyler configure` 重新配置。打开显示的 Web 地址，使用自动生成的 token 登录。
-也可以运行 `kyler tui` 使用终端界面。
+也可以运行 `kyler`（等同于 `kyler tui`）打开本地终端界面，无需启动后台服务。
+如需连接后台服务进行命令行聊天，请显式运行 `kyler chat`。
 
 ```sh
 kyler service status   # 查看服务状态

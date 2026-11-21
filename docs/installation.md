@@ -273,7 +273,7 @@ and retrieve the token again with
 | View Web token | `kyler service token` |
 | Rotate Web token | `kyler service token --reset` |
 | Reconfigure model and access scope | `kyler configure --web` |
-| Open the terminal interface | `kyler tui` |
+| Open the local terminal interface | `kyler` (or `kyler tui`) |
 
 `kyler logs backend` and `kyler logs web` show the last 100 lines, then continuously
 follow new output. `kyler logs` defaults to the backend. Press Ctrl+C to exit the viewer without stopping the service. The commands
@@ -348,9 +348,13 @@ downloads.
 
 ### Local terminal agent
 
-Run `kyler tui` from your project directory. It loads local model credentials and
+Run `kyler` from your project directory; it defaults to `kyler tui`. It loads local model credentials and
 executes the agent in the terminal process; backend and Web services do not need
 to be running. The backend access token and `--server` option are not used by TUI.
+
+For backend-connected text chat, explicitly run `kyler chat`. For piped input use
+`kyler chat` or `kyler run`; the default TUI requires an interactive terminal and
+rejects `--json` and `--server` just like an explicit `kyler tui` invocation.
 
 Resume a local session with `kyler tui --session <session-id>`. Local TUI sessions
 are separate from Web sessions and normally live in `~/.kyler/tui/sessions`.

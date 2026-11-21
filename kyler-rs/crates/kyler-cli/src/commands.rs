@@ -22,7 +22,10 @@ use crate::{
 
 use kyler_client::Client;
 
-pub async fn execute(args: Args) -> Result<()> {
+pub async fn execute(mut args: Args) -> Result<()> {
+    if args.command.is_none() {
+        args.command = Some(Command::Tui { session: None });
+    }
     if let Some(Command::Token { command }) = &args.command {
         if args.server.is_some() {
             return Err(CliError::new(
@@ -171,7 +174,7 @@ pub async fn execute(args: Args) -> Result<()> {
         kyler_config::loader::load_client(args.config.as_deref(), args.server.as_deref())
             .map_err(|e| CliError::new(2, e.to_string()))?;
     let client = Client::new(settings)?;
-    match args.command.unwrap_or(Command::Chat { session: None }) {
+    match args.command.expect("default command was assigned") {
         Command::Skills { command } => skills::execute(&client, command, args.json).await,
         Command::Eval { suite, report } => eval::run(&client, &suite, &report).await,
         Command::Install { .. } | Command::Tui { .. } | Command::Acp | Command::Learning { .. } => {

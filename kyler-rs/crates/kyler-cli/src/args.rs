@@ -80,7 +80,7 @@ pub enum Command {
         #[arg(long, default_value = "eval-report.json")]
         report: PathBuf,
     },
-    /// Interactive conversation (the default command).
+    /// Interactive conversation through the backend service.
     Chat {
         #[arg(long)]
         session: Option<String>,
@@ -110,7 +110,7 @@ pub enum Command {
         #[command(subcommand)]
         command: ServiceCommand,
     },
-    /// Open the local in-process terminal agent (no backend service required).
+    /// Open the local terminal agent (default command; no backend service required).
     Tui {
         #[arg(long)]
         session: Option<String>,

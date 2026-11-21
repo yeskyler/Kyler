@@ -225,7 +225,7 @@ async fn json_stdout_contains_only_json_records_and_full_final_snapshot() {
 async fn chat_accepts_piped_turns_and_exits_on_command_or_eof() {
     let fixture = Fixture::new(StateData::default()).await;
     let mut cmd = fixture.cmd();
-    cmd.stdin(Stdio::piped());
+    cmd.arg("chat").stdin(Stdio::piped());
     let mut child = cmd.spawn().unwrap();
     child
         .stdin
@@ -243,6 +243,31 @@ async fn chat_accepts_piped_turns_and_exits_on_command_or_eof() {
     let eof = fixture.output(&["chat"]).await;
     assert!(eof.status.success());
     assert!(eof.stdout.is_empty());
+}
+
+#[tokio::test]
+async fn omitted_subcommand_uses_local_tui_and_rejects_server_before_configuration() {
+    let fixture = Fixture::new(StateData::default()).await;
+    for args in [vec![], vec!["tui"]] {
+        let out = fixture.output(&args).await;
+        assert_eq!(out.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&out.stderr)
+                .contains("tui runs locally; --server is not supported")
+        );
+    }
+    assert_eq!(fixture.state.starts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn omitted_subcommand_rejects_json_like_explicit_tui() {
+    let fixture = Fixture::new(StateData::default()).await;
+    for args in [vec!["--json"], vec!["--json", "tui"]] {
+        let out = fixture.output(&args).await;
+        assert_eq!(out.status.code(), Some(2));
+        let error: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(error["message"], "--json cannot be combined with tui");
+    }
 }
 #[tokio::test]
 async fn run_failure_and_invalid_parameters_have_distinct_exit_codes() {

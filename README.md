@@ -45,7 +45,8 @@ sh install.sh
 ```
 
 Run `kyler configure` to configure the model and access scope, then choose **Save and start**. Open the displayed Web address
-and sign in with the generated token, or run `kyler tui` for the terminal interface.
+and sign in with the generated token, or run `kyler` (equivalent to `kyler tui`) for the local terminal interface.
+Use `kyler chat` for interactive chat through the backend service.
 
 ```sh
 kyler service status   # Check service status
