@@ -80,9 +80,6 @@ async fn completion(State(model): State<Model>, Json(request): Json<Value>) -> R
         if let Some(output) = input.strip_prefix("deliver:") {
             yield Ok::<_, Infallible>(Event::default().data(chunk(json!({"content":output}),Value::Null)));
             yield Ok::<_, Infallible>(Event::default().data(chunk(json!({}),json!("stop"))));
-        } else if input=="question" && !has_result {
-            let args = json!({"questions":[{"id":"format","question":"Choose an output format","type":"single_select","options":[{"id":"pdf","label":"PDF"},{"id":"pptx","label":"PowerPoint"}]}]});
-            yield Ok::<_, Infallible>(Event::default().data(chunk(json!({"tool_calls":[{"index":0,"id":"question-call","function":{"name":"ask_question","arguments":args.to_string()}}]}),json!("tool_calls"))));
         } else if input=="history-tool" && !has_result {
             yield Ok::<_, Infallible>(Event::default().data(chunk(json!({"content":"Inspecting the project before calling a tool."}),Value::Null)));
             yield Ok::<_, Infallible>(Event::default().data(chunk(json!({"tool_calls":[{"index":0,"id":"history-call","function":{"name":"echo","arguments":"{\"api_key\":\"DO_NOT_EXPOSE\",\"path\":\"/project\"}"}}]}),json!("tool_calls"))));

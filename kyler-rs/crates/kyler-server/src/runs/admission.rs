@@ -343,11 +343,6 @@ impl RunManager {
                 .keys
                 .insert((session_id, key), (info.run_id.clone(), fingerprint));
         }
-        let permit = Arc::new(super::questions::QuestionPermit::new(
-            permit,
-            self.permits.clone(),
-        ));
-        let agent = agent.with_questions(self.questions.clone(), Some(permit.clone()));
         let manager = self.clone();
         tokio::spawn(async move {
             let result = manager

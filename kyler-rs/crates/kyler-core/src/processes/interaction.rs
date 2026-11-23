@@ -1,4 +1,4 @@
-//! Serialized incremental reads for the two model-facing process tools.
+//! Serialized incremental reads for the model-facing command lifecycle.
 use super::ProcessManager;
 use crate::{
     environment::ExecutionEnvironment,

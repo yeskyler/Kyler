@@ -24,25 +24,42 @@ pub(crate) fn decide(
     if settings.validation_error().is_some() {
         return ApprovalStatus::Denied;
     }
-    let legacy = match tool.name() {
-        "exec_command" | "shell" => "run_command",
-        "write_stdin" => match operation {
+    let continuation = tool.name() == "exec_command"
+        && matches!(
+            arguments["action"].as_str(),
+            Some("poll" | "write" | "close" | "terminate")
+        );
+    let legacy = if continuation || tool.name() == "write_stdin" {
+        match operation {
             ToolOperation::Read => "read_process",
             ToolOperation::State => "stop_process",
             _ => "write_process",
-        },
-        _ => tool.name(),
+        }
+    } else {
+        match tool.name() {
+            "exec_command" | "shell" => "run_command",
+            _ => tool.name(),
+        }
     };
-    let rule = settings
-        .rules
-        .get(tool.name())
-        .or_else(|| settings.rules.get(legacy));
+    let rule = if continuation {
+        let rules =
+            ["exec_command", "write_stdin", legacy].map(|name| settings.rules.get(name).copied());
+        [ToolRule::Deny, ToolRule::Ask, ToolRule::Allow]
+            .into_iter()
+            .find(|rule| rules.contains(&Some(*rule)))
+    } else {
+        settings
+            .rules
+            .get(tool.name())
+            .or_else(|| settings.rules.get(legacy))
+            .copied()
+    };
     match rule {
         Some(ToolRule::Deny) => return ApprovalStatus::Denied,
         Some(ToolRule::Allow) if !requested => return ApprovalStatus::Allowed,
         _ => {}
     }
-    let ask = requested || rule == Some(&ToolRule::Ask);
+    let ask = requested || rule == Some(ToolRule::Ask);
     if ask {
         return if settings.rejects(ApprovalRequestKind::ToolRule) {
             ApprovalStatus::Denied
@@ -184,7 +201,7 @@ mod tests {
 
     #[test]
     fn renamed_process_tools_preserve_legacy_deny_rules() {
-        use crate::tools::exec_command::{ExecCommandTool, WriteStdinTool};
+        use crate::tools::exec_command::ExecCommandTool;
         let mut settings = ApprovalSettings::default();
         settings.policy = ApprovalPolicy::Never;
         settings.rules.insert("run_command".into(), ToolRule::Deny);
@@ -206,8 +223,8 @@ mod tests {
             decide(
                 &settings,
                 ToolOperation::Command,
-                &serde_json::json!({"session_id":"p","chars":"x"}),
-                &WriteStdinTool,
+                &serde_json::json!({"action":"write","process_id":"p","chars":"x"}),
+                &ExecCommandTool,
                 None,
                 false
             ),
@@ -217,8 +234,8 @@ mod tests {
             decide(
                 &settings,
                 ToolOperation::Read,
-                &serde_json::json!({"session_id":"p"}),
-                &WriteStdinTool,
+                &serde_json::json!({"action":"poll","process_id":"p"}),
+                &ExecCommandTool,
                 None,
                 false
             ),
@@ -229,8 +246,8 @@ mod tests {
             decide(
                 &settings,
                 ToolOperation::Read,
-                &serde_json::json!({"session_id":"p"}),
-                &WriteStdinTool,
+                &serde_json::json!({"action":"poll","process_id":"p"}),
+                &ExecCommandTool,
                 None,
                 false
             ),

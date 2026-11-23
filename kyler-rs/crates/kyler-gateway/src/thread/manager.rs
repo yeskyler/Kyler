@@ -146,7 +146,6 @@ impl ThreadManager {
             Agent::from_config_with_tools_and_store(config, Arc::new(tools), self.store.clone())
                 .await?
                 .with_environment(environment.clone())
-                .with_questions(questions.clone(), None)
                 .with_processes(processes.clone())
                 .with_attachments(attachments.clone())
                 .with_project_memory(memory, &session)

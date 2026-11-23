@@ -129,6 +129,9 @@ impl Agent {
             agent.toolbox = Arc::new(tools);
             agent.skill_snapshot = Some(snapshot);
         }
+        if self.validate_image_input().is_err() {
+            Arc::make_mut(&mut agent.toolbox).remove("view_image");
+        }
         Ok(agent)
     }
 }

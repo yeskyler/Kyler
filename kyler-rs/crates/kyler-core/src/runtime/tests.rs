@@ -671,7 +671,8 @@ async fn application_config_constructs_runtime_services_and_configured_tools() {
     let process_agent = agent
         .clone()
         .with_processes(Arc::new(crate::processes::ProcessManager::default()));
-    assert!(process_agent.toolbox.contains_key("write_stdin"));
+    assert!(process_agent.toolbox.contains_key("exec_command"));
+    assert!(!process_agent.toolbox.contains_key("write_stdin"));
     for legacy in [
         "run_command",
         "read_process",

@@ -210,23 +210,42 @@ impl Agent {
                 .map(|(value, _)| value)
                 .unwrap_or_else(|_| arguments.clone());
             let authorization = self.authorize_call(session, f, &arguments, &clean).await;
-            prepared.push((f, arguments, serde_json::to_string(&clean)?, authorization));
+            let process = (f.function.name == "exec_command")
+                .then(|| clean["process_id"].as_str().map(str::to_owned))
+                .flatten();
+            prepared.push((
+                f,
+                arguments,
+                serde_json::to_string(&clean)?,
+                authorization,
+                process,
+            ));
         }
         // Authorization mutates the durable session. Tool execution never borrows it.
         let mut prepared = std::collections::VecDeque::from(prepared);
         let mut pending = FuturesUnordered::new();
         let mut running = 0;
         let mut waiting = 0;
+        let mut busy_processes = std::collections::HashSet::new();
         loop {
-            while let Some(index) = prepared.iter().position(|(f, _, _, _)| {
+            while let Some(index) = prepared.iter().position(|(f, _, _, _, process)| {
+                if process
+                    .as_ref()
+                    .is_some_and(|id| busy_processes.contains(id))
+                {
+                    return false;
+                }
                 if self.toolbox[&f.function.name].concurrency() == ToolConcurrency::Wait {
                     waiting < self.max_parallel_calls
                 } else {
                     running < self.max_parallel_calls
                 }
             }) {
-                let (f, arguments, clean, authorization) =
+                let (f, arguments, clean, authorization, process) =
                     prepared.remove(index).expect("queued call");
+                if let Some(id) = &process {
+                    busy_processes.insert(id.clone());
+                }
                 let tool = self.toolbox[&f.function.name].clone();
                 let is_wait = tool.concurrency() == ToolConcurrency::Wait;
                 if is_wait {
@@ -278,12 +297,15 @@ impl Agent {
                     tracing::info!(tool=%f.function.name, tool_call_id=%f.id,
                         elapsed_ms=started.elapsed().as_millis() as u64,
                         success=result.is_ok(), "tool execution finished");
-                    (f, is_wait, result)
+                    (f, is_wait, process, result)
                 });
             }
-            let Some((f, is_wait, result)) = pending.next().await else {
+            let Some((f, is_wait, process, result)) = pending.next().await else {
                 break;
             };
+            if let Some(id) = process {
+                busy_processes.remove(&id);
+            }
             if is_wait {
                 waiting -= 1;
             } else {

@@ -207,7 +207,7 @@ impl ProcessManager {
                     && entry.command_key.as_ref() == Some(&command_key)
             }) {
                 anyhow::bail!(
-                    "The same command is already running in process session {}. Use write_stdin with that session_id to read output or terminate it; do not restart it.",
+                    "The same command is already running in process session {}. Use exec_command with that process_id and action=poll or action=terminate; do not restart it.",
                     entry.info.id
                 );
             }

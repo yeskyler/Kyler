@@ -162,6 +162,8 @@ impl Agent {
         if validation.is_err()
             && requested
             && tool.execution_mode().sandboxed()
+            && (name != "exec_command"
+                || matches!(clean_arguments["action"].as_str(), None | Some("start")))
             && !settings.rejects(ApprovalRequestKind::SandboxEscalation)
             && settings.rules.get(name) != Some(&ToolRule::Deny)
             && preflight(self.environment.as_deref()).is_ok()

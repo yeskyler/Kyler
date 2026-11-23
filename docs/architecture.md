@@ -95,36 +95,31 @@ tool state from plain assistant text.
 
 ## Command lifecycle
 
-Models use `shell` for one-shot argv execution and retain `exec_command` and
-`write_stdin` for ongoing processes. Shared execution parameters and validation live
-in `tools/shell.rs`; there is no `tools/command.rs`. `shell` closes stdin, waits for
-exit or its bounded timeout, returns output and exit status without a process
-session ID, and cleans up its private process entry on exit or cancellation.
-Its default timeout is the host command timeout; explicit values remain bounded by
-the host background timeout.
+Models use `shell` for one-shot argv execution. It closes stdin, waits for exit
+or the configured timeout, and cleans up its temporary process entry.
 
- `exec_command` accepts a complete
-`command` string, executed through `/bin/sh -c` within the existing authorized
-sandbox. Optional working directory, child environment, total timeout and initial
-wait retain the host's limits. Repeating an identical running command in the same
-chat is rejected with its existing process session ID. Ordinary shell syntax does
-not grant permissions beyond the sandbox or approval policy.
-
-Running commands return a process `session_id`, distinct from the chat session ID.
-`write_stdin` waits for new output when `chars` is empty/omitted, sends nonempty
-input, sends EOF with `close_stdin`, or stops the process group with `terminate`.
-Reads are serialized per process and use host-owned cursors. Terminal sessions
-retain remaining output and exit codes; input to ended sessions is explicitly not
-sent. Reads do not repeat already consumed output. Output is bounded and model
-summaries preserve status and exit codes. No PTY is advertised or implemented;
-Ctrl-C bytes are ordinary pipe input, so use `terminate` to interrupt.
+`exec_command` manages ongoing processes. Use `action: start` with a complete
+shell command and optional working directory, environment and timeout. Follow
+a running process using its `process_id`: `poll` reads new output, `write` sends
+stdin text, `close` sends EOF, and `terminate` stops the process group. Calls
+for the same process run in order and share a host-owned output cursor. Start,
+input, output and termination retain their separate approval classifications.
+The process belongs to the current chat. Processes use ordinary pipes.
 
 The existing manager retains at most four active processes per chat and 128 total
 entries, with bounded output; completed entries can be evicted at capacity.
 Legacy process tools and the internal `run_command` worker transport remain
 available to historical/internal code but are not advertised by the default agent.
-Existing legacy deny/ask rules apply to corresponding new operations unless an
-explicit new-name rule overrides them. Web and TUI use existing structured events.
+Existing process continuation deny/ask rules still apply to the corresponding
+new operations. Web and TUI use existing structured events.
+
+## Attachment tools
+
+`read_attachment` returns a document overview or a page, sheet, or text range
+from a session-owned attachment. Document extraction runs in a read-only
+sandbox. `view_image` supplies a session-owned image as a visual input after
+the complete tool-result batch. Clarification is a normal assistant response,
+while execution approvals keep their separate controls.
 
 ## Focused file operations
 

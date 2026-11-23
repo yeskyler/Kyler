@@ -13,10 +13,10 @@ use crate::{
     skills::SkillManager,
     subagent::{SubagentConfig, SubagentManager},
     tools::{
-        Tool, ToolBox, ToolOutputBudget,
-        attachment::AttachmentTool,
+        ToolBox, ToolOutputBudget,
+        attachment::{ReadAttachmentTool, ViewImageTool},
         build_toolbox,
-        exec_command::{ExecCommandTool, WriteStdinTool},
+        exec_command::ExecCommandTool,
         shell::ShellTool,
         subagent_tools,
     },
@@ -171,17 +171,6 @@ impl Agent {
             environment: None,
         }
     }
-    pub fn with_questions(
-        mut self,
-        manager: Arc<crate::questions::QuestionManager>,
-        waiter: Option<Arc<dyn crate::questions::QuestionWaiter>>,
-    ) -> Self {
-        Arc::make_mut(&mut self.toolbox).insert(
-            "ask_question".into(),
-            Arc::new(crate::tools::ask_question::AskQuestionTool { manager, waiter }),
-        );
-        self
-    }
     pub fn with_processes(mut self, manager: Arc<ProcessManager>) -> Self {
         self.process_manager = Some(manager.clone());
         let tools = Arc::make_mut(&mut self.toolbox);
@@ -193,7 +182,7 @@ impl Agent {
         ] {
             tools.remove(legacy);
         }
-        tools.insert("write_stdin".into(), Arc::new(WriteStdinTool));
+        tools.insert("exec_command".into(), Arc::new(ExecCommandTool));
         self
     }
     pub fn with_project_memory(mut self, store: Arc<MemoryStore>, session: &Session) -> Self {
@@ -208,13 +197,11 @@ impl Agent {
     }
     pub fn with_attachments(mut self, store: Arc<AttachmentStore>) -> Self {
         let tools = Arc::make_mut(&mut self.toolbox);
-        for inspect in [true, false] {
-            let tool = AttachmentTool {
-                store: store.clone(),
-                inspect,
-            };
-            tools.insert(tool.name().into(), Arc::new(tool));
-        }
+        tools.insert(
+            "read_attachment".into(),
+            Arc::new(ReadAttachmentTool(store.clone())),
+        );
+        tools.insert("view_image".into(), Arc::new(ViewImageTool(store.clone())));
         self.attachments = Some(store);
         self
     }
@@ -242,7 +229,6 @@ impl Agent {
                 self = self.with_processes(Arc::new(ProcessManager::default()));
             }
             let mut tools = self.toolbox.as_ref().clone();
-            tools.insert("exec_command".into(), Arc::new(ExecCommandTool));
             tools.insert("shell".into(), Arc::new(ShellTool));
             self.toolbox = Arc::new(tools);
         }

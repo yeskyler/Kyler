@@ -12,7 +12,7 @@ use crate::{
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result, ensure};
-use schemars::{JsonSchema, schema_for};
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -106,6 +106,83 @@ impl WriteStdinArgs {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum Action {
+    Start(ExecCommandArgs),
+    Poll {
+        process_id: String,
+        #[serde(default = "default_wait")]
+        yield_time_ms: u32,
+    },
+    Write {
+        process_id: String,
+        chars: String,
+        #[serde(default = "default_wait")]
+        yield_time_ms: u32,
+    },
+    Close {
+        process_id: String,
+        #[serde(default = "default_wait")]
+        yield_time_ms: u32,
+    },
+    Terminate {
+        process_id: String,
+        #[serde(default = "default_wait")]
+        yield_time_ms: u32,
+    },
+}
+
+enum CommandOperation {
+    Start(RunCommandArgs),
+    Continue(WriteStdinArgs),
+}
+
+impl Action {
+    fn operation(mut args: Value) -> Result<CommandOperation> {
+        // Existing command-only callers still go through the same validation.
+        if let Some(object) = args.as_object_mut() {
+            object.entry("action").or_insert(json!("start"));
+        }
+        let (session_id, chars, yield_time_ms, close_stdin, terminate) =
+            match serde_json::from_value::<Self>(args)? {
+                Self::Start(args) => return Ok(CommandOperation::Start(args.into_command()?)),
+                Self::Poll {
+                    process_id,
+                    yield_time_ms,
+                } => (process_id, String::new(), yield_time_ms, false, false),
+                Self::Write {
+                    process_id,
+                    chars,
+                    yield_time_ms,
+                } => {
+                    ensure!(
+                        !chars.is_empty(),
+                        "write requires nonempty chars; use poll to read"
+                    );
+                    (process_id, chars, yield_time_ms, false, false)
+                }
+                Self::Close {
+                    process_id,
+                    yield_time_ms,
+                } => (process_id, String::new(), yield_time_ms, true, false),
+                Self::Terminate {
+                    process_id,
+                    yield_time_ms,
+                } => (process_id, String::new(), yield_time_ms, false, true),
+            };
+        let args = WriteStdinArgs {
+            session_id,
+            chars,
+            yield_time_ms,
+            close_stdin,
+            terminate,
+        };
+        args.validate()?;
+        Ok(CommandOperation::Continue(args))
+    }
+}
+
 pub struct ExecCommandTool;
 #[async_trait::async_trait]
 impl Tool for ExecCommandTool {
@@ -113,14 +190,28 @@ impl Tool for ExecCommandTool {
         "exec_command"
     }
     fn description(&self) -> &str {
-        "Execute a complete shell command (including its arguments) through /bin/sh -c inside the sandbox. Wait up to yield_time_ms (default 1000, max 60000) and return output, status and exit_code. If still running, session_id identifies the process for write_stdin; it is not the chat session ID. timeout_ms bounds total process lifetime and must fit host policy. Use write_stdin with empty chars to wait/read more; do not repeatedly launch the same running command. Inspect exit_code: starting a process does not establish success. Ordinary pipes only, no PTY; use write_stdin terminate=true to stop. Environment and working_directory apply only to this command. Omit unused options. Use apply_patch for file edits instead of embedding large files in shell strings."
+        "Manage sandboxed commands. start executes a complete shell command with optional working_directory, environment and timeout_ms. Use the returned process_id with poll for incremental output, write with nonempty chars for stdin, close for EOF, or terminate to stop its process group. Waits use yield_time_ms (default 1000, maximum 60000). A process belongs to the current chat; dependent operations belong in separate batches. Processes have pipes, not a PTY. Inspect exit_code before treating execution as successful."
     }
     fn parameters(&self) -> Value {
-        serde_json::to_value(schema_for!(ExecCommandArgs)).expect("exec command schema")
+        json!({"type":"object","properties":{
+            "action":{"type":"string","enum":["start","poll","write","close","terminate"]},
+            "command":{"type":"string","description":"Complete shell command; required for start."},
+            "working_directory":{"type":"string","description":"Start only."},
+            "environment":{"type":"object","additionalProperties":{"type":"string"},"description":"Start only."},
+            "timeout_ms":{"type":"integer","minimum":1,"description":"Total runtime limit; start only."},
+            "process_id":{"type":"string","description":"Required for poll, write, close and terminate."},
+            "chars":{"type":"string","description":"Required and nonempty for write only."},
+            "yield_time_ms":{"type":"integer","minimum":0,"maximum":60000,"default":1000}
+        },"required":["action"],"additionalProperties":false})
+    }
+    fn validate_arguments(&self, args: &Value) -> Result<()> {
+        Action::operation(args.clone()).map(|_| ())
     }
     fn approval_requirement(&self, args: &Value) -> Result<ToolOperation> {
-        serde_json::from_value::<ExecCommandArgs>(args.clone())?.into_command()?;
-        Ok(ToolOperation::Command)
+        Ok(match Action::operation(args.clone())? {
+            CommandOperation::Start(_) => ToolOperation::Command,
+            CommandOperation::Continue(args) => args.operation(),
+        })
     }
     fn compress_output(
         &self,
@@ -146,67 +237,37 @@ impl Tool for ExecCommandTool {
         args: &str,
         context: &crate::tools::ParallelToolContext<'_>,
     ) -> Result<String> {
-        let command = serde_json::from_str::<ExecCommandArgs>(args)?.into_command()?;
+        let operation = Action::operation(serde_json::from_str(args)?)?;
         let manager = context
             .processes
             .context("exec_command requires a process manager")?;
-        let environment = context
-            .environment
-            .context("exec_command requires an authorized sandbox")?;
-        let result = manager
-            .exec_command(context.session_id, environment.clone(), command)
-            .await?;
-        Ok(result.to_string())
-    }
-}
-
-pub struct WriteStdinTool;
-#[async_trait::async_trait]
-impl Tool for WriteStdinTool {
-    fn name(&self) -> &str {
-        "write_stdin"
-    }
-    fn description(&self) -> &str {
-        "Continue a process session from exec_command. Empty or omitted chars waits and reads only NEW output; nonempty chars sends stdin then reads output. close_stdin=true sends EOF. Read completed sessions to collect remaining output and exit_code; they cannot accept further input. Set terminate=true to stop a process group, including non-PTY commands. No PTY is available: Ctrl-C bytes are ordinary input, not a signal. yield_time_ms defaults to 1000 (max 60000); increase waits when no output arrives instead of tight polling. Output cursors are managed by the host."
-    }
-    fn parameters(&self) -> Value {
-        serde_json::to_value(schema_for!(WriteStdinArgs)).expect("stdin schema")
-    }
-    fn approval_requirement(&self, args: &Value) -> Result<ToolOperation> {
-        let args: WriteStdinArgs = serde_json::from_value(args.clone())?;
-        args.validate()?;
-        Ok(args.operation())
-    }
-    fn compress_output(
-        &self,
-        output: &str,
-        budget: &ToolOutputBudget,
-    ) -> Result<CompressedToolOutput> {
-        compact_result(output, budget)
-    }
-    fn activity_kind(&self) -> ActivityKind {
-        ActivityKind::Execute
-    }
-    fn execution_mode(&self) -> ToolExecutionMode {
-        ToolExecutionMode::Host
-    }
-    async fn execute(&self, args: &str, context: &mut ToolContext<'_>) -> Result<String> {
-        let args: WriteStdinArgs = serde_json::from_str(args)?;
-        args.validate()?;
-        if matches!(args.operation(), ToolOperation::Command) {
-            ensure!(
-                context
+        let mut result = match operation {
+            CommandOperation::Start(command) => {
+                let environment = context
                     .environment
-                    .is_some_and(|env| env.policy().process.allow_commands),
-                "Sandbox blocks process input"
-            );
+                    .context("exec_command requires an authorized sandbox")?;
+                manager
+                    .exec_command(context.session_id, environment.clone(), command)
+                    .await?
+            }
+            CommandOperation::Continue(args) => {
+                if args.operation() == ToolOperation::Command {
+                    ensure!(
+                        context
+                            .environment
+                            .is_some_and(|env| env.policy().process.allow_commands),
+                        "Sandbox blocks process input"
+                    );
+                }
+                manager.continue_command(context.session_id, args).await?
+            }
+        };
+        if let Some(fields) = result.as_object_mut()
+            && let Some(id) = fields.remove("session_id")
+        {
+            fields.insert("process_id".into(), id);
         }
-        Ok(context
-            .processes
-            .context("write_stdin requires a process manager")?
-            .continue_command(context.session_id, args)
-            .await?
-            .to_string())
+        Ok(result.to_string())
     }
 }
 
@@ -229,6 +290,43 @@ fn compact_result(output: &str, budget: &ToolOutputBudget) -> Result<CompressedT
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn unified_actions_validate_and_classify_permissions() {
+        let tool = ExecCommandTool;
+        for (arguments, expected) in [
+            (
+                json!({"action":"start","command":"echo hello"}),
+                ToolOperation::Command,
+            ),
+            (
+                json!({"action":"poll","process_id":"p"}),
+                ToolOperation::Read,
+            ),
+            (
+                json!({"action":"write","process_id":"p","chars":"hello"}),
+                ToolOperation::Command,
+            ),
+            (
+                json!({"action":"close","process_id":"p"}),
+                ToolOperation::Command,
+            ),
+            (
+                json!({"action":"terminate","process_id":"p"}),
+                ToolOperation::State,
+            ),
+        ] {
+            assert_eq!(tool.approval_requirement(&arguments).unwrap(), expected);
+        }
+        for arguments in [
+            json!({"action":"start","command":"echo hello","process_id":"p"}),
+            json!({"action":"poll","process_id":"p","chars":"x"}),
+            json!({"action":"write","process_id":"p","chars":""}),
+            json!({"action":"terminate"}),
+        ] {
+            assert!(tool.validate_arguments(&arguments).is_err(), "{arguments}");
+        }
+    }
 
     #[test]
     fn command_requires_complete_input_and_rejects_unsupported_pty() {

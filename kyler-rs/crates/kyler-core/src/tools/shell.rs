@@ -122,7 +122,7 @@ impl RunCommandArgs {
         Ok(directory)
     }
 }
-/// One-shot argv execution; interactive lifecycle belongs to exec_command/write_stdin.
+/// One-shot argv execution; interactive lifecycle belongs to exec_command.
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShellArgs {
@@ -161,7 +161,7 @@ impl Tool for ShellTool {
         "shell"
     }
     fn description(&self) -> &str {
-        r#"Execute a one-shot program and wait for completion or timeout. command is an argv array including the program and all arguments, e.g. ["node","--check","snake/snake.js"]. For pipes/redirection explicitly use ["/bin/sh","-c","..."]. Stdin is closed; no PTY or interactive process session is returned. Prefer this for ordinary checks, tests and builds. Use exec_command plus write_stdin for ongoing/interactive processes. Default timeout is the host command timeout; requested timeout_ms must fit the host background limit. Timeout/cancellation cleans up the process group. Inspect status, exit_code, stdout and stderr; nonzero exit is not success. Environment and working_directory are per-call and remain subject to sandbox policy. Use apply_patch for edits."#
+        r#"Execute a one-shot program and wait for completion or timeout. command is an argv array including the program and all arguments, e.g. ["node","--check","snake/snake.js"]. For pipes/redirection explicitly use ["/bin/sh","-c","..."]. Stdin is closed; no PTY or interactive process session is returned. Prefer this for ordinary checks, tests and builds. Use exec_command for ongoing/interactive processes. Default timeout is the host command timeout; requested timeout_ms must fit the host background limit. Timeout/cancellation cleans up the process group. Inspect status, exit_code, stdout and stderr; nonzero exit is not success. Environment and working_directory are per-call and remain subject to sandbox policy. Use apply_patch for edits."#
     }
     fn parameters(&self) -> Value {
         serde_json::to_value(schema_for!(ShellArgs)).expect("shell schema")

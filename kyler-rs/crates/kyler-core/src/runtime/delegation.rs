@@ -47,9 +47,7 @@ impl Agent {
         let tools = self
             .toolbox
             .iter()
-            .filter(|(_, tool)| {
-                !is_subagent_management(tool.as_ref()) && tool.name() != "ask_question"
-            })
+            .filter(|(_, tool)| !is_subagent_management(tool.as_ref()))
             .map(|(name, tool)| (name.clone(), Arc::clone(tool)))
             .collect();
         let mut child = Self::new(

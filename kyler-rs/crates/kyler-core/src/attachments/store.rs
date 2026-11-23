@@ -208,7 +208,7 @@ impl AttachmentStore {
         let info = self.get(session, &args.attachment_id)?;
         ensure!(
             info.kind != AttachmentKind::Image,
-            "Images are provided directly to vision-capable models; use inspect_attachment for metadata"
+            "Use view_image for image attachments"
         );
         let location = self.location(session, &info.id)?;
         let bytes = fs::read(location.join("blob"))?;
