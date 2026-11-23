@@ -17,10 +17,18 @@ export function isVisibleMessagePart(part: ThreadAssistantMessagePart): boolean 
 
 /** Keep the final answer visible while collecting prior work in chronological order. */
 export function partitionAssistantParts(parts: readonly ThreadAssistantMessagePart[]) {
+  const hasCompaction = parts.some(isCompactionPart);
+  const visible = (part: ThreadAssistantMessagePart) =>
+    isVisibleMessagePart(part) &&
+    !(
+      hasCompaction &&
+      part.type === "text" &&
+      part.text.trim() === "Conversation history compacted."
+    );
   let lastActivity = -1;
   let lastText = -1;
   parts.forEach((part, index) => {
-    if (!isVisibleMessagePart(part)) return;
+    if (!visible(part)) return;
     if (part.type === "tool-call" || part.type === "reasoning" || isCompactionPart(part))
       lastActivity = index;
     if (part.type === "text" && part.text.trim()) lastText = index;
@@ -29,7 +37,7 @@ export function partitionAssistantParts(parts: readonly ThreadAssistantMessagePa
   const process: number[] = [];
   const answer: number[] = [];
   parts.forEach((part, index) => {
-    if (!isVisibleMessagePart(part) || (part.type === "text" && !part.text.trim())) return;
+    if (!visible(part) || (part.type === "text" && !part.text.trim())) return;
     (index < finalStart ? process : answer).push(index);
   });
   return { process, answer };

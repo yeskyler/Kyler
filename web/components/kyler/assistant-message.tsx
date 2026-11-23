@@ -382,6 +382,23 @@ export function AssistantMessage() {
   const { process, answer } = partitionAssistantParts(message.content);
   const sections = executionSections(message.content, process);
   const details = process.filter((index) => !isCompactionPart(message.content[index]));
+  if (
+    sections.length &&
+    !details.length &&
+    !answer.length &&
+    message.status?.type !== "incomplete"
+  ) {
+    return (
+      <MessagePrimitive.Root className="min-w-0 px-2" data-role="assistant">
+        {sections.map(({ indices: [index] }) => {
+          const part = message.content[index];
+          return part.type === "data" ? (
+            <CompactionSeparator key={part.id ?? index} compaction={part.data as Compaction} />
+          ) : null;
+        })}
+      </MessagePrimitive.Root>
+    );
+  }
   const toolCount = message.content.filter(
     (part) => part.type === "tool-call" && isVisibleMessagePart(part),
   ).length;

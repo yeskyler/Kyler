@@ -32,6 +32,14 @@ test("compaction updates in place and remains outside collapsed process sections
   assert.equal(parts[3].type === "data" && parts[3].data.status, "cancelled");
 });
 
+test("a successful compaction renders its status without a duplicate reply", () => {
+  const parts: ThreadAssistantMessagePart[] = [];
+  upsertCompaction(parts, { ...record, status: "completed", finished_at: 2 });
+  const confirmation = { type: "text", text: "Conversation history compacted." } as const;
+  assert.deepEqual(partitionAssistantParts([...parts, confirmation]), { process: [0], answer: [] });
+  assert.deepEqual(partitionAssistantParts([confirmation]), { process: [], answer: [0] });
+});
+
 test("history reconstructs one separator and never animates unconfirmed pending records", () => {
   const events: HistoryEvent[] = [
     {
