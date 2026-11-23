@@ -1,16 +1,18 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { readConfig } from "./server.ts";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { configPath, readConfig } from "./server.ts";
+import { resolve } from "node:path";
+import { sessionSeconds, WebSessions } from "./web-sessions.ts";
 
 export const sessionCookie = "kyler_web_session";
-const sessionSeconds = 7 * 24 * 60 * 60;
+const attemptWindow = 60_000;
+const maxFailures = 5;
+let attempts = { scope: "", failures: 0, until: 0 };
+const sessions = () => new WebSessions(`${resolve(configPath())}.web-sessions`);
 const equal = (left: string, right: string) =>
   timingSafeEqual(
     createHash("sha256").update(left).digest(),
     createHash("sha256").update(right).digest(),
   );
-const sign = (payload: string, token: string) =>
-  createHmac("sha256", token).update(`kyler-web:${payload}`).digest("base64url");
-
 export function safeNext(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -30,21 +32,6 @@ export function safeNext(value: unknown): string {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-export function createSession(token: string, now = Date.now()): string {
-  const payload = `v1.${Math.floor(now / 1000) + sessionSeconds}.${randomBytes(16).toString("hex")}`;
-  return `${payload}.${sign(payload, token)}`;
-}
-export function validSession(value: string, token: string, now = Date.now()): boolean {
-  const match = value.match(/^(v1\.([0-9]{1,12})\.[a-f0-9]{32})\.([A-Za-z0-9_-]{43})$/);
-  if (!match || !token) return false;
-  const expires = Number(match[2]);
-  const seconds = Math.floor(now / 1000);
-  return (
-    expires > seconds &&
-    expires <= seconds + sessionSeconds &&
-    equal(match[3], sign(match[1], token))
-  );
-}
 function cookieValue(request: Request): string {
   return (
     request.headers
@@ -98,7 +85,11 @@ function publicPath(path: string): boolean {
     path === "/favicon.ico"
   );
 }
-export function checkWebAccess(request: Request, configuration: Record<string, unknown>) {
+export async function checkWebAccess(
+  request: Request,
+  configuration: Record<string, unknown>,
+  store = sessions(),
+) {
   const url = new URL(request.url);
   url.host = request.headers.get("host") ?? url.host;
   if (secure(request)) url.protocol = "https:";
@@ -109,10 +100,10 @@ export function checkWebAccess(request: Request, configuration: Record<string, u
       { message: "Web token is not configured. Run kyler configure --web." },
       { status: 503, headers: { "cache-control": "no-store" } },
     );
-  if (validSession(cookieValue(request), token)) return null;
+  if (await store.valid(cookieValue(request), token)) return null;
   if (url.pathname.startsWith("/api/"))
     return Response.json(
-      { message: "Sign in with your Web token." },
+      { message: "Your Web session is missing or expired. Sign in again." },
       { status: 401, headers: { "cache-control": "no-store" } },
     );
   const login = new URL("/login", url);
@@ -123,7 +114,12 @@ export function checkWebAccess(request: Request, configuration: Record<string, u
   });
 }
 
-export async function login(request: Request, configuration?: Record<string, unknown>) {
+export async function login(
+  request: Request,
+  configuration?: Record<string, unknown>,
+  store = sessions(),
+  now = Date.now(),
+) {
   if (!sameOrigin(request))
     return Response.json({ message: "Cross-origin sign-in is not permitted." }, { status: 403 });
   const token = webToken(configuration ?? (await webConfiguration()));
@@ -159,24 +155,44 @@ export async function login(request: Request, configuration?: Record<string, unk
   } finally {
     reader?.releaseLock();
   }
-  if (typeof supplied !== "string" || supplied.length > 256 || !equal(supplied.trim(), token))
+  const scope = resolve(configPath());
+  if (attempts.scope !== scope || now >= attempts.until)
+    attempts = { scope, failures: 0, until: now + attemptWindow };
+  if (attempts.failures >= maxFailures)
+    return Response.json(
+      { message: "Too many sign-in attempts. Try again shortly." },
+      {
+        status: 429,
+        headers: {
+          "retry-after": String(Math.ceil((attempts.until - now) / 1000)),
+          "cache-control": "no-store",
+        },
+      },
+    );
+  if (typeof supplied !== "string" || supplied.length > 256 || !equal(supplied.trim(), token)) {
+    attempts.failures++;
     return Response.json(
       { message: "Invalid Web token." },
       { status: 401, headers: { "cache-control": "no-store" } },
     );
+  }
+  attempts.failures = 0;
+  const id = await store.create(token, now);
+  await store.revoke(cookieValue(request));
   return Response.json(
     { ok: true },
     {
       headers: {
-        "set-cookie": cookieHeader(createSession(token), request),
+        "set-cookie": cookieHeader(id, request),
         "cache-control": "no-store",
       },
     },
   );
 }
-export function logout(request: Request) {
+export async function logout(request: Request, store = sessions()) {
   if (!sameOrigin(request))
     return Response.json({ message: "Cross-origin sign-out is not permitted." }, { status: 403 });
+  await store.revoke(cookieValue(request));
   return Response.json(
     { ok: true },
     { headers: { "set-cookie": cookieHeader("", request, true), "cache-control": "no-store" } },
@@ -184,4 +200,75 @@ export function logout(request: Request) {
 }
 export async function authorizeWeb(request: Request) {
   return checkWebAccess(request, await webConfiguration());
+}
+
+/** Keep browser authority attached to an upstream event stream until it closes. */
+export async function proxyWebEvents(
+  request: Request,
+  open: (request: Request) => Promise<Response>,
+  check = authorizeWeb,
+  interval = 2000,
+) {
+  const denied = await check(request);
+  if (denied) return denied;
+  const revoked = new AbortController();
+  const signal = AbortSignal.any([request.signal, revoked.signal]);
+  let pending = false;
+  let timer: ReturnType<typeof setInterval>;
+  const clear = () => clearInterval(timer);
+  timer = setInterval(async () => {
+    if (pending) return;
+    pending = true;
+    try {
+      if (await check(request)) revoked.abort();
+    } catch {
+      revoked.abort();
+    } finally {
+      pending = false;
+    }
+  }, interval);
+  signal.addEventListener("abort", clear, { once: true });
+  try {
+    const response = await open(new Request(request, { signal }));
+    if (signal.aborted || !response.ok || !response.body) {
+      clear();
+      return response;
+    }
+    const upstream = response.body.getReader();
+    const closeUpstream = () => void upstream.cancel().catch(() => {});
+    signal.addEventListener("abort", closeUpstream, { once: true });
+    if (signal.aborted) closeUpstream();
+    const stop = () => {
+      clear();
+      signal.removeEventListener("abort", clear);
+      signal.removeEventListener("abort", closeUpstream);
+    };
+    return new Response(
+      new ReadableStream({
+        async pull(controller) {
+          try {
+            const { done, value } = await upstream.read();
+            if (done || signal.aborted) {
+              stop();
+              controller.close();
+            } else {
+              controller.enqueue(value);
+            }
+          } catch (error) {
+            stop();
+            if (signal.aborted) controller.close();
+            else controller.error(error);
+          }
+        },
+        async cancel(reason) {
+          stop();
+          await upstream.cancel(reason);
+        },
+      }),
+      { status: response.status, headers: response.headers },
+    );
+  } catch (error) {
+    clear();
+    throw error;
+  }
 }

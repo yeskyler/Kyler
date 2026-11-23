@@ -22,7 +22,13 @@ credential; it is not the server's authentication authority. Authentication alwa
 checks the gateway database.
 
 The Web login token (`kyler service token`) is a different credential. A browser
-exchanges it for a signed cookie. Provider keys and the gateway credential remain
+exchanges it for an opaque, seven-day browser session. The Web server stores
+session digests beside the selected configuration. Sign-out revokes the current
+browser session. Token reset invalidates prior sessions and closes affected Web
+event subscriptions on revalidation. Inference runs continue independently.
+If Web uses the `KYLER_WEB_TOKEN` override, update that environment value and
+restart Web to rotate the effective token.
+Provider keys and the gateway credential remain
 in the Web server process. The current shared Web login represents that managed
 service identity, not separate human users. Use scoped API tokens for distinct
 callers until individual Web accounts are implemented.

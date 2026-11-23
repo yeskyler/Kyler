@@ -3,8 +3,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 
+export function configPath() {
+  return process.env.KYLER_CONFIG ?? join(homedir(), ".kyler", "config.toml");
+}
+
 export async function readConfig() {
-  const file = process.env.KYLER_CONFIG ?? join(homedir(), ".kyler", "config.toml");
+  const file = configPath();
   let config: Record<string, unknown> = {};
   try {
     config = parse(await readFile(file, "utf8"));

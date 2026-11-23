@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { sessionSeconds, WebSessions } from "../lib/kyler/web-sessions.ts";
 import {
   checkWebAccess,
-  createSession,
-  validSession,
   login,
   logout,
+  proxyWebEvents,
   cookieHeader,
   safeNext,
   sessionCookie,
@@ -20,25 +23,33 @@ const signIn = (origin = "http://localhost:30002", value = token) =>
     body: JSON.stringify({ token: value }),
   });
 
-test("local and network pages require token sessions while login assets stay public", () => {
+async function fixture(t: TestContext) {
+  const directory = await mkdtemp(join(tmpdir(), "kyler-web-session-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  return new WebSessions(directory);
+}
+
+test("local and network pages require token sessions while login assets stay public", async () => {
   for (const host of ["localhost:30002", "192.168.1.10:30002"]) {
-    const page = checkWebAccess(new Request(`http://${host}/chat/s1`), configuration)!;
+    const page = (await checkWebAccess(new Request(`http://${host}/chat/s1`), configuration))!;
     assert.equal(page.status, 303);
     const redirect = new URL(page.headers.get("location")!);
     assert.equal(redirect.pathname, "/login");
     assert.equal(redirect.searchParams.get("next"), "/chat/s1");
     assert.equal(
-      checkWebAccess(new Request(`http://${host}/api/kyler/sessions`), configuration)?.status,
+      (await checkWebAccess(new Request(`http://${host}/api/kyler/sessions`), configuration))
+        ?.status,
       401,
     );
   }
   for (const path of ["/login", "/_next/static/example.js", "/icon.svg"])
-    assert.equal(checkWebAccess(new Request(`http://localhost${path}`), {}), null);
-  assert.equal(checkWebAccess(new Request("http://localhost/"), {})?.status, 503);
+    assert.equal(await checkWebAccess(new Request(`http://localhost${path}`), {}), null);
+  assert.equal((await checkWebAccess(new Request("http://localhost/"), {}))?.status, 503);
 });
 
-test("token login issues a signed HttpOnly cookie without placing the token in it", async () => {
-  const response = await login(signIn(), configuration);
+test("token login issues an opaque HttpOnly cookie without placing the token in it", async (t) => {
+  const store = await fixture(t);
+  const response = await login(signIn(), configuration, store);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true });
   const cookie = response.headers.get("set-cookie")!;
@@ -49,18 +60,24 @@ test("token login issues a signed HttpOnly cookie without placing the token in i
   const authenticated = new Request("http://localhost:30002/chat/s1", {
     headers: { cookie: cookie.split(";")[0] },
   });
-  assert.equal(checkWebAccess(authenticated, configuration), null);
+  assert.equal(await checkWebAccess(authenticated, configuration, store), null);
   assert.equal(
-    checkWebAccess(authenticated, { web: { bind: "127.0.0.1:30002", access_token: token } }),
+    await checkWebAccess(
+      authenticated,
+      { web: { bind: "127.0.0.1:30002", access_token: token } },
+      store,
+    ),
     null,
   );
   assert.equal(
-    checkWebAccess(authenticated, { web: { access_token: "rotated-token" } })?.status,
+    (await checkWebAccess(authenticated, { web: { access_token: "rotated-token" } }, store))
+      ?.status,
     303,
   );
 });
 
-test("token login checks browser Host when Next uses an internal localhost URL", async () => {
+test("token login checks browser Host when Next uses an internal localhost URL", async (t) => {
+  const store = await fixture(t);
   const request = new Request("http://localhost:30002/api/auth/login", {
     method: "POST",
     headers: {
@@ -70,7 +87,7 @@ test("token login checks browser Host when Next uses an internal localhost URL",
     },
     body: JSON.stringify({ token }),
   });
-  assert.equal((await login(request, configuration)).status, 200);
+  assert.equal((await login(request, configuration, store)).status, 200);
 });
 
 test("invalid tokens and cross-site or opaque origins never create sessions", async () => {
@@ -83,27 +100,85 @@ test("invalid tokens and cross-site or opaque origins never create sessions", as
   assert.equal((await login(signIn(), {})).status, 503);
   const basic = `Basic ${Buffer.from(`kyler:${token}`).toString("base64")}`;
   assert.equal(
-    checkWebAccess(
-      new Request("http://localhost/api/kyler/info", { headers: { authorization: basic } }),
-      configuration,
+    (
+      await checkWebAccess(
+        new Request("http://localhost/api/kyler/info", { headers: { authorization: basic } }),
+        configuration,
+      )
     )?.status,
     401,
   );
 });
 
-test("signed sessions expire and reject tampering and reset tokens", () => {
+test("stored sessions expire and reject unknown IDs and rotated tokens", async (t) => {
+  const store = await fixture(t);
   const now = 1_700_000_000_000;
-  const session = createSession(token, now);
-  assert.ok(validSession(session, token, now + 1000));
-  assert.ok(!validSession(session, token, now + 7 * 24 * 60 * 60 * 1000));
-  assert.ok(!validSession(session + "x", token, now));
-  assert.ok(!validSession(session.replace("v1.", "v2."), token, now));
-  assert.ok(!validSession(session, "different-token", now));
-  assert.ok(!validSession(session, "", now));
-  assert.ok(!validSession("malformed", token, now));
+  const id = await store.create(token, now);
+  assert.ok(await store.valid(id, token, now + 1000));
+  assert.ok(!(await store.valid(id, token, now + sessionSeconds * 1000)));
+  assert.ok(!(await store.valid(id + "x", token, now)));
+  assert.ok(!(await store.valid(id, "different-token", now)));
+  assert.ok(!(await store.valid("malformed", token, now)));
 });
 
-test("HTTPS cookies are secure and logout clears the session with origin protection", () => {
+test("logout revokes a copied cookie while a second device stays authenticated", async (t) => {
+  const store = await fixture(t);
+  const first = await store.create(token);
+  const second = await store.create(token);
+  const request = new Request("http://localhost/api/auth/logout", {
+    method: "POST",
+    headers: { origin: "http://localhost", cookie: `${sessionCookie}=${first}` },
+  });
+  assert.equal((await logout(request, store)).status, 200);
+  assert.ok(!(await store.valid(first, token)));
+  assert.ok(await store.valid(second, token));
+});
+
+test("a changed Web token closes a protected SSE stream", async (t) => {
+  const store = await fixture(t);
+  const id = await store.create(token);
+  const request = new Request("http://localhost/api/kyler/runs/run/events", {
+    headers: { cookie: `${sessionCookie}=${id}` },
+  });
+  let currentToken = token;
+  let upstreamSignal: AbortSignal | undefined;
+  const response = await proxyWebEvents(
+    request,
+    async (upstream) => {
+      upstreamSignal = upstream.signal;
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("data: ready\n\n"));
+            upstream.signal.addEventListener("abort", () => controller.close(), { once: true });
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+    (request) => checkWebAccess(request, { web: { access_token: currentToken } }, store),
+    5,
+  );
+  const reader = response.body!.getReader();
+  assert.equal(new TextDecoder().decode((await reader.read()).value), "data: ready\n\n");
+  currentToken = "new-secret";
+  assert.equal((await reader.read()).done, true);
+  assert.ok(upstreamSignal?.aborted);
+});
+
+test("repeated failures trigger a bounded cooldown and allow sign-in afterward", async (t) => {
+  const store = await fixture(t);
+  const now = Date.now() + 120000;
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await login(signIn(undefined, "bad"), configuration, store, now)).status, 401);
+  }
+  const limited = await login(signIn(), configuration, store, now + 1000);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("retry-after"), "59");
+  assert.equal((await login(signIn(), configuration, store, now + 60000)).status, 200);
+});
+
+test("HTTPS cookies are secure and logout clears the session with origin protection", async () => {
   assert.ok(cookieHeader("value", new Request("https://kyler.example/")).includes("; Secure"));
   const proxied = new Request("http://localhost/api/auth/logout", {
     method: "POST",
@@ -113,17 +188,19 @@ test("HTTPS cookies are secure and logout clears the session with origin protect
       "x-forwarded-proto": "https",
     },
   });
-  const response = logout(proxied);
+  const response = await logout(proxied);
   assert.equal(response.status, 200);
   assert.ok(response.headers.get("set-cookie")!.includes(`${sessionCookie}=;`));
   assert.ok(response.headers.get("set-cookie")!.includes("Max-Age=0"));
   assert.ok(response.headers.get("set-cookie")!.includes("; Secure"));
   assert.equal(
-    logout(
-      new Request("http://localhost/api/auth/logout", {
-        method: "POST",
-        headers: { origin: "https://evil.example" },
-      }),
+    (
+      await logout(
+        new Request("http://localhost/api/auth/logout", {
+          method: "POST",
+          headers: { origin: "https://evil.example" },
+        }),
+      )
     ).status,
     403,
   );
