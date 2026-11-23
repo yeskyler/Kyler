@@ -17,6 +17,13 @@ use kyler_protocol::api::permissions::PermissionMode;
 impl Agent {
     pub(super) async fn tool_snapshot(&self, session: &str) -> Result<Self> {
         let mut agent = self.clone();
+        if self.prompt_role == kyler_protocol::prompts::PromptRole::Memory {
+            anyhow::ensure!(
+                self.toolbox.is_empty() && self.mcp.is_none() && self.skills.is_none(),
+                "Memory analysis has no tool capabilities"
+            );
+            return Ok(agent);
+        }
         if self.prompt_role == kyler_protocol::prompts::PromptRole::Review {
             anyhow::ensure!(
                 self.environment

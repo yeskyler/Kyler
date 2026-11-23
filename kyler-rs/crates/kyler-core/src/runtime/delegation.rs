@@ -36,6 +36,13 @@ impl Agent {
         child.prompt_role = PromptRole::Review;
         child
     }
+    pub(crate) fn memory_runtime(&self, environment: Arc<crate::ExecutionEnvironment>) -> Self {
+        let mut child = self.review_runtime(environment, Default::default(), false);
+        child.prompt_role = PromptRole::Memory;
+        child.max_steps = 1;
+        child
+    }
+
     pub(super) fn child_executor(&self, manager: &SubagentManager) -> Arc<dyn SubagentExecutor> {
         let tools = self
             .toolbox
@@ -65,6 +72,7 @@ impl Agent {
         child.observer = self.observer.clone();
         child.prompt_role = PromptRole::Subagent;
         child.session_store = manager.child_store();
+        child.parent_session_store = self.session_store.clone();
         child.environment = self.environment.clone();
         child.mcp = self.mcp.clone();
         child.skills = self.skills.clone();

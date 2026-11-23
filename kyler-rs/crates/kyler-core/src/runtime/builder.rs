@@ -166,6 +166,7 @@ impl Agent {
             max_parallel_calls: 8,
             parallel_tool_calls: None,
             session_store: None,
+            parent_session_store: None,
             subagent_manager: None,
             environment: None,
         }

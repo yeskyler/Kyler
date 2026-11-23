@@ -134,3 +134,20 @@ retain separate scopes. The CLI remains available for local administration.
 A TUI candidate review panel, automated validation suites, semantic conflict
 detection, automatic invalidation and skill rollback are follow-up work. There is no automatic upgrade
 from repeated success to active memory or an enabled skill.
+
+## Review committed history with a Memory Agent
+
+Ask Kyler to review the current session's history for durable facts, preferences,
+or reusable procedures. The parent delegates a `memory` task and collects its
+results with `wait_tasks`. The host reads only committed events from the parent
+session and excludes the current execution. The analysis receives a bounded
+selection of recent text messages after secret-pattern filtering. Tool arguments,
+tool results, attachments, and private reasoning are excluded.
+
+The child has no callable tools. The host validates its report and evidence
+references before writing candidates to the session's scoped JSON memory.
+Identical candidates are skipped, and the task reports any failed writes.
+Review candidates in Memory before using them in future context. If the user
+requested a reusable workflow, the parent can turn a returned procedure and
+its exact revision into an uninstalled skill draft using the existing review
+card. This workflow is initiated by request and reads only the current session.

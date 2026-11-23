@@ -1,5 +1,6 @@
 mod concurrency;
 mod mcp_tools;
+mod memory;
 mod responses;
 mod review;
 use super::Agent;

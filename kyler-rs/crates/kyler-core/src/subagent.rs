@@ -1,5 +1,6 @@
 //! Background delegation contracts and task metadata; child histories stay isolated.
 pub mod manager;
+pub(crate) mod memory;
 pub(crate) mod review;
 
 use crate::{
@@ -178,10 +179,10 @@ impl DelegateTaskArgs {
             "Delegated context exceeds 128000 bytes"
         );
         match (self.agent, &self.review) {
-            (AgentKind::General, None) => Ok(()),
+            (AgentKind::General | AgentKind::Memory, None) => Ok(()),
             (AgentKind::Review, Some(request)) => review::validate_request(request),
             _ => anyhow::bail!(
-                "Review agents require review.target; general agents cannot accept a review target"
+                "Review agents require review.target; other agents cannot accept a review target"
             ),
         }
     }
@@ -196,7 +197,7 @@ pub trait SubagentExecutor: Send + Sync {
     ) -> Result<Option<std::sync::Arc<dyn SubagentExecutor>>> {
         ensure!(
             request.agent == AgentKind::General,
-            "This executor does not support review agents"
+            "This executor does not support specialized agents"
         );
         Ok(None)
     }

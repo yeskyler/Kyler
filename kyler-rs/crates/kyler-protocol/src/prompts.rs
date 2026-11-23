@@ -1,6 +1,7 @@
 //! Shared English prompts and provider-independent composition.
 //! Runtime data and credentials are never read by this module.
 pub const AGENT: &str = include_str!("prompts/agent.md");
+pub const MEMORY: &str = include_str!("prompts/memory.md");
 pub const REVIEW: &str = include_str!("prompts/review.md");
 pub const SUBAGENT: &str = include_str!("prompts/subagent.md");
 pub const SUMMARY: &str = include_str!("prompts/summary.md");
@@ -12,14 +13,15 @@ pub enum PromptRole {
     Assistant,
     Subagent,
     Review,
+    Memory,
 }
 
 /// Application instructions supplement the base prompt. Role-specific constraints come last.
 pub fn agent_prompt(additional_instructions: Option<&str>, role: PromptRole) -> String {
-    let mut prompt = if role == PromptRole::Review {
-        REVIEW
-    } else {
-        AGENT
+    let mut prompt = match role {
+        PromptRole::Review => REVIEW,
+        PromptRole::Memory => MEMORY,
+        _ => AGENT,
     }
     .trim()
     .to_owned();

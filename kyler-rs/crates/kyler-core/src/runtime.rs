@@ -34,7 +34,7 @@ use crate::{
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use kyler_protocol::{
     api::images::ImageInput,
@@ -80,6 +80,7 @@ pub struct Agent {
     max_parallel_calls: usize,
     parallel_tool_calls: Option<bool>,
     session_store: Option<Arc<SessionStore>>,
+    parent_session_store: Option<Arc<SessionStore>>,
     subagent_manager: Option<Arc<SubagentManager>>,
     environment: Option<Arc<ExecutionEnvironment>>,
 }
@@ -219,6 +220,17 @@ impl SubagentExecutor for Agent {
     ) -> Result<Option<Arc<dyn SubagentExecutor>>> {
         match request.agent {
             crate::subagent::AgentKind::General => Ok(None),
+            crate::subagent::AgentKind::Memory => Ok(Some(Arc::new(
+                crate::subagent::memory::MemoryExecutor::new(
+                    self,
+                    self.parent_session_store
+                        .clone()
+                        .context("Parent rollout storage is unavailable")?,
+                    self.memory_store
+                        .clone()
+                        .context("Memory storage is unavailable")?,
+                )?,
+            ))),
             crate::subagent::AgentKind::Review => Ok(Some(Arc::new(
                 crate::subagent::review::ReviewExecutor::new(
                     self.clone(),
