@@ -16,7 +16,11 @@ fn defaults_validation_and_unknown_fields() {
     assert_eq!(config.agent.max_steps, 50);
     assert_eq!(config.agent.max_parallel_calls, 8);
     assert_eq!(config.agent.parallel_tool_calls, None);
-    assert!(!config.session.enabled && !config.subagent.enabled);
+    assert!(!config.session.enabled);
+    assert!(config.subagent.enabled);
+    let opted_out = loader::parse(&format!("{VALID}\n[subagent]\nenabled = false")).unwrap();
+    opted_out.validate().unwrap();
+    assert!(!opted_out.subagent.enabled);
     assert!(loader::parse(&format!("{VALID}\n[agent]\nmax_step = 3")).is_err());
     assert!(loader::parse(&format!("{VALID}\n[embed]\nmodel = 'obsolete'")).is_err());
     for invalid in [

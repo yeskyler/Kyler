@@ -127,6 +127,7 @@ export type ThreadComponents = {
   ComposerExtra?: ComponentType | undefined;
   ComposerEnd?: ComponentType | undefined;
   ComposerMenu?: ComponentType | undefined;
+  ComposerInput?: ComponentType<React.ComponentProps<typeof PasteComposerInput>> | undefined;
   ComposerHeader?: ComponentType | undefined;
   ComposerFooter?: ComponentType | undefined;
 };
@@ -507,7 +508,11 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
-  const { ComposerHeader, ComposerFooter } = useContext(ThreadComponentsContext);
+  const {
+    ComposerHeader,
+    ComposerFooter,
+    ComposerInput = PasteComposerInput,
+  } = useContext(ThreadComponentsContext);
   return (
     <PasteComposerRoot className="aui-composer-root relative flex w-full flex-col">
       <div className="rounded-(--composer-radius) border border-border bg-muted shadow-sm transition-[border-color,box-shadow] focus-within:border-input focus-within:ring-2 focus-within:ring-ring/15">
@@ -521,7 +526,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           }
         >
           <ComposerAttachments />
-          <PasteComposerInput
+          <ComposerInput
             placeholder=""
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-64 min-h-17 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-7 outline-none"
             rows={2}

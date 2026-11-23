@@ -14,7 +14,7 @@ use kyler_core::runtime::UserTurn;
 use kyler_protocol::api::{
     attachments::{AttachmentInfo, AttachmentKind, MAX_ATTACHMENTS},
     images::MAX_IMAGES,
-    run::{CreateRunRequest, RunAccepted, RunInfo, RunStatus},
+    run::{CreateRunRequest, RunAccepted, RunInfo, RunStatus, SessionCommand},
 };
 
 impl RunManager {
@@ -69,11 +69,23 @@ impl RunManager {
         principal: kyler_protocol::api::gateway::Principal,
     ) -> ApiResult<RunAccepted> {
         valid_id(&session_id)?;
+        if request.command.is_some()
+            && (!request.input.is_empty()
+                || !request.skills.is_empty()
+                || !request.images.is_empty()
+                || !request.attachment_ids.is_empty()
+                || request.resume)
+        {
+            return Err(ApiError::bad(
+                "Session commands must be sent without message input, attachments, or resume.",
+            ));
+        }
         if request.input.trim().is_empty()
             && request.skills.is_empty()
             && request.images.is_empty()
             && request.attachment_ids.is_empty()
             && !request.resume
+            && request.command.is_none()
         {
             return Err(ApiError::bad("Input cannot be empty."));
         }
@@ -100,7 +112,9 @@ impl RunManager {
                 "At most four images are allowed per message.",
             ));
         }
-        let bytes = if request.skills.is_empty() {
+        let bytes = if let Some(command) = &request.command {
+            serde_json::to_vec(command)
+        } else if request.skills.is_empty() {
             serde_json::to_vec(&(
                 &request.input,
                 &request.images,
@@ -196,6 +210,44 @@ impl RunManager {
             return Err(crate::gateway::forbidden());
         }
         self.validate_session_environment(&session)?;
+        match &request.command {
+            Some(SessionCommand::Review { .. } | SessionCommand::Memory)
+                if self.agent.subagent_manager().is_none() =>
+            {
+                return Err(ApiError::bad("Subagents are disabled on this server."));
+            }
+            Some(SessionCommand::Review { target }) => {
+                if session.environment.is_none() {
+                    return Err(ApiError::bad("Code review requires a workspace."));
+                }
+                use kyler_protocol::review::ReviewTarget;
+                if let ReviewTarget::Commit { commit: reference }
+                | ReviewTarget::BaseBranch { branch: reference } = target
+                    && (reference.is_empty()
+                        || reference.len() > 256
+                        || reference.starts_with('-')
+                        || reference.contains("..")
+                        || !reference.bytes().all(|ch| {
+                            ch.is_ascii_alphanumeric() || matches!(ch, b'/' | b'.' | b'_' | b'-')
+                        }))
+                {
+                    return Err(ApiError::bad("Enter a local commit ID or branch name."));
+                }
+            }
+            Some(SessionCommand::Compact | SessionCommand::Memory) if session.events.is_empty() => {
+                return Err(ApiError::bad(
+                    "This session has no conversation history yet.",
+                ));
+            }
+            _ => {}
+        }
+        let compact = matches!(request.command, Some(SessionCommand::Compact));
+        let input = request
+            .command
+            .as_ref()
+            .map(SessionCommand::input)
+            .unwrap_or(request.input);
+
         let selection = self.read_model_selection(&session_id).await?;
         let mut agent = self
             .agent_for_session(&session)?
@@ -333,7 +385,7 @@ impl RunManager {
             false,
             self.settings.max_subscribers_per_run,
         ));
-        *entry.input.lock().unwrap_or_else(|e| e.into_inner()) = Some(request.input.clone());
+        *entry.input.lock().unwrap_or_else(|e| e.into_inner()) = Some(input.clone());
         registry
             .active
             .insert(session_id.clone(), info.run_id.clone());
@@ -351,11 +403,11 @@ impl RunManager {
                     session,
                     UserTurn {
                         skills: request.skills,
-                        text: request.input,
+                        text: input,
                         images,
                         attachments: attached,
                         resume: request.resume,
-                        compact: false,
+                        compact,
                     },
                     agent,
                 )

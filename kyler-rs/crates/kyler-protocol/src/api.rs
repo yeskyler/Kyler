@@ -56,6 +56,8 @@ pub struct ModelFailureDetails {
 pub struct ServerInfo {
     #[serde(default)]
     pub instance_id: Option<String>,
+    #[serde(default)]
+    pub subagents_enabled: bool,
     pub model: String,
     pub context_window_tokens: usize,
     /// None for older servers; clients must not infer a retention ratio.

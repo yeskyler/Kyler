@@ -171,7 +171,7 @@ pub struct SubagentSettings {
 impl Default for SubagentSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             persist_sessions: false,
             max_concurrent_tasks: kyler_protocol::agents::MAX_CONCURRENT_SUBAGENTS,
             max_tasks_per_execution: kyler_protocol::agents::MAX_SUBAGENTS_PER_EXECUTION,

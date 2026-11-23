@@ -39,8 +39,8 @@ enabled = false
 directory = "sessions"
 
 [subagent]
-# Enables general delegation and read-only Review agents.
-enabled = false
+# Enables general delegation and specialized Review and Memory agents.
+enabled = true
 # Retains child sessions, validated review reports and diagnostic rollouts.
 persist_sessions = false
 # Shared running limit; additional tasks wait in the queue (maximum 32).

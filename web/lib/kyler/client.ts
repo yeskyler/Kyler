@@ -1,6 +1,7 @@
 import { requestFailureMessage, type RequestFailure } from "./errors.ts";
 import { randomUuid } from "./random-uuid.ts";
 import { upsertCompaction, settleCompactions } from "./compaction.ts";
+import type { SessionCommand } from "./session-commands.ts";
 import type { QuestionRecord } from "./questions.ts";
 import type {
   AttachmentAdapter,
@@ -195,7 +196,8 @@ export function chatAdapter(
 ): ChatModelAdapter {
   let recovery = recoverRun;
   return {
-    async *run({ messages, abortSignal }) {
+    async *run({ messages, abortSignal, runConfig }) {
+      const command = runConfig?.custom?.sessionCommand as SessionCommand | undefined;
       const session = await resolveSession(reference);
       const last = messages.at(-1);
       if (!recovery && last?.role !== "user")
@@ -213,8 +215,13 @@ export function chatAdapter(
         : await api<{ run_id: string }>(`sessions/${session}/runs`, {
             method: "POST",
             body: JSON.stringify({
-              input,
-              attachment_ids: last?.role === "user" ? last.attachments.map((item) => item.id) : [],
+              ...(command
+                ? { input: "", command }
+                : {
+                    input,
+                    attachment_ids:
+                      last?.role === "user" ? last.attachments.map((item) => item.id) : [],
+                  }),
               client_request_id: randomUuid(),
             }),
           });

@@ -66,6 +66,7 @@ pub async fn run(client: &Client, suite: &Path, report: &Path) -> Result<()> {
             .start_run(
                 &session.session_id,
                 &CreateRunRequest {
+                    command: None,
                     skills: Vec::new(),
                     input: case.input.clone(),
                     images: Vec::new(),

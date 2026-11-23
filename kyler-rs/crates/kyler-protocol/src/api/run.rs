@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct CreateRunRequest {
     pub input: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<SessionCommand>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<super::skills::SkillReference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -15,6 +17,27 @@ pub struct CreateRunRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<super::images::ImageInput>,
     pub client_request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SessionCommand {
+    Compact,
+    Review { target: crate::review::ReviewTarget },
+    Memory,
+}
+
+impl SessionCommand {
+    pub fn input(&self) -> String {
+        match self {
+            Self::Compact => "/compact".into(),
+            Self::Review { target } => {
+                let review = serde_json::json!({"target": target});
+                format!("Perform an independent read-only code review. Delegate using agent=review and review={review}. Wait for the review report and summarize actionable findings and coverage limitations. Do not modify files.")
+            }
+            Self::Memory => "Review the committed history of this session for durable facts, explicit user preferences, and reusable procedures. Delegate using agent=memory and wait for the result. Save only candidates and draft any supported reusable workflows for review.".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

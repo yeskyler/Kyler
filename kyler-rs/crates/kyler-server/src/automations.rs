@@ -109,6 +109,7 @@ impl AutomationExecutor {
             .start(
                 run.session_id.clone(),
                 CreateRunRequest {
+                    command: None,
                     skills: Vec::new(),
                     input: config.prompt,
                     attachment_ids: Vec::new(),

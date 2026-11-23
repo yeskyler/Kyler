@@ -473,7 +473,8 @@ parent execution. Review pagination requires exactly one ID, `timeout_secs=0` an
 
 In the local TUI, `/review` asks the main agent to review uncommitted changes,
 and `/memory` asks it to review committed history from the current session for
-memory candidates or skill drafts. These commands require `[subagent].enabled`.
+memory candidates or skill drafts. Subagents are enabled by default. Set
+`[subagent].enabled = false` to disable delegation.
 Use `/compact` to summarize earlier conversation even below the automatic
 threshold. Manual compaction retains the original events and runs no tools.
 

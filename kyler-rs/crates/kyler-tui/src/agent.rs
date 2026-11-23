@@ -146,6 +146,7 @@ impl AgentHandle {
         let profile = thread.model(None).await?.profile;
         let agent = thread.agent().bind_model(profile.as_deref())?;
         Ok(ServerInfo {
+            subagents_enabled: self.inner.config.subagent.enabled,
             instance_id: None,
             model: agent.model().into(),
             context_window_tokens: agent.context_window_tokens(),
@@ -195,9 +196,13 @@ impl AgentHandle {
         );
         let thread = self.thread(id).await?;
         let compact = text.trim() == "/compact";
+        use kyler_protocol::{api::run::SessionCommand, review::ReviewTarget};
         let text = match text.trim() {
-            "/review" => "Perform an independent read-only code review of the current uncommitted changes. Delegate using agent=review and review.target.type=uncommitted. Wait for the review report and summarize actionable findings and coverage limitations. Do not modify files.".into(),
-            "/memory" => "Review the committed history of this session for durable facts, explicit user preferences, and reusable procedures. Delegate using agent=memory and wait for the result. Save only candidates and draft any supported reusable workflows for review.".into(),
+            "/review" => SessionCommand::Review {
+                target: ReviewTarget::Uncommitted,
+            }
+            .input(),
+            "/memory" => SessionCommand::Memory.input(),
             _ => text,
         };
         let run = thread

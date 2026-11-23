@@ -34,6 +34,7 @@ import { ArtifactsProvider, ArtifactBrowserLayout } from "@/components/kyler/art
 import { QuestionsProvider, useQuestions } from "@/components/kyler/questions";
 import { ApprovalCard } from "@/components/kyler/approval-card";
 import { AssistantMessage } from "@/components/kyler/assistant-message";
+import { SessionCommandContext, SlashComposerInput } from "@/components/kyler/slash-composer";
 import { ComposerMenu } from "@/components/kyler/composer-menu";
 import { SidebarToggle } from "@/components/kyler/sidebar-toggle";
 import { WorkspaceSidebar } from "@/components/kyler/workspace-sidebar";
@@ -43,6 +44,7 @@ import type { Session } from "@/lib/kyler/types";
 import type { Approval } from "@/lib/kyler/events";
 
 type Loaded = {
+  subagents?: boolean;
   defaultWorkspace?: string;
   initialText?: string;
   key: string;
@@ -52,7 +54,12 @@ type Loaded = {
   approvals: Approval[];
   recoverRun?: string;
 };
-type Info = { model: string; default_workspace?: string; cwd?: string | null };
+type Info = {
+  subagents_enabled?: boolean;
+  model: string;
+  default_workspace?: string;
+  cwd?: string | null;
+};
 
 export function Assistant() {
   const [loaded, updateLoaded] = useState<Loaded>();
@@ -136,6 +143,7 @@ export function Assistant() {
           setLoaded({
             key: session.session_id,
             defaultWorkspace: info.default_workspace ?? info.cwd ?? undefined,
+            subagents: info.subagents_enabled,
             session,
             messages: [],
             model: info.model,
@@ -165,6 +173,7 @@ export function Assistant() {
         setLoaded({
           key: session.session_id,
           defaultWorkspace: info.default_workspace ?? info.cwd ?? undefined,
+          subagents: info.subagents_enabled,
           session,
           messages,
           model: model.active?.model ?? model.selected?.model ?? info.model,
@@ -234,6 +243,7 @@ export function Assistant() {
     setLoaded({
       key: session.session_id,
       defaultWorkspace: info.default_workspace ?? info.cwd ?? undefined,
+      subagents: info.subagents_enabled,
       initialText,
       session,
       messages: [],
@@ -597,32 +607,44 @@ function Connected({
                       </div>
                     </header>
                     <div className={view === "chat" ? "relative min-h-0 flex-1" : "hidden"}>
-                      <ArtifactBrowserLayout enabled={!loaded.session.draft}>
-                        <Thread
-                          autoFocus={active}
-                          composerBefore={
-                            approvals[0] ? (
-                              <ApprovalCard
-                                key={approvals[0].id}
-                                approval={approvals[0]}
-                                count={approvals.length}
-                                busy={busy}
-                                error={error}
-                                onDecision={(decision) => decide(approvals[0], decision)}
-                              />
-                            ) : null
-                          }
-                          components={{
-                            Welcome: NewChatWelcome,
-                            AssistantMessage,
-                            ComposerExtra: PermissionControl,
-                            ComposerEnd: ModelThinkingControl,
-                            ComposerMenu,
-                            ComposerHeader: ComposerStatus,
-                            ComposerFooter: ComposerSettings,
-                          }}
-                        />
-                      </ArtifactBrowserLayout>
+                      <SessionCommandContext.Provider
+                        value={{
+                          subagents: loaded.subagents,
+                          hasWorkspace: !!(
+                            loaded.session.cwd ??
+                            loaded.session.project ??
+                            loaded.defaultWorkspace
+                          ),
+                        }}
+                      >
+                        <ArtifactBrowserLayout enabled={!loaded.session.draft}>
+                          <Thread
+                            autoFocus={active}
+                            composerBefore={
+                              approvals[0] ? (
+                                <ApprovalCard
+                                  key={approvals[0].id}
+                                  approval={approvals[0]}
+                                  count={approvals.length}
+                                  busy={busy}
+                                  error={error}
+                                  onDecision={(decision) => decide(approvals[0], decision)}
+                                />
+                              ) : null
+                            }
+                            components={{
+                              Welcome: NewChatWelcome,
+                              AssistantMessage,
+                              ComposerExtra: PermissionControl,
+                              ComposerEnd: ModelThinkingControl,
+                              ComposerMenu,
+                              ComposerInput: SlashComposerInput,
+                              ComposerHeader: ComposerStatus,
+                              ComposerFooter: ComposerSettings,
+                            }}
+                          />
+                        </ArtifactBrowserLayout>
+                      </SessionCommandContext.Provider>
                     </div>
                     <div className={view === "inspection" ? "min-h-0 flex-1" : "hidden"}>
                       <SessionInspectorPage />

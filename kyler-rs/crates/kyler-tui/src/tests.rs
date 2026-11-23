@@ -22,6 +22,7 @@ fn ready() -> State {
     let mut state = State::new(Some("00000000-0000-4000-8000-000000000001".into()));
     state.phase = Phase::Ready;
     state.info = Some(ServerInfo {
+        subagents_enabled: false,
         default_workspace: None,
         instance_id: None,
         model: "DeepSeek V4 Flash".into(),

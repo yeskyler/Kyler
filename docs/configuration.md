@@ -60,7 +60,7 @@ roots follow configuration path resolution.
 | `context` | Window, compaction, output reservation | 128000 tokens; window ratio 0.6; trigger ratio 0.8 |
 | `workspace` | Default task directory | `workspace`, normally `~/.kyler/workspace` |
 | `session` | Persistent conversation storage | Template disabled; installer enables it |
-| `subagent` | Delegation and child limits | Disabled by default; up to 32 concurrent and 64 total tasks per parent execution |
+| `subagent` | Delegation and child limits | Enabled by default; up to 32 concurrent and 64 total tasks per parent execution |
 | `sandbox` | Filesystem, process, network policy | Workspace write; outbound networking enabled |
 | `approval` | Tool decision policy and reviewer | `on-request`, user reviewer |
 | `server` | Rust API and run limits | `127.0.0.1:30001` |

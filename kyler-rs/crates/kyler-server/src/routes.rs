@@ -293,6 +293,7 @@ async fn info(
     let environment = agent.workspace_environment();
     let model = agent.model_registry().and_then(|r| r.resolve(None).ok());
     axum::Json(ServerInfo {
+        subagents_enabled: agent.subagent_manager().is_some(),
         instance_id: Some(state.instance_id.clone()),
         model: model
             .as_ref()

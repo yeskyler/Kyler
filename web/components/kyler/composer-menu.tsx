@@ -199,7 +199,7 @@ export function ComposerMenu() {
                 }}
               >
                 <PaperclipIcon className="size-4 text-muted-foreground" />
-                Upload attachment
+                Upload
               </Menu.Item>
               <Menu.SubmenuRoot
                 onOpenChange={(value) => {

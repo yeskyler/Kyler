@@ -269,6 +269,35 @@ test("adapter submits only the new turn and renders ordered tool and text events
   assert.equal(final.content[2].text, "Done.");
 });
 
+test("the adapter submits an explicit session command without sending draft attachments", async (t) => {
+  const command = { type: "review", target: { type: "base_branch", branch: "main" } };
+  t.mock.method(globalThis, "fetch", async (path: string, init?: RequestInit) => {
+    if (path.endsWith("/runs")) {
+      const { client_request_id, ...body } = JSON.parse(init?.body as string);
+      assert.ok(client_request_id);
+      assert.deepEqual(body, { input: "", command });
+      return Response.json({ run_id: "r1" });
+    }
+    if (path.endsWith("/events"))
+      return stream([{ seq: 1, type: "run_completed", output: "Review complete." }]);
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  const run = chatAdapter("s1", () => {}).run({
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "text", text: "/review" }],
+        attachments: [{ id: "draft-file" }],
+      },
+    ],
+    runConfig: { custom: { sessionCommand: command } },
+    abortSignal: new AbortController().signal,
+  } as never);
+  const updates = [];
+  for await (const update of run as AsyncGenerator<ChatModelRunResult>) updates.push(update);
+  assert.equal(updates.at(-1)?.status?.type, "complete");
+});
+
 test("Stop cancels an admitted backend run even if stopped during admission", async (t) => {
   const abort = new AbortController();
   let cancelled = false;
