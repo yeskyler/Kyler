@@ -27,7 +27,9 @@ Kyler independently verified it. Candidates never replace reviewed entries; use 
 new key to propose a conflicting conclusion. Review can activate, reject or
 invalidate an exact entry revision. Expired/invalid/rejected entries are excluded
 from retrieval. Search includes at most 16 whole records within a 16 KiB record
-budget. The existing scope derivation is preserved, including private-workspace
+budget. For automatic context, the runtime loads eligible entries directly from
+the current scope under the same byte budget, newest first, without matching the
+user question or applying a record-count cap. The existing scope derivation is preserved, including private-workspace
 isolation; this release does not introduce globally shared personal memory.
 
 The tool returns the store path, scope and candidate revision for review:

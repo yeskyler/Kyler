@@ -459,6 +459,46 @@ mod learning_tests {
     }
 
     #[test]
+    fn context_loads_active_records_without_a_query_or_search_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let store = MemoryStore::new(root.path().into());
+        let scope = "e".repeat(64);
+        for n in 0..18 {
+            store
+                .put(
+                    &scope,
+                    &format!("fact{n}"),
+                    "project detail",
+                    vec![],
+                    Some(0),
+                    "session",
+                )
+                .unwrap();
+        }
+        store
+            .propose(
+                &scope,
+                "unreviewed",
+                "candidate content",
+                vec![],
+                MemoryMetadata::default(),
+                None,
+                "session",
+                "execution",
+                "call",
+            )
+            .unwrap();
+        let entries = store.load_context(&scope).unwrap();
+        assert_eq!(entries.len(), 18);
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry.status == MemoryStatus::Active)
+        );
+        assert_eq!(store.search(&scope, "").unwrap().len(), 16);
+    }
+
+    #[test]
     fn retrieval_fits_complete_records_within_the_context_budget() {
         let root = tempfile::tempdir().unwrap();
         let store = MemoryStore::new(root.path().into());
@@ -475,7 +515,7 @@ mod learning_tests {
                 )
                 .unwrap();
         }
-        let results = store.search(&scope, "").unwrap();
+        let results = store.load_context(&scope).unwrap();
         assert!(!results.is_empty() && results.len() < 10);
         assert!(
             results
