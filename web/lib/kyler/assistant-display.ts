@@ -1,3 +1,4 @@
+import { isSubagentPart } from "./subagents.ts";
 import { isCompactionPart } from "./compaction.ts";
 import type { ThreadAssistantMessagePart } from "@assistant-ui/react";
 
@@ -29,7 +30,12 @@ export function partitionAssistantParts(parts: readonly ThreadAssistantMessagePa
   let lastText = -1;
   parts.forEach((part, index) => {
     if (!visible(part)) return;
-    if (part.type === "tool-call" || part.type === "reasoning" || isCompactionPart(part))
+    if (
+      part.type === "tool-call" ||
+      part.type === "reasoning" ||
+      isCompactionPart(part) ||
+      isSubagentPart(part)
+    )
       lastActivity = index;
     if (part.type === "text" && part.text.trim()) lastText = index;
   });
@@ -41,6 +47,21 @@ export function partitionAssistantParts(parts: readonly ThreadAssistantMessagePa
     (index < finalStart ? process : answer).push(index);
   });
   return { process, answer };
+}
+
+/** Keep status rows in order, separate from grouped tool calls. */
+export function executionSections(
+  parts: readonly ThreadAssistantMessagePart[],
+  indices: readonly number[],
+) {
+  const sections: { kind: "details" | "compaction" | "subagent"; indices: number[] }[] = [];
+  for (const index of indices) {
+    if (isCompactionPart(parts[index])) sections.push({ kind: "compaction", indices: [index] });
+    else if (isSubagentPart(parts[index])) sections.push({ kind: "subagent", indices: [index] });
+    else if (sections.at(-1)?.kind === "details") sections.at(-1)!.indices.push(index);
+    else sections.push({ kind: "details", indices: [index] });
+  }
+  return sections;
 }
 
 export function formatRunDuration(milliseconds: number) {

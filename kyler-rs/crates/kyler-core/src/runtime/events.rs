@@ -18,6 +18,9 @@ use kyler_protocol::activity::{ActivityKind, ToolSource};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentStreamEvent {
+    SubagentUpdated {
+        task: kyler_protocol::api::history::SubagentPresentation,
+    },
     ContextCompaction {
         compaction: kyler_protocol::api::compaction::CompactionInfo,
     },

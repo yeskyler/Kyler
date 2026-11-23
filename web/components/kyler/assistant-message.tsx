@@ -34,6 +34,7 @@ import {
 } from "@/components/assistant-ui/elements/collapsible-root";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import {
+  executionSections,
   formatRunDuration,
   isVisibleMessagePart,
   partitionAssistantParts,
@@ -41,7 +42,9 @@ import {
   groupToolCategories,
 } from "@/lib/kyler/assistant-display";
 
-import { executionSections, isCompactionPart, type Compaction } from "@/lib/kyler/compaction";
+import { isCompactionPart, type Compaction } from "@/lib/kyler/compaction";
+import { SubagentRow } from "./subagent-row";
+import type { SubagentPresentation } from "@/lib/kyler/subagents";
 import { CompactionSeparator } from "./compaction-separator";
 
 import { parsePatchResult } from "@/lib/kyler/patch-changes";
@@ -475,6 +478,12 @@ export function AssistantMessage() {
           if (section.kind === "compaction" && part.type === "data")
             return (
               <CompactionSeparator key={part.id ?? index} compaction={part.data as Compaction} />
+            );
+          if (section.kind === "subagent" && part.type === "data")
+            return (
+              <CollapsibleContent key={part.id ?? index}>
+                <SubagentRow task={part.data as SubagentPresentation} />
+              </CollapsibleContent>
             );
           const rows = groupProcessParts(message.content, section.indices);
           return (

@@ -1,7 +1,9 @@
 import type { RequestFailure } from "./errors.ts";
 import type { QuestionRecord } from "./questions.ts";
 import type { Compaction } from "./compaction.ts";
+import type { SubagentPresentation } from "./subagents.ts";
 export type KylerEvent = {
+  task?: SubagentPresentation;
   patch?: import("./patch-changes.ts").PatchResult;
   compaction?: Compaction;
   type: string;

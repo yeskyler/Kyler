@@ -1,3 +1,4 @@
+import { isSubagentTool, upsertSubagent, type SubagentPresentation } from "./subagents.ts";
 import { upsertCompaction, settleCompactions, type Compaction } from "./compaction.ts";
 import type {
   ThreadMessageLike,
@@ -17,6 +18,7 @@ type Presentation = {
   finished_at: number | null;
 };
 export type HistoryContent =
+  | { type: "subagent"; task: SubagentPresentation }
   | { type: "context_compaction"; compaction: Compaction }
   | { type: "message"; role: string; text: string }
   | { type: "reasoning"; text: string }
@@ -165,6 +167,9 @@ export function historyMessages(
     }
     if (event.execution_id === recoverExecution) continue;
     for (const item of event.content) {
+      if (item.type === "subagent") upsertSubagent(ensureAssistant(event), item.task);
+      if ((item.type === "tool_call" || item.type === "tool_result") && isSubagentTool(item.name))
+        continue;
       if (item.type === "context_compaction")
         upsertCompaction(ensureAssistant(event), item.compaction);
       if (item.type === "reasoning" && item.text.trim())

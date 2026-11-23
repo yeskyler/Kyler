@@ -31,6 +31,7 @@ use kyler_protocol::{
 
 #[derive(Debug, Clone)]
 pub enum Entry {
+    Subagent(kyler_protocol::api::history::SubagentPresentation),
     Compaction(kyler_protocol::api::compaction::CompactionInfo),
     Assistant(AgentMessageCell),
     Reasoning(ReasoningCell),
@@ -414,6 +415,18 @@ impl State {
             .or_else(|| self.info.as_ref().map(|i| i.model.as_str()))
             .unwrap_or("Connecting…")
     }
+    pub(super) fn subagent(&mut self, task: kyler_protocol::api::history::SubagentPresentation) {
+        if let Some(Entry::Subagent(previous)) = self.entries.iter_mut().rev().find(
+            |entry| matches!(entry, Entry::Subagent(previous) if previous.task_id == task.task_id),
+        ) {
+            *previous = task;
+        } else {
+            self.finish_reasoning();
+            self.finish_assistant();
+            self.entries.push(Entry::Subagent(task));
+        }
+    }
+
     pub(super) fn compaction(
         &mut self,
         compaction: kyler_protocol::api::compaction::CompactionInfo,
@@ -431,6 +444,16 @@ impl State {
     pub(super) fn settle_compactions(&mut self, cancelled: bool) {
         use kyler_protocol::api::compaction::CompactionStatus;
         for entry in &mut self.entries {
+            if let Entry::Subagent(task) = entry
+                && matches!(task.status.as_str(), "queued" | "running")
+            {
+                task.status = if cancelled {
+                    "cancelled"
+                } else {
+                    "interrupted"
+                }
+                .into();
+            }
             if let Entry::Compaction(info) = entry {
                 if info.status == CompactionStatus::Running {
                     info.status = if cancelled {
@@ -490,6 +513,10 @@ impl State {
             }
             for item in event.content {
                 match item {
+                    HistoryContent::Subagent { task } => self.subagent(task),
+                    HistoryContent::ToolCall { name, .. }
+                    | HistoryContent::ToolResult { name, .. }
+                        if kyler_protocol::api::history::is_subagent_control_tool(&name) => {}
                     HistoryContent::ContextCompaction { compaction } => self.compaction(compaction),
                     HistoryContent::Reasoning { text } if !text.trim().is_empty() => {
                         self.entries

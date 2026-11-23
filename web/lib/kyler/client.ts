@@ -1,5 +1,6 @@
 import { requestFailureMessage, type RequestFailure } from "./errors.ts";
 import { randomUuid } from "./random-uuid.ts";
+import { isSubagentTool, upsertSubagent } from "./subagents.ts";
 import { upsertCompaction, settleCompactions } from "./compaction.ts";
 import type { SessionCommand } from "./session-commands.ts";
 import type { QuestionRecord } from "./questions.ts";
@@ -297,6 +298,9 @@ export function chatAdapter(
           if (event.type === "run_started") {
             startedAt = event.timestamp_ms ?? startedAt;
             yield update();
+          } else if (event.type === "subagent_updated" && event.task) {
+            upsertSubagent(content, event.task);
+            yield update();
           } else if (event.type === "context_compaction" && event.compaction) {
             upsertCompaction(content, event.compaction);
             yield update();
@@ -332,6 +336,7 @@ export function chatAdapter(
             event.type === "tool_queued" ||
             event.type === "tool_started"
           ) {
+            if (event.name && isSubagentTool(event.name)) continue;
             const existing = content.findIndex(
               (part) => part.type === "tool-call" && part.toolCallId === event.call_id,
             );
@@ -376,6 +381,7 @@ export function chatAdapter(
               content[existing] = tool;
             yield update();
           } else if (event.type === "tool_finished") {
+            if (event.name && isSubagentTool(event.name)) continue;
             const index = content.findIndex(
               (part) => part.type === "tool-call" && part.toolCallId === event.call_id,
             );

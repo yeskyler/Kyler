@@ -261,6 +261,44 @@ async fn review_is_delegated_collected_and_persisted_through_the_server() {
         task.review.as_ref().unwrap().report.assessment,
         ReviewAssessment::NoFindings
     );
+    use kyler_protocol::api::{
+        event::EventPayload,
+        history::{HistoryContent, HistoryPage},
+    };
+    let events = harness.events(&run.run_id, 0).await;
+    assert!(events.iter().any(|event| matches!(&event.payload,
+        EventPayload::SubagentUpdated { task: update } if update.task_id == task.task_id && update.name == "atlas" && update.status == "completed"
+    )));
+    let history: HistoryPage = harness
+        .client
+        .get(format!("{}/v1/sessions/{session}/history", harness.url))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rows = history
+        .events
+        .iter()
+        .flat_map(|event| &event.content)
+        .filter_map(|item| {
+            if let HistoryContent::Subagent { task } = item {
+                Some(task)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].task_id, task.task_id);
+    assert_eq!(
+        rows[0].summary.as_deref(),
+        Some("No actionable defect found.")
+    );
+
     let child = harness.store.load(&task.session_id).await.unwrap();
     assert!(child.state.contains_key("kyler.review.result"));
     harness.restart().await;

@@ -13,9 +13,23 @@ pub struct ToolPresentation {
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
 }
+/// Bounded task status for the parent conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentPresentation {
+    pub task_id: String,
+    pub name: String,
+    pub agent: crate::review::AgentKind,
+    pub status: String,
+    pub target: Option<crate::review::ReviewTarget>,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HistoryContent {
+    Subagent {
+        task: SubagentPresentation,
+    },
     ContextCompaction {
         compaction: super::compaction::CompactionInfo,
     },
@@ -70,4 +84,11 @@ pub struct HistoryPage {
     pub events: Vec<HistoryEvent>,
     pub executions: Vec<HistoryExecution>,
     pub next_cursor: Option<usize>,
+}
+
+pub fn is_subagent_control_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "delegate_task" | "wait_tasks" | "cancel_task" | "get_task"
+    )
 }

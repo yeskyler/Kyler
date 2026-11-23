@@ -370,6 +370,7 @@ async fn projection(event: AgentStreamEvent, state: &ThreadState) -> Option<Even
                 .as_ref()
                 .and_then(|a| a.model.clone()),
         },
+        AgentStreamEvent::SubagentUpdated { task } => EventPayload::SubagentUpdated { task },
         AgentStreamEvent::ContextCompaction { compaction } => {
             EventPayload::ContextCompaction { compaction }
         }

@@ -215,6 +215,7 @@ impl Agent {
                 return Err(error);
             }
         };
+        let mut presented = std::collections::HashMap::new();
         let result = async {
             self.checkpoint(session).await?;
             if let Some(stream) = stream {
@@ -228,6 +229,16 @@ impl Agent {
                     biased;
                     _ = stream.cancelled() => anyhow::bail!("agent execution cancelled"),
                     result = self.run_loop(session, scope.as_ref(), Some(stream), turn.compact) => result,
+                    result = async {
+                        let Some(scope) = &scope else { return std::future::pending().await };
+                        loop {
+                            let changed = scope.changed();
+                            tokio::pin!(changed);
+                            changed.as_mut().enable();
+                            publish_subagent_tasks(stream, &mut presented, &scope.list()).await?;
+                            changed.await;
+                        }
+                    } => result,
                 }
             } else {
                 self.run_loop(session, scope.as_ref(), None, turn.compact).await
@@ -237,6 +248,9 @@ impl Agent {
         if let Some(scope) = &scope {
             let tasks = scope.close().await;
             session.record_subagent_tasks(&tasks);
+            if let Some(stream) = stream {
+                let _ = publish_subagent_tasks(stream, &mut presented, &tasks).await;
+            }
         }
         if let Some(context) = &self.approval {
             if context.session_id == session.session_id {
@@ -295,4 +309,25 @@ impl Agent {
             }
         }
     }
+}
+
+async fn publish_subagent_tasks(
+    stream: &StreamControl,
+    previous: &mut std::collections::HashMap<
+        String,
+        kyler_protocol::api::history::SubagentPresentation,
+    >,
+    tasks: &[crate::SubagentTask],
+) -> Result<()> {
+    for task in tasks {
+        let task = task.presentation();
+        if previous.get(&task.task_id) == Some(&task) {
+            continue;
+        }
+        stream
+            .emit(AgentStreamEvent::SubagentUpdated { task: task.clone() })
+            .await?;
+        previous.insert(task.task_id.clone(), task);
+    }
+    Ok(())
 }

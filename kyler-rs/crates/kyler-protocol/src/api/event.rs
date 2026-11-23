@@ -15,6 +15,9 @@ pub struct ServerEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventPayload {
+    SubagentUpdated {
+        task: super::history::SubagentPresentation,
+    },
     ContextCompaction {
         compaction: super::compaction::CompactionInfo,
     },
@@ -90,6 +93,7 @@ pub enum EventPayload {
 impl EventPayload {
     pub fn name(&self) -> &'static str {
         match self {
+            Self::SubagentUpdated { .. } => "subagent_updated",
             Self::ContextCompaction { .. } => "context_compaction",
             Self::QuestionUpdated { .. } => "question_updated",
             Self::ApprovalUpdated { .. } => "approval_updated",

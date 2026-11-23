@@ -124,6 +124,8 @@ pub struct SubagentTask {
     pub agent: AgentKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<ReviewResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_target: Option<kyler_protocol::review::ReviewTarget>,
     pub task_id: String,
     pub parent_session_id: String,
     pub parent_execution_id: String,
@@ -137,6 +139,61 @@ pub struct SubagentTask {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+}
+impl SubagentTask {
+    pub fn presentation(&self) -> kyler_protocol::api::history::SubagentPresentation {
+        fn preview(text: &str) -> String {
+            text.trim().chars().take(400).collect()
+        }
+        let status = match self.status {
+            SubagentStatus::Queued => "queued",
+            SubagentStatus::Running => "running",
+            SubagentStatus::Completed => "completed",
+            SubagentStatus::Failed => "failed",
+            SubagentStatus::TimedOut => "timed_out",
+            SubagentStatus::Cancelled => "cancelled",
+        };
+        kyler_protocol::api::history::SubagentPresentation {
+            task_id: self.task_id.clone(),
+            name: self.author.name.clone(),
+            agent: self.agent,
+            status: status.into(),
+            target: self.review_target.clone().or_else(|| {
+                self.review
+                    .as_ref()
+                    .map(|review| review.snapshot.target.clone())
+            }),
+            summary: self
+                .review
+                .as_ref()
+                .map(|r| r.report.summary.as_str())
+                .or(self.output.as_deref())
+                .map(preview),
+            error: self.presentation_error(),
+        }
+    }
+
+    fn presentation_error(&self) -> Option<String> {
+        let reason = match self.status {
+            SubagentStatus::TimedOut => "The subagent exceeded its time limit.",
+            SubagentStatus::Failed => {
+                let error = self.error.as_deref().unwrap_or_default();
+                if error.contains("not a git repository") {
+                    "The workspace is not a Git repository."
+                } else if error.contains("Review target") || error.contains("Git read failed") {
+                    "The review could not read the selected Git target."
+                } else if error.contains("child session checkpoint failed") {
+                    "The subagent could not save its session."
+                } else if error.contains("panicked") {
+                    "The subagent stopped unexpectedly."
+                } else {
+                    "The subagent could not complete its task. See the execution record for details."
+                }
+            }
+            _ => return None,
+        };
+        Some(reason.into())
+    }
 }
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

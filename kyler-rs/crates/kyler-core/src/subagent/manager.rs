@@ -360,6 +360,10 @@ pub struct SubagentScope {
     closed: AtomicBool,
 }
 impl SubagentScope {
+    pub(crate) fn changed(&self) -> tokio::sync::futures::Notified<'_> {
+        self.manager.inner.notify.notified()
+    }
+
     pub fn delegate(&self, request: DelegateTaskArgs, tool_call_id: &str) -> Result<SubagentTask> {
         request.validate()?;
         let executor = self
@@ -416,6 +420,7 @@ impl SubagentScope {
             author: session.author.clone(),
             agent: request.agent,
             review: None,
+            review_target: request.review.as_ref().map(|review| review.target.clone()),
             task_id: task_id.clone(),
             parent_session_id: self.owner.session_id.clone(),
             parent_execution_id: self.owner.execution_id.clone(),
@@ -453,6 +458,7 @@ impl SubagentScope {
                 .await;
         });
         *lock(&entry.worker) = Some(worker);
+        self.manager.inner.notify.notify_waiters();
         Ok(snapshot)
     }
     pub fn get(&self, id: &str) -> Result<SubagentTask> {

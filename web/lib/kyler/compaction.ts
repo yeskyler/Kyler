@@ -39,17 +39,3 @@ export function settleCompactions(
       parts[index] = compactionPart({ ...part.data, status });
   });
 }
-
-/** Separators keep their chronological position and never enter collapsible execution details. */
-export function executionSections(
-  parts: readonly ThreadAssistantMessagePart[],
-  indices: readonly number[],
-) {
-  const sections: { kind: "details" | "compaction"; indices: number[] }[] = [];
-  for (const index of indices) {
-    if (isCompactionPart(parts[index])) sections.push({ kind: "compaction", indices: [index] });
-    else if (sections.at(-1)?.kind === "details") sections.at(-1)!.indices.push(index);
-    else sections.push({ kind: "details", indices: [index] });
-  }
-  return sections;
-}

@@ -18,28 +18,93 @@ pub fn history(session: &Session, cursor: usize, limit: usize) -> Result<History
         .chain(session.execution.iter())
         .map(|execution| (execution.execution_id.as_str(), execution))
         .collect::<HashMap<_, _>>();
+    let subagents = session
+        .subagent_tasks
+        .values()
+        .map(|task| {
+            (
+                (
+                    task.parent_execution_id.as_str(),
+                    task.parent_tool_call_id.as_str(),
+                ),
+                task,
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let mut included = HashSet::new();
     let mut events = Vec::new();
     for event in &session.events[cursor..requested_end] {
         let execution = executions.get(event.execution_id.as_str());
         let mut content = Vec::new();
         for item in &event.content {
-            content.push(match item {
-                ContentItem::ContextCompaction { compaction } => HistoryContent::ContextCompaction { compaction: compaction.clone() },
-                ContentItem::Reasoning { text } => HistoryContent::Reasoning { text:text.clone() },
-                ContentItem::Message { role, content } => HistoryContent::Message { role: role.as_str().into(), text: content.clone() },
-                ContentItem::Attachment { attachment } => HistoryContent::Attachment { attachment: attachment.clone() },
-                ContentItem::Image { image } => HistoryContent::Image { name: image.name().into() },
-                ContentItem::ToolCall { tool_call_id, name, arguments } => {
-                    let presentation = execution.and_then(|execution| execution.tool_presentations.get(tool_call_id)).cloned();
+            let item = match item {
+                ContentItem::ContextCompaction { compaction } => {
+                    HistoryContent::ContextCompaction {
+                        compaction: compaction.clone(),
+                    }
+                }
+                ContentItem::Reasoning { text } => HistoryContent::Reasoning { text: text.clone() },
+                ContentItem::Message { role, content } => HistoryContent::Message {
+                    role: role.as_str().into(),
+                    text: content.clone(),
+                },
+                ContentItem::Attachment { attachment } => HistoryContent::Attachment {
+                    attachment: attachment.clone(),
+                },
+                ContentItem::Image { image } => HistoryContent::Image {
+                    name: image.name().into(),
+                },
+                ContentItem::ToolCall {
+                    tool_call_id,
+                    name,
+                    arguments,
+                } => {
+                    if name == "delegate_task"
+                        && let Some(task) =
+                            subagents.get(&(event.execution_id.as_str(), tool_call_id.as_str()))
+                    {
+                        content.push(HistoryContent::Subagent {
+                            task: task.presentation(),
+                        });
+                    }
+                    let presentation = execution
+                        .and_then(|execution| execution.tool_presentations.get(tool_call_id))
+                        .cloned();
                     let mut arguments = arguments.clone();
                     redact(&mut arguments);
-                    let summary = presentation.as_ref().and_then(|metadata| tool_summary(name, &arguments, &metadata.source));
-                    if arguments.to_string().len() > 8192 { arguments = serde_json::json!({"preview":prefix(&arguments.to_string(),8192),"truncated":true}); }
-                    HistoryContent::ToolCall { call_id: tool_call_id.clone(), name: name.clone(), arguments, presentation, summary }
+                    let summary = presentation
+                        .as_ref()
+                        .and_then(|metadata| tool_summary(name, &arguments, &metadata.source));
+                    if arguments.to_string().len() > 8192 {
+                        arguments = serde_json::json!({"preview":prefix(&arguments.to_string(),8192),"truncated":true});
+                    }
+                    HistoryContent::ToolCall {
+                        call_id: tool_call_id.clone(),
+                        name: name.clone(),
+                        arguments,
+                        presentation,
+                        summary,
+                    }
                 }
-                ContentItem::ToolResult { tool_call_id, name, status, content, .. } => HistoryContent::ToolResult { patch: (name == "apply_patch").then(|| kyler_protocol::api::tools::PatchResult::from_output(content)).flatten(), call_id: tool_call_id.clone(), name: name.clone(), status: format!("{status:?}").to_ascii_lowercase(), output: prefix(content, 32000), output_bytes: content.len(), truncated: content.len() > 32000 },
-            });
+                ContentItem::ToolResult {
+                    tool_call_id,
+                    name,
+                    status,
+                    content,
+                    ..
+                } => HistoryContent::ToolResult {
+                    patch: (name == "apply_patch")
+                        .then(|| kyler_protocol::api::tools::PatchResult::from_output(content))
+                        .flatten(),
+                    call_id: tool_call_id.clone(),
+                    name: name.clone(),
+                    status: format!("{status:?}").to_ascii_lowercase(),
+                    output: prefix(content, 32000),
+                    output_bytes: content.len(),
+                    truncated: content.len() > 32000,
+                },
+            };
+            content.push(item);
         }
         let projected = HistoryEvent {
             id: event.id.clone(),

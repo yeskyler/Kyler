@@ -58,6 +58,7 @@ async fn task_history_is_scoped_bounded_and_restored_after_restart() {
             author: Default::default(),
             agent: Default::default(),
             review: None,
+            review_target: None,
             task_id: agent_id.clone(),
             parent_session_id: session.clone(),
             parent_execution_id: "execution".into(),

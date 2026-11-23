@@ -18,6 +18,12 @@ impl State {
                 self.cursor = event.seq;
                 let queued = matches!(&event.payload, EventPayload::ToolQueued { .. });
                 match event.payload {
+                    EventPayload::SubagentUpdated { task } => self.subagent(task),
+                    EventPayload::ToolCallDelta { name, .. }
+                    | EventPayload::ToolQueued { name, .. }
+                    | EventPayload::ToolStarted { name, .. }
+                    | EventPayload::ToolFinished { name, .. }
+                        if kyler_protocol::api::history::is_subagent_control_tool(&name) => {}
                     EventPayload::ContextCompaction { compaction } => {
                         self.finish_reasoning();
                         self.finish_assistant();
@@ -335,7 +341,7 @@ impl State {
             self.dirty = true;
         }
     }
-    fn finish_assistant(&mut self) {
+    pub(super) fn finish_assistant(&mut self) {
         if let Some(index) = self.assistant.take() {
             if let Entry::Assistant(cell) = &mut self.entries[index] {
                 cell.finish(None);

@@ -293,6 +293,7 @@ mod tests {
                     stale: false,
                 },
             }),
+            review_target: None,
             task_id: "task".into(),
             parent_session_id: "parent".into(),
             parent_execution_id: "execution".into(),

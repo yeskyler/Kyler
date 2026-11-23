@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ThreadAssistantMessagePart, ChatModelRunResult } from "@assistant-ui/react";
-import {
-  upsertCompaction,
-  settleCompactions,
-  executionSections,
-  type Compaction,
-} from "../lib/kyler/compaction.ts";
-import { partitionAssistantParts } from "../lib/kyler/assistant-display.ts";
+import { upsertCompaction, settleCompactions, type Compaction } from "../lib/kyler/compaction.ts";
+import { executionSections, partitionAssistantParts } from "../lib/kyler/assistant-display.ts";
 import { historyMessages, type HistoryEvent } from "../lib/kyler/history.ts";
 import { chatAdapter } from "../lib/kyler/client.ts";
 
