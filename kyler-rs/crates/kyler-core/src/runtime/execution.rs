@@ -61,6 +61,14 @@ impl Agent {
         stream: Option<&StreamControl>,
     ) -> Result<String> {
         self.tool_output_budget.validate()?;
+        anyhow::ensure!(
+            !turn.compact
+                || (!turn.resume
+                    && turn.skills.is_empty()
+                    && turn.images.is_empty()
+                    && turn.attachments.is_empty()),
+            "Context compaction cannot be combined with resume, skills or attachments"
+        );
         crate::skills::validate_references(&turn.skills)?;
         let _lease = acquire_session(&session.session_id)?;
         session.validate()?;
@@ -174,7 +182,9 @@ impl Agent {
             session.current_execution()?.execution_id.as_str(),
         );
         tracing::info!(max_steps = self.max_steps, "agent execution started");
-        let scope_result = if let Some(manager) = &self.subagent_manager {
+        let scope_result = if let Some(manager) =
+            self.subagent_manager.as_ref().filter(|_| !turn.compact)
+        {
             manager
                 .open_scope(
                     TaskOwner {
@@ -217,10 +227,10 @@ impl Agent {
                 tokio::select! {
                     biased;
                     _ = stream.cancelled() => anyhow::bail!("agent execution cancelled"),
-                    result = self.run_loop(session, scope.as_ref(), Some(stream)) => result,
+                    result = self.run_loop(session, scope.as_ref(), Some(stream), turn.compact) => result,
                 }
             } else {
-                self.run_loop(session, scope.as_ref(), None).await
+                self.run_loop(session, scope.as_ref(), None, turn.compact).await
             }
         }
         .await;

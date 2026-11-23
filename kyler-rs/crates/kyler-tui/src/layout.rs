@@ -379,7 +379,7 @@ impl View {
             } else {
                 (
                     "Help",
-                    "/model        Model\n/permissions  Permissions\n/mcp          MCP\n/skills       Skills\n$             Select skill\n@PATH         Attach file\nCtrl+V        Paste image / text\nCtrl+O        Toggle latest thought\nAlt+Backspace Remove image\nEnter         Send\nAlt+Enter     New line\nCtrl+P        Permissions\nF2            Approvals\nF3            Latest tool details\nPageUp/Down   Scroll messages\nCtrl+End      Latest message\nCtrl+N        New session\nF5            Reconnect\nCtrl+C        Cancel / exit\nCtrl+R        Restore failed input\nF10           Exit",
+                    "/model        Model\n/permissions  Permissions\n/mcp          MCP\n/skills       Skills\n/compact      Compact history\n/review       Review uncommitted code\n/memory       Review history for memory\n/resume       Continue interrupted task\n$             Select skill\n@PATH         Attach file\nCtrl+V        Paste image / text\nCtrl+O        Toggle latest thought\nAlt+Backspace Remove image\nEnter         Send\nAlt+Enter     New line\nCtrl+P        Permissions\nF2            Approvals\nF3            Latest tool details\nPageUp/Down   Scroll messages\nCtrl+End      Latest message\nCtrl+N        New session\nF5            Reconnect\nCtrl+C        Cancel / exit\nCtrl+R        Restore failed input\nF10           Exit",
                     "↑↓ Scroll · Esc Back",
                 )
             };

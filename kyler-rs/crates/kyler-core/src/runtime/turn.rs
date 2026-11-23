@@ -11,4 +11,6 @@ pub struct UserTurn {
     pub images: Vec<UserImage>,
     pub attachments: Vec<AttachmentInfo>,
     pub resume: bool,
+    /// Compact history without running a normal model/tool turn.
+    pub compact: bool,
 }

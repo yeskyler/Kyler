@@ -28,6 +28,18 @@ pub const COMMANDS: &[Command] = &[
         description: "Help",
     },
     Command {
+        name: "/compact",
+        description: "Compact conversation history",
+    },
+    Command {
+        name: "/review",
+        description: "Review uncommitted code",
+    },
+    Command {
+        name: "/memory",
+        description: "Review conversation for memory",
+    },
+    Command {
         name: "/resume",
         description: "Continue task",
     },

@@ -189,12 +189,23 @@ impl AgentHandle {
         attachments: Vec<AttachmentInfo>,
         resume: bool,
     ) -> Result<String> {
+        anyhow::ensure!(
+            !matches!(text.trim(), "/review" | "/memory") || self.inner.config.subagent.enabled,
+            "Enable [subagent].enabled in the Kyler configuration and restart TUI to use /review or /memory."
+        );
         let thread = self.thread(id).await?;
+        let compact = text.trim() == "/compact";
+        let text = match text.trim() {
+            "/review" => "Perform an independent read-only code review of the current uncommitted changes. Delegate using agent=review and review.target.type=uncommitted. Wait for the review report and summarize actionable findings and coverage limitations. Do not modify files.".into(),
+            "/memory" => "Review the committed history of this session for durable facts, explicit user preferences, and reusable procedures. Delegate using agent=memory and wait for the result. Save only candidates and draft any supported reusable workflows for review.".into(),
+            _ => text,
+        };
         let run = thread
             .submit_turn(UserTurn {
                 text,
                 attachments,
                 resume,
+                compact,
                 ..Default::default()
             })
             .await?;

@@ -6,6 +6,10 @@ use crate::{
     state::{Panel, State},
 };
 
+pub(crate) fn starts_turn(name: &str) -> bool {
+    matches!(name, "/resume" | "/compact" | "/review" | "/memory")
+}
+
 pub(crate) fn dispatch_command(
     name: &str,
     state: &mut State,

@@ -36,7 +36,7 @@ pub(super) async fn run(
             biased;
             op = ops.recv(), if !stopping => match op {
                 Some(ThreadOp::SubmitTurn {op_id,turn,context,reply}) => {
-                    let payload=if turn.skills.is_empty(){serde_json::to_vec(&(&turn.text,&turn.images,&turn.attachments,turn.resume))?}else{serde_json::to_vec(&(&turn.text,&turn.images,&turn.attachments,turn.resume,&turn.skills))?};
+                    let payload=if turn.compact { serde_json::to_vec(&("compact", &turn.text))? } else if turn.skills.is_empty(){serde_json::to_vec(&(&turn.text,&turn.images,&turn.attachments,turn.resume))?}else{serde_json::to_vec(&(&turn.text,&turn.images,&turn.attachments,turn.resume,&turn.skills))?};
                     let fingerprint = Sha256::digest(payload).to_vec();
                     if let Some(previous) = receipts.get(&op_id) {
                         let result = if previous == &fingerprint {Ok(op_id)} else {Err(anyhow::anyhow!("operation ID was already used with different input"))};

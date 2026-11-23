@@ -26,6 +26,7 @@ impl Agent {
         session: &mut Session,
         scope: Option<&SubagentScope>,
         stream: Option<&StreamControl>,
+        compact: bool,
     ) -> Result<String> {
         #[cfg(not(test))]
         let client = kyler_provider::transport::client(&self.base_url, &self.api_key);
@@ -51,6 +52,37 @@ impl Agent {
                 .unwrap_or_default(),
         );
         let client = kyler_provider::transport::ModelSession::new(client, protocol);
+        if compact {
+            let question = session.memory.current_question_index;
+            let has_history = session
+                .visible_event_indices()
+                .into_iter()
+                .any(|index| index != question);
+            let text = if has_history {
+                self.prepare_messages(session, &[], &client, stream, true)
+                    .await?;
+                "Conversation history compacted."
+            } else {
+                "No conversation history to compact."
+            }
+            .to_owned();
+            self.record(
+                session,
+                vec![ContentItem::Message {
+                    role: Role::Assistant,
+                    content: text.clone(),
+                }],
+            )?;
+            if let Some(stream) = stream {
+                stream
+                    .emit(AgentStreamEvent::TextDelta {
+                        step: 0,
+                        text: text.clone(),
+                    })
+                    .await?;
+            }
+            return Ok(text);
+        }
         let mut retrieval = super::mcp_tools::McpRetrieval::default();
         let mut explicit_loaded = false;
         let mut patch_retries = 0;
@@ -159,7 +191,7 @@ impl Agent {
                     .await?;
             }
             let mut messages = step_agent
-                .prepare_messages(session, &tools, &client, stream)
+                .prepare_messages(session, &tools, &client, stream, false)
                 .await?;
             if let Some(started) = preparing {
                 tracing::info!(target: "kyler_latency", session_id=%session.session_id,

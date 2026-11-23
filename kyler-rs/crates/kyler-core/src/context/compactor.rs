@@ -84,6 +84,7 @@ impl ContextCompactor {
         &self,
         context: &mut Session,
         summarizer: &mut S,
+        force: bool,
         count_request: F,
     ) -> anyhow::Result<()>
     where
@@ -91,7 +92,7 @@ impl ContextCompactor {
         F: Fn(&Session) -> anyhow::Result<usize>,
     {
         let before = count_request(context)?;
-        if before <= self.input_limit() {
+        if !force && before <= self.input_limit() {
             context.memory.last_input_tokens = before;
             return Ok(());
         }
@@ -106,7 +107,7 @@ impl ContextCompactor {
         let window_budget = self.policy.sliding_window_tokens();
         let mut window_size = 0;
         let mut cut = candidate.events.len();
-        for &(a, b) in groups.iter().rev() {
+        for &(a, b) in groups.iter().rev().filter(|_| !force) {
             let group: Vec<_> = candidate.events[a..b]
                 .iter()
                 .map(Event::model_view)
@@ -367,16 +368,45 @@ mod tests {
             fail: false,
             calls: 0,
         };
-        m.prepare(&mut c, &mut fake, size).await.unwrap();
+        m.prepare(&mut c, &mut fake, false, size).await.unwrap();
         assert_eq!(original, serde_json::to_string(&c.events).unwrap());
         assert!(c.memory.window_start > 1);
         assert_eq!(c.memory.window_start % 2, 1);
         assert!(size(&c).unwrap() <= m.input_limit());
         assert!(c.usage.total_tokens > 0);
         let calls = fake.calls;
-        m.prepare(&mut c, &mut fake, size).await.unwrap();
+        m.prepare(&mut c, &mut fake, false, size).await.unwrap();
         assert_eq!(calls, fake.calls);
     }
+    #[tokio::test]
+    async fn manual_compaction_summarizes_history_below_the_automatic_limit() {
+        let compactor = manager();
+        let mut session = Session::new();
+        session.begin_execution("Prior question").unwrap();
+        session
+            .finish(crate::ExecutionStatus::Completed, None, None)
+            .unwrap();
+        session.begin_execution("/compact").unwrap();
+        let mut fake = Fake {
+            fail: false,
+            calls: 0,
+        };
+        assert!(size(&session).unwrap() < compactor.input_limit());
+        compactor
+            .prepare(&mut session, &mut fake, true, size)
+            .await
+            .unwrap();
+        assert_eq!(fake.calls, 1);
+        assert_eq!(
+            session.memory.summary.as_deref(),
+            Some("Facts and progress")
+        );
+        assert_eq!(
+            session.visible_event_indices(),
+            vec![session.memory.current_question_index]
+        );
+    }
+
     #[tokio::test]
     async fn failed_summary_does_not_move_window() {
         let mut c = context();
@@ -388,6 +418,7 @@ mod tests {
                         fail: true,
                         calls: 0
                     },
+                    false,
                     size
                 )
                 .await
@@ -405,7 +436,7 @@ mod tests {
         };
         assert!(
             manager()
-                .prepare(&mut c, &mut fake, |c| Ok(size(c)? + 9000))
+                .prepare(&mut c, &mut fake, false, |c| Ok(size(c)? + 9000))
                 .await
                 .is_err()
         );
@@ -432,7 +463,7 @@ mod tests {
             fail: false,
             calls: 0,
         };
-        m.prepare(&mut c, &mut fake, size).await.unwrap();
+        m.prepare(&mut c, &mut fake, false, size).await.unwrap();
         let previous_start = c.memory.window_start;
         for i in 8..16 {
             c.add_event(event(vec![ContentItem::ToolCall {
@@ -459,7 +490,7 @@ mod tests {
                 })
             }
         }
-        m.prepare(&mut c, &mut Merge, size).await.unwrap();
+        m.prepare(&mut c, &mut Merge, false, size).await.unwrap();
         assert!(c.memory.window_start > previous_start);
         assert_eq!(c.memory.compression_count, 2);
     }
@@ -475,7 +506,10 @@ mod tests {
             fail: false,
             calls: 0,
         };
-        manager().prepare(&mut c, &mut fake, size).await.unwrap();
+        manager()
+            .prepare(&mut c, &mut fake, false, size)
+            .await
+            .unwrap();
         assert_eq!(c.memory.window_start, 3);
         assert!(fake.calls > 1);
     }
@@ -529,7 +563,7 @@ mod tests {
             inputs: String::new(),
         };
         manager()
-            .prepare(&mut session, &mut first, size)
+            .prepare(&mut session, &mut first, false, size)
             .await
             .unwrap();
         assert!(!first.inputs.contains("FIRST_QUESTION"));
@@ -544,7 +578,7 @@ mod tests {
             inputs: String::new(),
         };
         manager()
-            .prepare(&mut session, &mut second, size)
+            .prepare(&mut session, &mut second, false, size)
             .await
             .unwrap();
         assert!(second.inputs.contains("FIRST_QUESTION"));
@@ -588,7 +622,7 @@ mod tests {
         }
         // Fixed overhead forces eviction even though the projected history is small.
         manager()
-            .prepare(&mut c, &mut Check, |s| Ok(size(s)? + 5800))
+            .prepare(&mut c, &mut Check, false, |s| Ok(size(s)? + 5800))
             .await
             .unwrap();
         assert!(

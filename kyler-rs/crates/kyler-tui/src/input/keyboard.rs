@@ -121,10 +121,9 @@ pub(super) fn handle(
         }
         KeyCode::Enter => {
             let draft = state.composer.lines().join("\n");
-            if let Some(command) = COMMANDS
-                .iter()
-                .find(|command| command.name == draft.trim() && command.name != "/resume")
-            {
+            if let Some(command) = COMMANDS.iter().find(|command| {
+                command.name == draft.trim() && !crate::commands::starts_turn(command.name)
+            }) {
                 dispatch_command(command.name, state, effects, client, send);
                 return false;
             }

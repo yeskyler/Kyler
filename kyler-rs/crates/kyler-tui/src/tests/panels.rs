@@ -93,6 +93,7 @@ fn slash_menu_filters_completes_and_dispatches_commands_without_a_model_request(
     state.composer.insert_str("/");
     let menu = render(&mut terminal, &mut view, &mut state);
     assert!(menu.contains("Commands") && menu.contains("/mcp") && menu.contains("/help"));
+    assert!(menu.contains("/compact") && menu.contains("/review") && menu.contains("/memory"));
     let bottom = view.input.bottom();
     let key = |code| Input::Key(KeyEvent::new(code, KeyModifiers::NONE));
     let help_index = COMMANDS

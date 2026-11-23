@@ -360,6 +360,7 @@ impl RunManager {
                         images,
                         attachments: attached,
                         resume: request.resume,
+                        compact: false,
                     },
                     agent,
                 )

@@ -123,9 +123,9 @@ pub(super) fn handle(
                     .intersects(KeyModifiers::ALT | KeyModifiers::SHIFT) =>
             {
                 let name = commands[state.slash_selected].name;
-                if name == "/resume" {
+                if crate::commands::starts_turn(name) {
                     state.composer = composer::new();
-                    state.composer.insert_str("/resume");
+                    state.composer.insert_str(name);
                     if let (Some(submission), Some(session)) =
                         (state.begin(), state.session.clone())
                     {

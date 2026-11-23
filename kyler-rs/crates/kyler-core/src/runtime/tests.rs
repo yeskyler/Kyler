@@ -115,6 +115,43 @@ fn agent(url: String) -> Agent {
         Arc::new(ToolBox::new()),
     )
 }
+#[tokio::test]
+async fn manual_compaction_turn_only_calls_the_summarizer() {
+    let (url, requests, model) = server(vec![
+        json!({"role":"assistant","content":"Condensed history"}),
+    ])
+    .await;
+    let mut session = crate::Session::new();
+    session.begin_execution("Prior question").unwrap();
+    session
+        .finish(ExecutionStatus::Completed, None, None)
+        .unwrap();
+    let output = agent(url)
+        .execute_turn(
+            &mut session,
+            super::UserTurn {
+                text: "/compact".into(),
+                compact: true,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(output, "Conversation history compacted.");
+    assert_eq!(session.memory.summary.as_deref(), Some("Condensed history"));
+    assert_eq!(session.current_execution().unwrap().current_step, 0);
+    model.await.unwrap();
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0]["tools"].is_null());
+    assert!(
+        requests[0]["messages"]
+            .to_string()
+            .contains("Prior question")
+    );
+}
+
 struct Remember;
 #[async_trait::async_trait]
 impl Tool for Remember {
@@ -1170,7 +1207,7 @@ async fn compaction_failure_records_terminal_status_without_losing_history() {
     );
     assert!(
         agent
-            .prepare_messages(&mut session, &[], &client, None)
+            .prepare_messages(&mut session, &[], &client, None, false)
             .await
             .is_err()
     );
@@ -1243,7 +1280,7 @@ async fn compaction_cancellation_is_checkpointed_before_execution_finishes() {
     );
     let task = tokio::spawn(async move {
         let result = agent
-            .prepare_messages(&mut session, &[], &client, Some(&stream))
+            .prepare_messages(&mut session, &[], &client, Some(&stream), false)
             .await;
         (session, result)
     });

@@ -28,6 +28,7 @@ impl Agent {
         tools: &[ChatCompletionTools],
         client: &kyler_provider::transport::ModelSession,
         stream: Option<&StreamControl>,
+        force_compaction: bool,
     ) -> Result<Vec<ChatCompletionRequestMessage>> {
         let store = ContextCompactor::new(self.context_policy.clone())?.with_tokenizer(
             self.model_info()
@@ -99,7 +100,7 @@ impl Agent {
             (store.count(&serde_json::json!({"messages":self.request_messages(project(session)?,session)?,"tools":tools}))? as f64
                 * session.memory.estimation_scale.max(1.0))
             .ceil() as usize;
-        let mut compaction = if before_tokens > store.input_limit() {
+        let mut compaction = if force_compaction || before_tokens > store.input_limit() {
             Some(kyler_protocol::api::compaction::CompactionInfo {
                 id: uuid::Uuid::new_v4().to_string(),
                 status: kyler_protocol::api::compaction::CompactionStatus::Running,
@@ -129,7 +130,7 @@ impl Agent {
         let outcome = if started.is_err() {
             started
         } else {
-            let prepare = store.prepare(session, &mut summarizer, |candidate| {
+            let prepare = store.prepare(session, &mut summarizer, force_compaction, |candidate| {
                 let estimate = store
                     .count(&serde_json::json!({"messages":self.request_messages(project(candidate)?,candidate)?,"tools":tools}))?;
                 Ok((estimate as f64 * candidate.memory.estimation_scale.max(1.0)).ceil() as usize)

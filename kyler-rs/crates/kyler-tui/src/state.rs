@@ -671,6 +671,10 @@ impl State {
         if input.trim().is_empty() && self.attachments.is_empty() {
             return None;
         }
+        if input.trim() == "/compact" && !self.attachments.is_empty() {
+            self.notice("Remove attachments before running /compact.");
+            return None;
+        }
         let submission = Submission {
             resume: input.trim() == "/resume",
             attachments: std::mem::take(&mut self.attachments),
