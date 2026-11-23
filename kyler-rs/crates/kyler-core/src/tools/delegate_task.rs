@@ -26,7 +26,7 @@ impl Tool for DelegateTaskTool {
         "delegate_task"
     }
     fn description(&self) -> &str {
-        "Set agent=review with review.target for a read-only code review of uncommitted, base_branch, or commit changes; review reports are structured and never apply fixes. Use agent=memory on explicit requests to review the current session’s committed history for scoped memory candidates and reusable procedures. Otherwise agent defaults to general. Start an independent child agent in the background and immediately return its task ID. Give a self-contained task and necessary context. General tasks inherit ordinary tools. No child can manage subagents. Use wait_tasks to collect results before answering; unfinished tasks are cancelled when this parent execution ends."
+        "Set agent=review with review.target for a read-only code review of uncommitted, base_branch, or commit changes; review reports are structured and never apply fixes. Use agent=memory to review prior committed messages for scoped memory candidates and reusable procedures when the user requests it or the Memory guidance calls for a focused history review. Otherwise agent defaults to general. Start an independent child agent in the background and immediately return its task ID. Give a self-contained task and necessary context. General tasks inherit ordinary tools. No child can manage subagents. Use wait_tasks to collect results before answering; unfinished tasks are cancelled when this parent execution ends."
     }
     fn validate_arguments(&self, arguments: &Value) -> anyhow::Result<()> {
         serde_json::from_value::<DelegateTaskArgs>(arguments.clone())?.validate()

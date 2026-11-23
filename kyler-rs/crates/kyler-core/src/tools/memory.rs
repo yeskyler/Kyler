@@ -60,7 +60,7 @@ impl Tool for MemoryTool {
         "memory"
     }
     fn description(&self) -> &str {
-        "Search active project facts; save only when the user explicitly asks to remember an approved fact. Use propose for inferred lessons/preferences, with applicability conditions and evidence. Candidates are excluded from automatic context until the user reviews their exact revision in Memory or with the local learning CLI. List inspects scoped entries; delete requires expected_revision. draft_skill turns exact source memory revisions into an uninstalled user skill draft: provide complete SKILL.md as instructions, name and sources. It never enables or executes the draft. Never persist credentials, sensitive data, temporary progress or claims of verification without evidence."
+        "Search active project facts; save only when the user explicitly asks to remember a confirmed fact or preference, or clearly sets a preference for future tasks. Use propose for inferred lessons/preferences, with applicability conditions and evidence. Candidates are excluded from automatic context until the user reviews their exact revision in Memory or with the local learning CLI. List inspects scoped entries; delete requires expected_revision. draft_skill turns exact source memory revisions into an uninstalled user skill draft: provide complete SKILL.md as instructions, name and sources. It never enables or executes the draft. Never persist credentials, sensitive data, temporary progress or claims of verification without evidence."
     }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{
