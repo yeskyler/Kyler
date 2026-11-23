@@ -66,3 +66,58 @@ async fn discovery_never_exposes_error_bodies_or_follows_redirects() {
     assert!(!text.contains("FIXTURE_SECRET"));
     server.abort();
 }
+
+#[tokio::test]
+async fn gemini_discovers_native_models_and_retrieves_the_next_page() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1beta", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/v1beta/models",
+        get(|headers: HeaderMap, uri: axum::http::Uri| async move {
+            assert_eq!(headers["x-goog-api-key"], "fixture");
+            assert!(!headers.contains_key("authorization"));
+            if uri.query() == Some("pageToken=next") {
+                Json(json!({"models":[{"name":"models/other","supportedGenerationMethods":["generateContent"]}]}))
+            } else {
+                assert!(uri.query().is_none());
+                Json(json!({"nextPageToken":"next","models":[
+                    {"name":"models/embedding","supportedGenerationMethods":["embedContent"]},
+                    {"name":"models/chat","supportedGenerationMethods":["generateContent"],"inputTokenLimit":131072,"outputTokenLimit":4096}
+                ]}))
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let models = list_models(&base, "fixture", Adapter(AdapterKind::Gemini))
+        .await
+        .unwrap();
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        ["chat", "other"]
+    );
+    assert_eq!(models[0].capabilities.max_context_tokens, Some(131072));
+    assert_eq!(models[0].capabilities.max_output_tokens, Some(4096));
+    server.abort();
+}
+
+#[tokio::test]
+async fn local_discovery_does_not_require_an_authorization_header() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/v1/models",
+        get(|headers: HeaderMap| async move {
+            assert!(!headers.contains_key("authorization"));
+            Json(json!({"data":[{"id":"local-chat"}]}))
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let models = list_models(&base, "", Adapter(AdapterKind::Ollama))
+        .await
+        .unwrap();
+    assert_eq!(models[0].id, "local-chat");
+    server.abort();
+}

@@ -9,6 +9,8 @@ pub enum WireProtocol {
     Auto,
     ChatCompletions,
     Responses,
+    AnthropicMessages,
+    GeminiGenerateContent,
 }
 
 /// None means undeclared; existing providers remain compatible until configured.

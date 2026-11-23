@@ -100,7 +100,7 @@ impl Wizard {
             Step::Provider if self.names.len() > 1 => Step::Connection,
             Step::Provider => return Err(super::input::cancelled()),
             Step::Url => Step::Provider,
-            Step::Key if self.provider.adapter == AdapterKind::Generic => Step::Url,
+            Step::Key if self.provider.adapter.editable_url() => Step::Url,
             Step::Key => Step::Provider,
             Step::Model => Step::Key,
             Step::Manual | Step::Context => Step::Model,
@@ -211,12 +211,20 @@ impl Wizard {
                 Step::Provider => prompts
                     .provider("Provider", wizard_adapter(&self.provider))
                     .map(|kind| {
-                        self.provider.base_url = default_url(kind, &self.provider.base_url);
-                        if self.provider.adapter != kind {
+                        let previous = wizard_adapter(&self.provider);
+                        let previous_url = self.provider.base_url.clone();
+                        if previous != kind || !kind.editable_url() {
+                            self.provider.base_url = default_url(kind, &self.provider.base_url);
+                        }
+                        if previous != kind || previous_url != self.provider.base_url {
                             self.provider.protocol = Default::default();
+                            self.provider.api_key = Default::default();
+                            self.provider.api_key_env = None;
+                            self.selected.clear();
+                            self.window = None;
                         }
                         self.provider.adapter = kind;
-                        self.step = if kind == AdapterKind::Generic {
+                        self.step = if kind.editable_url() {
                             Step::Url
                         } else {
                             Step::Key
@@ -224,14 +232,36 @@ impl Wizard {
                         false
                     }),
                 Step::Url => prompts
-                    .api_url("API URL", &self.provider.base_url)
+                    .api_url(
+                        match self.provider.adapter {
+                            AdapterKind::AzureOpenai => "Azure OpenAI v1 resource URL",
+                            AdapterKind::Bedrock => "Bedrock regional base URL",
+                            AdapterKind::VertexAi => "Vertex AI project and location URL",
+                            _ => "API URL",
+                        },
+                        &self.provider.base_url,
+                    )
                     .map(|url| {
+                        if self.provider.base_url != url {
+                            self.provider.api_key = Default::default();
+                            self.provider.api_key_env = None;
+                            self.selected.clear();
+                            self.window = None;
+                        }
                         self.provider.base_url = url;
                         self.step = Step::Key;
                         false
                     }),
                 Step::Key => prompts
-                    .key("API key", &self.provider.api_key, false)
+                    .key(
+                        if self.provider.adapter == AdapterKind::VertexAi {
+                            "Google Cloud access token"
+                        } else {
+                            "API key"
+                        },
+                        &self.provider.api_key,
+                        self.provider.adapter.is_local(),
+                    )
                     .map(|key| {
                         if key.expose() != self.provider.api_key.expose() {
                             self.provider.api_key_env = None;
@@ -421,11 +451,10 @@ pub(super) fn review(
         .map(|entry| &entry.capabilities);
     let mut details = vec![format!(
         "Provider  {}",
-        match Adapter::resolve(provider.adapter, &provider.base_url).0 {
-            AdapterKind::Openai => "OpenAI",
-            AdapterKind::Siliconflow => "SiliconFlow",
-            _ => "Custom（OpenAI Completion）",
-        }
+        Adapter::resolve(provider.adapter, &provider.base_url)
+            .0
+            .preset()
+            .name
     )];
     details.push(summary(
         Adapter::resolve(provider.adapter, &provider.base_url),
@@ -445,7 +474,12 @@ pub(super) fn review(
 
 fn wizard_adapter(provider: &ProviderSettings) -> AdapterKind {
     let inferred = Adapter::resolve(AdapterKind::Auto, &provider.base_url).0;
-    if provider.adapter == AdapterKind::Generic || inferred == AdapterKind::Generic {
+    if provider.adapter == AdapterKind::Generic
+        || (matches!(
+            provider.adapter,
+            AdapterKind::Openai | AdapterKind::Siliconflow
+        ) && inferred == AdapterKind::Generic)
+    {
         AdapterKind::Generic
     } else if provider.adapter == AdapterKind::Auto {
         inferred
@@ -454,11 +488,7 @@ fn wizard_adapter(provider: &ProviderSettings) -> AdapterKind {
     }
 }
 fn default_url(kind: AdapterKind, current: &str) -> String {
-    match kind {
-        AdapterKind::Openai => "https://api.openai.com/v1".into(),
-        AdapterKind::Siliconflow => "https://api.siliconflow.cn/v1".into(),
-        _ => current.into(),
-    }
+    kind.preset().base_url.unwrap_or(current).into()
 }
 fn clear_model_fields(value: Option<&mut toml::Value>) {
     if let Some(table) = value.and_then(toml::Value::as_table_mut) {

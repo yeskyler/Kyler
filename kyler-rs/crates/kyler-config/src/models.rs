@@ -116,7 +116,14 @@ pub fn validate_provider(provider: &ProviderSettings) -> Result<()> {
             && url.fragment().is_none(),
         "model base_url must be HTTP(S) without credentials, query or fragment"
     );
-    ensure!(!provider.api_key.is_empty(), "LLM API key is missing");
+    ensure!(
+        provider.adapter.is_local() || !provider.api_key.is_empty(),
+        "LLM API key is missing"
+    );
+    ensure!(
+        !provider.api_key.expose().chars().any(char::is_control),
+        "LLM API key contains invalid control characters"
+    );
     Ok(())
 }
 impl AppConfig {

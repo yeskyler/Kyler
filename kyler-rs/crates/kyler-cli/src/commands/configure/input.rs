@@ -78,18 +78,19 @@ impl Prompts {
         label: &str,
         default: kyler_provider::AdapterKind,
     ) -> Result<kyler_provider::AdapterKind> {
-        use kyler_provider::AdapterKind::*;
-        let kinds = [Openai, Siliconflow, Generic];
+        let presets = kyler_provider::PROVIDER_PRESETS;
         let index = self.select(
             label,
-            vec![
-                "OpenAI".into(),
-                "SiliconFlow".into(),
-                "Custom（OpenAI Completion）".into(),
-            ],
-            kinds.iter().position(|k| *k == default).unwrap_or(0),
+            presets
+                .iter()
+                .map(|preset| preset.name.to_owned())
+                .collect(),
+            presets
+                .iter()
+                .position(|preset| preset.kind == default)
+                .unwrap_or(0),
         )?;
-        Ok(kinds[index])
+        Ok(presets[index].kind)
     }
     pub fn connection(&mut self, names: &[String], default: &str) -> Result<String> {
         let index = self.select(

@@ -10,9 +10,173 @@ pub enum AdapterKind {
     #[default]
     Auto,
     Openai,
+    Anthropic,
+    Gemini,
+    Xai,
+    Mistral,
+    Cohere,
+    Perplexity,
+    Deepseek,
+    Dashscope,
+    Moonshot,
+    Zhipu,
+    Minimax,
+    Volcengine,
+    Hunyuan,
+    Qianfan,
     Siliconflow,
+    Openrouter,
+    Groq,
+    Together,
+    Fireworks,
+    Cerebras,
+    Huggingface,
+    AzureOpenai,
+    Bedrock,
+    VertexAi,
+    Ollama,
+    LmStudio,
+    Vllm,
+    LlamaCpp,
     Generic,
 }
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderPreset {
+    pub kind: AdapterKind,
+    pub name: &'static str,
+    pub base_url: Option<&'static str>,
+}
+
+macro_rules! presets {
+    ($(($kind:ident, $name:literal, $url:expr)),* $(,)?) => {
+        pub const PROVIDER_PRESETS: &[ProviderPreset] = &[
+            $(ProviderPreset { kind: AdapterKind::$kind, name: $name, base_url: $url }),*
+        ];
+    };
+}
+presets!(
+    (Openai, "OpenAI", Some("https://api.openai.com/v1")),
+    (
+        Anthropic,
+        "Anthropic Claude",
+        Some("https://api.anthropic.com/v1")
+    ),
+    (
+        Gemini,
+        "Google Gemini",
+        Some("https://generativelanguage.googleapis.com/v1beta")
+    ),
+    (Xai, "xAI Grok", Some("https://api.x.ai/v1")),
+    (Mistral, "Mistral", Some("https://api.mistral.ai/v1")),
+    (
+        Cohere,
+        "Cohere",
+        Some("https://api.cohere.ai/compatibility/v1")
+    ),
+    (Perplexity, "Perplexity", Some("https://api.perplexity.ai")),
+    (Deepseek, "DeepSeek", Some("https://api.deepseek.com/v1")),
+    (
+        Dashscope,
+        "Qwen (Alibaba Cloud Model Studio)",
+        Some("https://dashscope.aliyuncs.com/compatible-mode/v1")
+    ),
+    (
+        Moonshot,
+        "Kimi (Moonshot AI)",
+        Some("https://api.moonshot.cn/v1")
+    ),
+    (
+        Zhipu,
+        "GLM (Zhipu AI)",
+        Some("https://open.bigmodel.cn/api/paas/v4")
+    ),
+    (Minimax, "MiniMax", Some("https://api.minimaxi.com/v1")),
+    (
+        Volcengine,
+        "Doubao (Volcengine Ark)",
+        Some("https://ark.cn-beijing.volces.com/api/v3")
+    ),
+    (
+        Hunyuan,
+        "Tencent Hunyuan",
+        Some("https://api.hunyuan.cloud.tencent.com/v1")
+    ),
+    (
+        Qianfan,
+        "Baidu Qianfan",
+        Some("https://qianfan.baidubce.com/v2")
+    ),
+    (
+        Siliconflow,
+        "SiliconFlow",
+        Some("https://api.siliconflow.cn/v1")
+    ),
+    (
+        Openrouter,
+        "OpenRouter",
+        Some("https://openrouter.ai/api/v1")
+    ),
+    (Groq, "Groq", Some("https://api.groq.com/openai/v1")),
+    (Together, "Together AI", Some("https://api.together.xyz/v1")),
+    (
+        Fireworks,
+        "Fireworks AI",
+        Some("https://api.fireworks.ai/inference/v1")
+    ),
+    (Cerebras, "Cerebras", Some("https://api.cerebras.ai/v1")),
+    (
+        Huggingface,
+        "Hugging Face Inference Providers",
+        Some("https://router.huggingface.co/v1")
+    ),
+    (
+        AzureOpenai,
+        "Azure OpenAI / Microsoft Foundry",
+        Some("https://resource.openai.azure.com/openai/v1")
+    ),
+    (
+        Bedrock,
+        "AWS Bedrock (API key)",
+        Some("https://bedrock-mantle.us-east-1.api.aws/v1")
+    ),
+    (
+        VertexAi,
+        "Google Vertex AI (access token)",
+        Some(
+            "https://aiplatform.googleapis.com/v1/projects/project-id/locations/global/endpoints/openapi"
+        )
+    ),
+    (Ollama, "Ollama", Some("http://127.0.0.1:11434/v1")),
+    (LmStudio, "LM Studio", Some("http://127.0.0.1:1234/v1")),
+    (Vllm, "vLLM", Some("http://127.0.0.1:8000/v1")),
+    (LlamaCpp, "llama.cpp", Some("http://127.0.0.1:8080/v1")),
+    (Generic, "Custom（OpenAI Completion）", None),
+);
+
+impl AdapterKind {
+    pub fn preset(self) -> &'static ProviderPreset {
+        PROVIDER_PRESETS
+            .iter()
+            .find(|preset| preset.kind == self)
+            .unwrap_or_else(|| PROVIDER_PRESETS.last().expect("custom provider preset"))
+    }
+
+    pub fn is_local(self) -> bool {
+        matches!(
+            self,
+            Self::Ollama | Self::LmStudio | Self::Vllm | Self::LlamaCpp
+        )
+    }
+
+    pub fn editable_url(self) -> bool {
+        self.is_local() || self == Self::Generic || self.is_enterprise()
+    }
+
+    pub fn is_enterprise(self) -> bool {
+        matches!(self, Self::AzureOpenai | Self::Bedrock | Self::VertexAi)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputTokenParameter {
@@ -29,6 +193,12 @@ impl Adapter {
     pub fn protocol(self, model: &str, configured: WireProtocol) -> WireProtocol {
         if configured != WireProtocol::Auto {
             return configured;
+        }
+        if self.0 == AdapterKind::Gemini {
+            return WireProtocol::GeminiGenerateContent;
+        }
+        if self.0 == AdapterKind::Anthropic {
+            return WireProtocol::AnthropicMessages;
         }
         if self.0 == AdapterKind::Openai
             && (model.starts_with("gpt-5")
@@ -55,7 +225,36 @@ impl Adapter {
             {
                 Some("api.openai.com") => AdapterKind::Openai,
                 Some("api.siliconflow.cn" | "api.siliconflow.com") => AdapterKind::Siliconflow,
-                _ => AdapterKind::Generic,
+                Some(host)
+                    if host.ends_with(".openai.azure.com")
+                        || host.ends_with(".services.ai.azure.com") =>
+                {
+                    AdapterKind::AzureOpenai
+                }
+                Some(host)
+                    if (host.starts_with("bedrock-mantle.") && host.ends_with(".api.aws"))
+                        || (host.starts_with("bedrock-runtime.")
+                            && host.ends_with(".amazonaws.com")) =>
+                {
+                    AdapterKind::Bedrock
+                }
+                Some(host)
+                    if host == "aiplatform.googleapis.com"
+                        || host.ends_with("-aiplatform.googleapis.com") =>
+                {
+                    AdapterKind::VertexAi
+                }
+                Some(host) => PROVIDER_PRESETS
+                    .iter()
+                    .filter(|preset| !preset.kind.is_local())
+                    .find(|preset| {
+                        preset
+                            .base_url
+                            .and_then(|url| url::Url::parse(url).ok())
+                            .is_some_and(|url| url.host_str() == Some(host))
+                    })
+                    .map_or(AdapterKind::Generic, |preset| preset.kind),
+                None => AdapterKind::Generic,
             },
         )
     }
@@ -139,6 +338,19 @@ impl Adapter {
             {
                 vec![Off, High, Max]
             }
+            AdapterKind::Deepseek
+                if matches!(
+                    model,
+                    "deepseek-chat"
+                        | "deepseek-reasoner"
+                        | "deepseek-flash"
+                        | "deepseek-pro"
+                        | "deepseek-v4-flash"
+                        | "deepseek-v4-pro"
+                ) =>
+            {
+                vec![Off, Low, High, Max]
+            }
             _ if explicit.is_some() => vec![explicit.unwrap()],
             _ => return None,
         };
@@ -176,7 +388,7 @@ impl Adapter {
         caps
     }
     pub fn carries_reasoning(self) -> bool {
-        self.0 == AdapterKind::Siliconflow
+        matches!(self.0, AdapterKind::Siliconflow | AdapterKind::Deepseek)
     }
     /// Convert unified intent only after the host has projected its session.
     pub fn project(
@@ -206,12 +418,25 @@ impl Adapter {
                 limit,
             );
         }
+        if self.0 == AdapterKind::Deepseek {
+            let enabled = effort.is_some_and(|level| level.enabled());
+            object.insert(
+                "thinking".into(),
+                serde_json::json!({
+                    "type": if enabled { "enabled" } else { "disabled" }
+                }),
+            );
+        }
         if let Some(effort) = effort {
             ensure!(
                 levels.is_some_and(|c| c.levels.contains(&effort)),
                 "Thinking level is not supported for this model/provider"
             );
-            if self.0 == AdapterKind::Siliconflow {
+            if self.0 == AdapterKind::Deepseek {
+                if effort.enabled() {
+                    object.insert("reasoning_effort".into(), effort.reasoning_effort().into());
+                }
+            } else if self.0 == AdapterKind::Siliconflow {
                 object.insert("enable_thinking".into(), effort.enabled().into());
                 if effort.enabled() {
                     object.insert("reasoning_effort".into(), effort.reasoning_effort().into());

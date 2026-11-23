@@ -5,7 +5,12 @@ export type RequestFailure = {
   details?: {
     model?: string;
     provider?: string;
-    protocol?: "auto" | "responses" | "chat_completions";
+    protocol?:
+      | "auto"
+      | "responses"
+      | "chat_completions"
+      | "anthropic_messages"
+      | "gemini_generate_content";
     http_status?: number;
     provider_code?: string;
     parameter?: string;
@@ -21,7 +26,7 @@ export function requestFailureMessage(error: RequestFailure | string | null | un
   const metadata = [
     details?.model && `Model: ${details.model}`,
     details?.protocol &&
-      `API: ${details.protocol === "responses" ? "Responses" : details.protocol === "chat_completions" ? "Chat Completions" : "Auto"}`,
+      `API: ${{ responses: "Responses", chat_completions: "Chat Completions", anthropic_messages: "Anthropic Messages", gemini_generate_content: "Gemini GenerateContent", auto: "Auto" }[details.protocol]}`,
     details?.http_status && `HTTP ${details.http_status}`,
     details?.provider_code && `Code: ${details.provider_code}`,
     details?.parameter && `Parameter: ${details.parameter}`,

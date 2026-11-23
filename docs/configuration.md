@@ -203,7 +203,28 @@ continues using the same private working directory.
 
 ## Providers and model discovery
 
-`kyler-provider` adapts OpenAI, SiliconFlow, and generic Chat Completions endpoints.
+`kyler-provider` exposes one preset catalog to `kyler configure`. Agent execution
+uses the same model and tool interface for every preset.
+
+| Group | Provider presets |
+| --- | --- |
+| Direct | OpenAI, Anthropic Claude, Google Gemini, xAI, Mistral, Cohere, Perplexity, DeepSeek, Qwen (Alibaba Cloud Model Studio), Kimi, GLM, MiniMax, Volcano Engine Ark, Tencent Hunyuan, Baidu Qianfan, SiliconFlow |
+| Hosted inference | OpenRouter, Groq, Together AI, Fireworks AI, Cerebras, Hugging Face Inference Providers |
+| Cloud | Azure OpenAI / Microsoft Foundry, AWS Bedrock, Google Vertex AI |
+| Local | Ollama, LM Studio, vLLM, llama.cpp |
+| Custom | OpenAI-compatible endpoint |
+
+Claude uses Anthropic Messages and Gemini uses GenerateContent. The cloud presets
+use OpenAI-compatible inference. Configure the resource and deployment for Azure,
+the regional endpoint and a Bedrock API key for AWS, or the Vertex project and
+location endpoint with a Google Cloud access token. Vertex tokens must be
+refreshed by the operator. Use a manually selected model or deployment name
+when its endpoint lacks a model directory. Local presets accept an empty API key.
+
+Use Off for Claude and Gemini while native reasoning controls are unavailable.
+Gemini models can still apply their own default thinking behavior. Tool and image
+availability can vary by model, region, and endpoint. The preset catalog describes
+connection setup. It does not guarantee support for every model capability.
 Existing `[llm]` and named profiles remain supported. `adapter` accepts `auto`
 (the default), `openai`, `siliconflow`, or `generic`. Auto identifies official
 endpoints by their exact hostname; specify an adapter for a compatible proxy.

@@ -29,12 +29,116 @@ pub async fn list_models(
     .await
     .map_err(|_| anyhow::anyhow!("Model discovery client initialization failed"))?
     .map_err(|_| anyhow::anyhow!("Model discovery client initialization failed"))?;
-    let mut request = client
-        .get(format!("{}/models", base_url.trim_end_matches('/')))
-        .bearer_auth(api_key);
+    let gemini = adapter.0 == crate::AdapterKind::Gemini;
+    let base = base_url.trim_end_matches('/');
+    let base = if gemini {
+        base.trim_end_matches("/openai")
+    } else {
+        base
+    };
+    let mut request = client.get(format!("{base}/models"));
+    match adapter.0 {
+        crate::AdapterKind::Gemini => request = request.header("x-goog-api-key", api_key),
+        crate::AdapterKind::Anthropic => {
+            request = request
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01");
+        }
+        crate::AdapterKind::AzureOpenai => request = request.header("api-key", api_key),
+        _ if !api_key.is_empty() => request = request.bearer_auth(api_key),
+        _ => {}
+    }
     if adapter.0 == crate::AdapterKind::Siliconflow {
         request = request.query(&[("sub_type", "chat")]);
     }
+    let mut cursor = None;
+    let mut entries = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    for _ in 0..20 {
+        let mut page = request
+            .try_clone()
+            .expect("model list requests have no body");
+        if let Some((parameter, value)) = &cursor {
+            page = page.query(&[(*parameter, value)]);
+        }
+        let value = tokio::time::timeout_at(deadline, discovery_response(page))
+            .await
+            .map_err(|_| anyhow::anyhow!("Model discovery timed out"))??;
+        let field = if gemini { "models" } else { "data" };
+        entries.extend(
+            value[field]
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("Model discovery response has no model list"))?
+                .iter()
+                .cloned(),
+        );
+        ensure!(
+            entries.len() <= 10000,
+            "Model directory exceeds entry limit"
+        );
+        let next = if gemini {
+            value["nextPageToken"]
+                .as_str()
+                .map(|token| ("pageToken", token.to_owned()))
+        } else if adapter.0 == crate::AdapterKind::Anthropic && value["has_more"] == true {
+            value["last_id"]
+                .as_str()
+                .map(|id| ("after_id", id.to_owned()))
+        } else {
+            None
+        };
+        if next.is_none() {
+            cursor = None;
+            break;
+        }
+        ensure!(next != cursor, "Model discovery cursor did not advance");
+        cursor = next;
+    }
+    ensure!(cursor.is_none(), "Model discovery exceeds page limit");
+    let mut models = std::collections::BTreeMap::new();
+    for item in &entries {
+        let id = if gemini {
+            if !item["supportedGenerationMethods"]
+                .as_array()
+                .is_some_and(|methods| methods.iter().any(|method| method == "generateContent"))
+            {
+                continue;
+            }
+            item["name"]
+                .as_str()
+                .and_then(|name| name.strip_prefix("models/"))
+        } else {
+            item["id"].as_str()
+        };
+        if let Some(id) =
+            id.filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
+        {
+            models
+                .entry(id.to_owned())
+                .or_insert_with(|| DiscoveredModel {
+                    id: id.to_owned(),
+                    capabilities: if gemini {
+                        kyler_protocol::api::models::ModelCapabilities {
+                            max_context_tokens: item["inputTokenLimit"]
+                                .as_u64()
+                                .and_then(|value| usize::try_from(value).ok())
+                                .filter(|value| *value > 0),
+                            max_output_tokens: item["outputTokenLimit"]
+                                .as_u64()
+                                .and_then(|value| u32::try_from(value).ok())
+                                .filter(|value| *value > 0),
+                            ..Default::default()
+                        }
+                    } else {
+                        reported_capabilities(item)
+                    },
+                });
+        }
+    }
+    Ok(models.into_values().collect())
+}
+
+async fn discovery_response(request: reqwest::RequestBuilder) -> Result<serde_json::Value> {
     let mut response = request
         .send()
         .await
@@ -56,30 +160,7 @@ pub async fn list_models(
         );
         body.extend_from_slice(&chunk);
     }
-    let value: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|_| anyhow::anyhow!("Invalid model discovery JSON"))?;
-    let entries = value["data"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("Model discovery response has no data array"))?;
-    ensure!(
-        entries.len() <= 10000,
-        "Model directory exceeds entry limit"
-    );
-    let mut models = std::collections::BTreeMap::new();
-    for item in entries {
-        if let Some(id) = item["id"]
-            .as_str()
-            .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
-        {
-            models
-                .entry(id.to_owned())
-                .or_insert_with(|| DiscoveredModel {
-                    id: id.to_owned(),
-                    capabilities: reported_capabilities(item),
-                });
-        }
-    }
-    Ok(models.into_values().collect())
+    serde_json::from_slice(&body).map_err(|_| anyhow::anyhow!("Invalid model discovery JSON"))
 }
 
 /// Accept only an explicit, validated level declaration. A boolean `true` cannot

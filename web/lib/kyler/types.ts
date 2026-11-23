@@ -21,7 +21,12 @@ export type ThinkingState = {
 };
 export type ModelInfo = {
   revision?: number;
-  protocol?: "auto" | "responses" | "chat_completions";
+  protocol?:
+    | "auto"
+    | "responses"
+    | "chat_completions"
+    | "anthropic_messages"
+    | "gemini_generate_content";
   profile: string;
   model: string;
   provider: string;
