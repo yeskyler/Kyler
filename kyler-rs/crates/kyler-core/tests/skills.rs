@@ -256,12 +256,36 @@ async fn builtins_are_embedded_enabled_and_follow_override_precedence() {
             .instructions
             .contains("save_skill")
     );
-    assert!(!snapshot.catalog_text().contains("## Authoring"));
+    assert!(!snapshot.catalog_text().contains("# Package design"));
+    assert!(
+        snapshot
+            .resource("skill-creator", "references/package-design.md")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .contains("# Package design")
+    );
+    assert!(
+        snapshot
+            .resource("skill-installer", "references/git-sources.md")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .contains("# Git sources")
+    );
     assert!(
         snapshot.resource("skill-creator", "SKILL.md").unwrap()["content"]
             .as_str()
             .unwrap()
             .contains("name: skill-creator")
+    );
+    assert!(
+        snapshot
+            .resource("skill-creator", "assets/skill-template.md")
+            .unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .contains("## Workflow")
     );
     let creator = builtin.iter().find(|p| p.name == "skill-creator").unwrap();
     manager

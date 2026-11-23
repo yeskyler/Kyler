@@ -254,8 +254,9 @@ guidance](../SECURITY.md).
 `kyler-core` depends on `kyler-skills`; the skill crate never depends on core or
 runs scripts, model requests, commands or connectors. The compatibility facade at
 `kyler_core::skills` preserves `SkillManager`, `SkillSnapshot`, archive helpers and
-catalog imports. Built-in packages are embedded in the new crate; their virtual
-paths and fingerprints remain stable.
+catalog imports. The skill crate embeds each built-in package from its own
+directory, including SKILL.md and any registered resources. Built-in virtual
+paths stay stable, and fingerprints cover the complete package.
 
 The standalone manager treats configured user/project source directories as
 host-authorized skill control-plane roots. Arbitrary local imports and project

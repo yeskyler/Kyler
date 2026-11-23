@@ -1,25 +1,37 @@
 ---
 name: skill-creator
-description: Create or update a reusable Kyler skill from a user workflow, project convention, or reference material.
+description: Create or update reusable Kyler skills when the user wants to turn a workflow, project convention, or reference into repeatable agent instructions.
 ---
 # Skill Creator
 
-Create focused, reusable instructions that change how Kyler handles the requested task. Preserve the user's scope and choices. Prefer a concise skill over generic advice or duplicated documentation.
+1. Start from a concrete request that should trigger the skill. Identify what
+   Kyler needs to know, which steps repeat, and what proves the result is ready.
+   Clarify a missing decision only when it changes the workflow, resources, or
+   destination. For an update, inspect the current package and its resources first.
+2. Choose a lowercase name of at most 64 characters using letters, digits, and
+   hyphens, with no leading or trailing hyphen. Match the package directory.
+   Create a `SKILL.md` with YAML `name` and `description`. Put both the capability
+   and when to use it in the description. Start with the [skill template](assets/skill-template.md)
+   when creating a package from scratch. Keep the body focused on prerequisites,
+   execution, decision points, validation, and recovery.
+3. Use flexible criteria for work that varies, a parameterized pattern for a
+   common procedure, and a tested script for steps where exact execution matters.
+   Put lengthy reference material under `references/`, executable helpers under
+   `scripts/`, and output templates under `assets/`. Link each supporting
+   resource from `SKILL.md` and explain when it is needed. See
+   [package design](references/package-design.md) for a worked example.
+4. Check the trigger against a realistic request and read the skill as the next
+   agent would. Verify requested executable helpers with representative inputs
+   under normal tool permissions. Remove duplicated prose, unused resources,
+   credentials, and machine-specific details.
+5. Use `save_skill` for the complete UTF-8 package, including unchanged resources
+   on updates. For binary resources, prepare the full directory in the workspace
+   and use `install_skill`. Default to user scope and use project scope for
+   workspace-specific requests. Replace only the inspected version using its
+   `expected_fingerprint`; reload and inspect if it changed. Use a user override
+   to customize a built-in.
 
-## Authoring
-
-- Choose a lowercase name using letters, digits, and hyphens, at most 64 characters. Use the same name for the directory and YAML `name`.
-- Write `SKILL.md` with YAML frontmatter containing `name` and a concise `description` explaining when the skill applies. Put instructions after the closing `---`.
-- Keep names and metadata in English. Follow the user's language preference for instructions.
-- Put substantial reference material in `references/`, reusable executable helpers in `scripts/`, and output templates in `assets/`. Create only resources the workflow needs; link them from the instructions.
-- Include concrete decision criteria and completion checks. Do not claim additional permissions, request secrets in skill files, or override system instructions.
-
-## Saving
-
-Use `save_skill` with the entire package as UTF-8 `files`, including `SKILL.md`. Default to `scope: user`; use `project` when the user asks for a workspace-specific skill. The configured user directory is normally `~/.kyler/skills`, and the project directory is normally `.kyler/skills` in the session workspace.
-
-For an update, read the current skill and its resources first, preserve unrelated content, and supply its current `expected_fingerprint`. Read user or project packages with normal file tools when needed; `load_skill` and `skills_resource` provide enabled skill content. To customize a built-in, save a user override without modifying bundled resources. Do not overwrite a conflicting local skill without inspecting it.
-
-For binary assets, assemble the package in the workspace and use `install_skill` to import it; `save_skill` accepts UTF-8 files only.
-
-Saving validates names, frontmatter, resource paths and size limits. Fix validation errors before retrying. Report the saved path, scope, and invocation `@skill-name`. Project skills require review and enabling in `/skills`; never claim they are enabled before confirmation. Skills refresh automatically on the next execution step. Scripts run only through ordinary tools under the existing sandbox and approval policy.
+If the task is to extract a workflow from reviewed Memory sources, make an
+uninstalled draft using exact source revisions and follow the draft review flow.
+Report the saved name, scope, and status. Project packages require review and
+enabling for their exact fingerprint.

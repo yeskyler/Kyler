@@ -1,19 +1,29 @@
 ---
 name: skill-installer
-description: Install or update Kyler skills from a local package or a user-selected Git repository.
+description: Install or update a Kyler skill from a local package or a user-selected Git repository, or help inspect and manage installed skills.
 ---
 # Skill Installer
 
-Install the specific skill requested by the user. Default to user scope, or project scope when explicitly requested. Do not install unrelated packages or execute installation hooks.
+1. Identify the requested package and source. For Git, identify the repository,
+   ref when specified, and exact package subdirectory. If the user only asks
+   what is available, show skills from the available catalog and distinguish
+   installed, disabled, shadowed, and review-required packages where those
+   statuses are available. Use an external registry only when explicitly
+   available and selected.
+2. Inspect the local directory containing `SKILL.md`, including frontmatter and
+   referenced resources. For Git, follow [the Git source workflow](references/git-sources.md)
+   to acquire and inspect the requested package before import.
+3. Use `install_skill` with the inspected directory and intended scope. Default
+   to user scope and use project scope for a workspace-specific installation.
+   The tool copies the package and validates its paths and resources.
+4. If a package with the same name exists, inspect its source and current
+   fingerprint. Replace it only when the requested operation authorizes an
+   update, and pass the current `expected_fingerprint`. If it changed, inspect
+   the new version before retrying. Customize built-ins through user overrides.
+5. Report the installed name, scope, and returned status. Project packages need
+   review and approval for the exact fingerprint before use. Use the available
+   Skills UI or supported CLI controls for enablement and removal.
 
-## Local package
-
-Use `install_skill` with the absolute path to the directory containing `SKILL.md`. The tool validates and copies the complete package, rejects symlinks and escaping paths, and never executes its scripts. Inspect existing package instructions and resources before updating; supply the installed package's current `expected_fingerprint` to replace it. A name collision without that fingerprint fails without overwriting anything.
-
-## Git repository
-
-Use `run_command` under the existing sandbox and approval policy to fetch the user's chosen repository into a temporary location in the workspace. Pass arguments directly to Git; do not build a shell command from the URL. Use a shallow clone with `--` before the repository URL, disable recursive submodules, and do not run repository scripts. If Git is unavailable or the fetch fails, report the cause and let the user supply a local package; do not invent another download source.
-
-Locate the requested skill subdirectory. Do not import `.git` or the entire repository when it contains multiple skills. Inspect the package before calling `install_skill`. Never embed credentials in repository URLs or saved skills; use existing Git credential handling for private repositories.
-
-After installation, report the source, destination, scope, fingerprint and `@skill-name` invocation. Project skills require review and enabling in `/skills`. Installed skills refresh on the next execution step; existing in-flight skill loads remain fingerprint-checked. Updating a built-in creates a user override and leaves bundled resources intact.
+Fetching, inspecting, and installing a package never runs its scripts or grants
+extra tool permissions. Use ordinary tool permissions for any separate execution
+the user requested.
