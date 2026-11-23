@@ -150,9 +150,14 @@ impl WorkspaceFactory {
         }
     }
     pub fn create(&self, workspace: &Path) -> Result<Arc<ExecutionEnvironment>> {
-        self.build(workspace, workspace)
+        self.build(workspace, workspace, false)
     }
-    fn build(&self, workspace: &Path, cwd: &Path) -> Result<Arc<ExecutionEnvironment>> {
+    fn build(
+        &self,
+        workspace: &Path,
+        cwd: &Path,
+        legacy_git_protection: bool,
+    ) -> Result<Arc<ExecutionEnvironment>> {
         ensure!(
             workspace.is_absolute() && cwd.is_absolute(),
             "workspace paths must be absolute"
@@ -202,14 +207,18 @@ impl WorkspaceFactory {
                     .filesystem
                     .readwrite_paths
                     .extend(self.sandbox.additional_write_roots.clone());
-                // Keep repository metadata and assistant configuration immutable in normal workspaces.
-                policy.filesystem.readonly_paths.extend(
-                    [".git", ".agents", ".codex", ".kyler/config.toml"].map(|path| root.join(path)),
-                );
+                // Protect assistant settings independently of normal workspace writes.
+                let defaults = legacy_git_protection.then_some(".git").into_iter().chain([
+                    ".agents",
+                    ".codex",
+                    ".kyler/config.toml",
+                ]);
+                for name in defaults {
+                    let path = root.join(name);
+                    policy.filesystem.readonly_paths.push(path.clone());
+                    policy.filesystem.write_protected_paths.push(path);
+                }
                 policy.filesystem.readonly_paths.extend(protected.clone());
-                policy.filesystem.write_protected_paths.extend(
-                    [".git", ".agents", ".codex", ".kyler/config.toml"].map(|path| root.join(path)),
-                );
                 policy
                     .filesystem
                     .write_protected_paths
@@ -237,46 +246,48 @@ impl WorkspaceFactory {
         )?))
     }
     pub fn restore(&self, snapshot: &SessionEnvironment) -> Result<Arc<ExecutionEnvironment>> {
-        let restore = |factory: &Self| -> Result<Arc<ExecutionEnvironment>> {
-            if let Some(managed) = &snapshot.managed {
-                let project = &snapshot.sandbox.base_directory;
-                return Ok(Arc::new(
+        let restore =
+            |factory: &Self, legacy_git_protection| -> Result<Arc<ExecutionEnvironment>> {
+                let environment = if let Some(managed) = &snapshot.managed {
+                    let project = &snapshot.sandbox.base_directory;
                     factory
-                        .create(project)?
+                        .build(project, project, legacy_git_protection)?
                         .isolated_session(&managed.root, project)?
-                        .with_cwd(&snapshot.cwd)?,
-                ));
-            }
-            factory.build(&snapshot.sandbox.base_directory, &snapshot.cwd)
+                        .with_cwd(&snapshot.cwd)?
+                } else {
+                    factory
+                        .build(
+                            &snapshot.sandbox.base_directory,
+                            &snapshot.cwd,
+                            legacy_git_protection,
+                        )?
+                        .as_ref()
+                        .clone()
+                };
+                Ok(Arc::new(
+                    environment.with_project_identity(snapshot.project.clone()),
+                ))
+            };
+        let matches = |factory: &Self, current: &ExecutionEnvironment| -> Result<bool> {
+            Ok(current.session_environment() == snapshot
+                // Permit only the exact previous boundary. Other policy changes still require a new session.
+                || (factory.sandbox.mode == SandboxMode::WorkspaceWrite
+                    && restore(factory, true)?.session_environment() == snapshot))
         };
-        let environment = Arc::new(
-            restore(self)?
-                .as_ref()
-                .clone()
-                .with_project_identity(snapshot.project.clone()),
-        );
-        if environment.session_environment() != snapshot
-            && self.sandbox.mode == SandboxMode::WorkspaceWrite
-            && self.network
-        {
+        let environment = restore(self, false)?;
+        if matches(self, &environment)? {
+            return Ok(environment);
+        }
+        if self.sandbox.mode == SandboxMode::WorkspaceWrite && self.network {
             // Preserve existing offline sessions when only the new host default changed.
             let mut offline = self.clone();
             offline.network = false;
             offline.sandbox.network_access = false;
-            let previous = Arc::new(
-                restore(&offline)?
-                    .as_ref()
-                    .clone()
-                    .with_project_identity(snapshot.project.clone()),
-            );
-            if previous.session_environment() == snapshot {
+            let previous = restore(&offline, false)?;
+            if matches(&offline, &previous)? {
                 return Ok(previous);
             }
         }
-        ensure!(
-            environment.session_environment() == snapshot,
-            "session workspace or policy changed; create a new session"
-        );
-        Ok(environment)
+        anyhow::bail!("session workspace or policy changed; create a new session")
     }
 }

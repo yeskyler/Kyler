@@ -735,12 +735,99 @@ async fn workspace_write_keeps_extra_roots_temp_and_protected_paths_distinct() {
 }
 
 #[tokio::test]
+async fn default_workspace_allows_git_without_initializing_on_open() {
+    use kyler_core::environment::workspaces::WorkspaceFactory;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let factory =
+        WorkspaceFactory::native(worker().into(), vec![root.clone()], true, true, false).unwrap();
+    let workspace = factory.create(&root).unwrap();
+    assert!(!root.join(".git").exists());
+    std::fs::write(root.join("hello.txt"), "hello").unwrap();
+    for args in [
+        vec!["init", "-q", "--template="],
+        vec!["add", "hello.txt"],
+        vec![
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+    ] {
+        let output = command(
+            &workspace,
+            "/usr/bin/git",
+            args.into_iter().map(str::to_owned).collect(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output["exit_code"], 0, "{output}");
+    }
+    assert!(root.join(".git/config").exists());
+    let mut saved = workspace.session_environment().clone();
+    let (version, boundary) = saved.sandbox.policy_id.split_once(':').unwrap();
+    let mut boundary: Value = serde_json::from_str(boundary).unwrap();
+    boundary["read"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, json!(root.join(".git")));
+    saved.sandbox.policy_id = format!("{version}:{boundary}");
+    let upgraded = factory.restore(&saved).unwrap();
+    assert_eq!(
+        upgraded.session_environment(),
+        workspace.session_environment()
+    );
+    assert!(
+        upgraded
+            .policy()
+            .filesystem
+            .check_write(&root, &root.join(".git/config"))
+            .is_ok()
+    );
+    boundary["commands"] = json!(false);
+    saved.sandbox.policy_id = format!("cli-workspace-write-v2:{boundary}");
+    assert!(factory.restore(&saved).is_err());
+
+    assert!(
+        workspace
+            .read_only()
+            .policy()
+            .filesystem
+            .check_write(&root, &root.join(".git/config"))
+            .is_err()
+    );
+    let protected = WorkspaceFactory::configured(
+        worker().into(),
+        vec![root.clone()],
+        kyler_config::SandboxSettings {
+            protected_paths: vec![".git".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .create(&root)
+    .unwrap();
+    assert!(
+        protected
+            .policy()
+            .filesystem
+            .check_write(&root, &root.join(".git/config"))
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn full_access_can_narrow_to_workspace_without_losing_protected_paths() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().canonicalize().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let outside_path = outside.path().join("outside.txt");
-    std::fs::create_dir(root.join(".git")).unwrap();
+    std::fs::create_dir(root.join(".agents")).unwrap();
     std::fs::write(root.join("server-secret"), "private").unwrap();
     let host = environment(
         &root,
@@ -759,6 +846,13 @@ async fn full_access_can_narrow_to_workspace_without_losing_protected_paths() {
         workspace.policy().network,
         kyler_core::sandbox::NetworkAccess::AllowOutbound
     ));
+    assert!(
+        workspace
+            .policy()
+            .filesystem
+            .check_write(&root, &root.join(".git/config"))
+            .is_ok()
+    );
     let inside = root.join("inside.txt");
     assert_eq!(
         command(
@@ -786,7 +880,7 @@ async fn full_access_can_narrow_to_workspace_without_losing_protected_paths() {
         command(
             &workspace,
             "/usr/bin/touch",
-            vec![root.join(".git/blocked").to_string_lossy().into_owned()]
+            vec![root.join(".agents/blocked").to_string_lossy().into_owned()]
         )
         .await
         .unwrap()["exit_code"],

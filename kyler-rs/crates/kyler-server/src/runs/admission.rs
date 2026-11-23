@@ -166,7 +166,7 @@ impl RunManager {
                 "The concurrent run limit has been reached.",
             )
         })?;
-        let session = self
+        let mut session = self
             .store
             .load(&session_id)
             .await
@@ -235,6 +235,12 @@ impl RunManager {
             .agent_for_session(&session)?
             .bind_model(selection.profile.as_deref())
             .map_err(|e| ApiError::bad(&e.to_string()))?;
+        if let (Some(saved), Some(active)) =
+            (&mut session.environment, agent.workspace_environment())
+        {
+            // The factory has verified the previous binding before applying a compatible upgrade.
+            *saved = active.clone();
+        }
         if !principal.role.administrative() {
             if let Some(environment) = agent.execution_environment() {
                 let environment = environment

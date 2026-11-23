@@ -48,7 +48,10 @@ Paths normally resolve beside the selected configuration. When the selected file
 inside a directory named `config`, application-relative paths resolve from that
 directory's parent. `workspace.default_directory` and skill paths support configured
 home-directory expansion. Sandbox protected paths are workspace-relative; extra access
-roots follow configuration path resolution.
+roots follow configuration path resolution. In `workspace-write` mode, `.git`
+inherits workspace access. Opening a directory leaves repository creation to
+an explicit Git operation. Use `sandbox.protected_paths` to make Git metadata
+read-only for a deployment. Tool approval and network policy apply independently.
 
 ## Main settings
 

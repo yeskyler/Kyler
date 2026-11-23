@@ -371,7 +371,7 @@ impl ExecutionEnvironment {
         policy.network = NetworkAccess::AllowOutbound;
         policy.filesystem.readonly_paths.push(PathBuf::from("/"));
         policy.filesystem.denied_paths = self.narrowing_protected_paths.clone();
-        for name in [".git", ".agents", ".codex", ".kyler/config.toml"] {
+        for name in [".agents", ".codex", ".kyler/config.toml"] {
             let path = self.snapshot.cwd.join(name);
             policy.filesystem.readonly_paths.push(path.clone());
             policy.filesystem.write_protected_paths.push(path);
