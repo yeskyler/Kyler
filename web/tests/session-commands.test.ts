@@ -4,7 +4,7 @@ import {
   commandDraft,
   matchingCommands,
   opensCommandMenu,
-  reviewTarget,
+  commandRequest,
 } from "../lib/kyler/session-commands.ts";
 
 test("slash commands require a typed slash in an empty draft", () => {
@@ -24,16 +24,8 @@ test("slash commands require a typed slash in an empty draft", () => {
   assert.deepEqual(matchingCommands("/review notes"), []);
 });
 
-test("review targets preserve the selected scope and reject revision expressions", () => {
-  assert.deepEqual(reviewTarget("uncommitted", ""), { type: "uncommitted" });
-  assert.deepEqual(reviewTarget("base_branch", " feature/ui "), {
-    type: "base_branch",
-    branch: "feature/ui",
-  });
-  assert.deepEqual(reviewTarget("commit", "c46bb7e"), { type: "commit", commit: "c46bb7e" });
-  for (const ref of ["", "-C", "HEAD~1", "a..b", "name with spaces"]) {
-    assert.equal(reviewTarget("commit", ref), null);
-  }
+test("review defaults to uncommitted changes without a workspace override", () => {
+  assert.deepEqual(commandRequest("review"), { type: "review", target: { type: "uncommitted" } });
 });
 
 test("plugin references remain in the draft when a command is selected", () => {

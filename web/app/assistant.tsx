@@ -610,11 +610,6 @@ function Connected({
                       <SessionCommandContext.Provider
                         value={{
                           subagents: loaded.subagents,
-                          hasWorkspace: !!(
-                            loaded.session.cwd ??
-                            loaded.session.project ??
-                            loaded.defaultWorkspace
-                          ),
                         }}
                       >
                         <ArtifactBrowserLayout enabled={!loaded.session.draft}>

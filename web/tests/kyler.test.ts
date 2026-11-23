@@ -270,7 +270,7 @@ test("adapter submits only the new turn and renders ordered tool and text events
 });
 
 test("the adapter submits an explicit session command without sending draft attachments", async (t) => {
-  const command = { type: "review", target: { type: "base_branch", branch: "main" } };
+  const command = { type: "review", target: { type: "uncommitted" } };
   t.mock.method(globalThis, "fetch", async (path: string, init?: RequestInit) => {
     if (path.endsWith("/runs")) {
       const { client_request_id, ...body } = JSON.parse(init?.body as string);

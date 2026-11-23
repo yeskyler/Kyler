@@ -14,7 +14,7 @@ use kyler_core::{
     subagent::SubagentManager,
 };
 use kyler_protocol::{
-    api::run::RunStatus,
+    api::run::{RunAccepted, RunStatus},
     review::{AgentKind, ReviewAssessment},
 };
 use serde_json::{Value, json};
@@ -56,7 +56,22 @@ async fn completion(
         .filter(|message| message["role"] == "tool")
         .map(|message| serde_json::from_str::<Value>(message["content"].as_str().unwrap()).unwrap())
         .collect::<Vec<_>>();
-    let (delta, reason) = if let Some(task) = results
+    let (delta, reason) = if request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|message| message["role"] == "user")
+        .is_some_and(|message| {
+            message["content"]
+                .as_str()
+                .is_some_and(|text| text.contains("No Git change set is available"))
+        }) {
+        (
+            json!({"content":"The current workspace is not a Git repository. Please provide a repository path, commit ID, or diff."}),
+            "stop",
+        )
+    } else if let Some(task) = results
         .iter()
         .filter_map(|result| result["tasks"].as_array())
         .flatten()
@@ -190,9 +205,51 @@ async fn review_is_delegated_collected_and_persisted_through_the_server() {
         );
     }
     std::fs::write(private.join("code.rs"), "pub fn value() -> u32 { 2 }\n").unwrap();
-    let run = harness
-        .run(&session, "Review the current code change", "review")
-        .await;
+    let url = format!("{}/v1/sessions/{session}/runs", harness.url);
+    let command =
+        json!({"input": "", "command": {"type": "review", "target": {"type": "uncommitted"}}});
+    let metadata = private.join(".git");
+    let parked_metadata = private.join("fixture-git-metadata");
+    std::fs::rename(&metadata, &parked_metadata).unwrap();
+    let response = harness
+        .client
+        .post(&url)
+        .json(&command)
+        .send()
+        .await
+        .unwrap();
+    let fallback: RunAccepted = response.error_for_status().unwrap().json().await.unwrap();
+    let result = harness.terminal(&fallback.run_id).await;
+    std::fs::rename(&parked_metadata, &metadata).unwrap();
+    assert_eq!(result.status, RunStatus::Completed, "{:?}", result.error);
+    assert!(
+        result
+            .output
+            .unwrap()
+            .contains("Please provide a repository path, commit ID, or diff.")
+    );
+    assert!(
+        harness
+            .store
+            .load(&session)
+            .await
+            .unwrap()
+            .subagent_tasks
+            .is_empty()
+    );
+
+    let run: RunAccepted = harness
+        .client
+        .post(url)
+        .json(&command)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let result = harness.terminal(&run.run_id).await;
     assert_eq!(result.status, RunStatus::Completed, "{:?}", result.error);
     assert!(result.output.unwrap().contains("static inspection only"));
@@ -221,7 +278,7 @@ async fn review_is_delegated_collected_and_persisted_through_the_server() {
         std::fs::read_to_string(root.join("code.rs")).unwrap(),
         "pub fn value() -> u32 { 2 }\n"
     );
-    assert_eq!(requests.lock().unwrap().len(), 4);
+    assert_eq!(requests.lock().unwrap().len(), 5);
     harness.close().await;
     model.abort();
 }

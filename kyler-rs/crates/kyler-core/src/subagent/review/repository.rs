@@ -33,18 +33,18 @@ async fn call<T: DeserializeOwned>(
     )
     .context("Invalid review worker response")
 }
+pub(super) async fn discover(
+    environment: &ExecutionEnvironment,
+    request: ReviewRequest,
+) -> Result<Discovery> {
+    call(environment, &GitRead::Discover { request }).await
+}
 impl Repository {
     pub async fn prepare(
         environment: Arc<ExecutionEnvironment>,
         request: ReviewRequest,
     ) -> Result<Arc<Self>> {
-        let discovery: Discovery = call(
-            &environment,
-            &GitRead::Discover {
-                request: request.clone(),
-            },
-        )
-        .await?;
+        let discovery = discover(&environment, request.clone()).await?;
         let metadata = environment.prepare_review_git(&discovery)?;
         let git = GitContext {
             directory: metadata.path().to_path_buf(),

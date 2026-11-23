@@ -216,24 +216,6 @@ impl RunManager {
             {
                 return Err(ApiError::bad("Subagents are disabled on this server."));
             }
-            Some(SessionCommand::Review { target }) => {
-                if session.environment.is_none() {
-                    return Err(ApiError::bad("Code review requires a workspace."));
-                }
-                use kyler_protocol::review::ReviewTarget;
-                if let ReviewTarget::Commit { commit: reference }
-                | ReviewTarget::BaseBranch { branch: reference } = target
-                    && (reference.is_empty()
-                        || reference.len() > 256
-                        || reference.starts_with('-')
-                        || reference.contains("..")
-                        || !reference.bytes().all(|ch| {
-                            ch.is_ascii_alphanumeric() || matches!(ch, b'/' | b'.' | b'_' | b'-')
-                        }))
-                {
-                    return Err(ApiError::bad("Enter a local commit ID or branch name."));
-                }
-            }
             Some(SessionCommand::Compact | SessionCommand::Memory) if session.events.is_empty() => {
                 return Err(ApiError::bad(
                     "This session has no conversation history yet.",
@@ -242,7 +224,7 @@ impl RunManager {
             _ => {}
         }
         let compact = matches!(request.command, Some(SessionCommand::Compact));
-        let input = request
+        let mut input = request
             .command
             .as_ref()
             .map(SessionCommand::input)
@@ -267,6 +249,20 @@ impl RunManager {
             })
         {
             return Err(crate::gateway::forbidden());
+        }
+        if let Some(SessionCommand::Review { target }) = &request.command
+            && let Err(error) = agent.validate_review_target(target.clone()).await
+        {
+            let status = if agent.effective_execution_environment().is_none() {
+                "This session has no workspace available for code review."
+            } else if error.to_string().contains("not a git repository") {
+                "The current session workspace is not a Git repository. No Git change set is available to review there."
+            } else {
+                "The requested Git target could not be verified in the current session workspace."
+            };
+            input = format!(
+                "I requested a code review. The workspace check reported: {status} Reply directly in the conversation in the user's language. If the current workspace path is available in your context, include it. Explain what was unavailable without claiming that a review was performed. Ask me to open a repository with changes or provide a repository path, commit ID, or diff so the review can continue. Do not start a review task until reviewable input is available."
+            );
         }
         if !images.is_empty() {
             agent.validate_image_input().map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "model_image_unsupported", "The selected model does not support image input. Select a vision-capable model with /model, then resend."))?;

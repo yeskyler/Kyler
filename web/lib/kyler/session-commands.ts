@@ -1,18 +1,14 @@
 export const sessionCommands = [
   { name: "compact", description: "Compact conversation context" },
-  { name: "review", description: "Review code changes" },
+  { name: "review", description: "Review uncommitted changes in this workspace" },
   { name: "memory", description: "Extract memories from this conversation" },
 ] as const;
 
 export type CommandName = (typeof sessionCommands)[number]["name"];
-export type ReviewTarget =
-  | { type: "uncommitted" }
-  | { type: "base_branch"; branch: string }
-  | { type: "commit"; commit: string };
 export type SessionCommand =
   | { type: "compact" }
   | { type: "memory" }
-  | { type: "review"; target: ReviewTarget };
+  | { type: "review"; target: { type: "uncommitted" } };
 
 export function commandDraft(text: string) {
   // The + menu stores plugin selections as reference tokens in the draft.
@@ -35,10 +31,6 @@ export function matchingCommands(text: string) {
   return sessionCommands.filter(({ name }) => name.startsWith(search));
 }
 
-export function reviewTarget(type: ReviewTarget["type"], reference: string): ReviewTarget | null {
-  if (type === "uncommitted") return { type };
-  const ref = reference.trim();
-  if (!/^[A-Za-z0-9_./-]{1,256}$/.test(ref) || ref.startsWith("-") || ref.includes(".."))
-    return null;
-  return type === "commit" ? { type, commit: ref } : { type, branch: ref };
+export function commandRequest(name: CommandName): SessionCommand {
+  return name === "review" ? { type: name, target: { type: "uncommitted" } } : { type: name };
 }

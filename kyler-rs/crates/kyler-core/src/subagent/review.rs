@@ -54,6 +54,21 @@ pub(crate) fn validate_request(request: &ReviewRequest) -> Result<()> {
     }
     Ok(())
 }
+impl Agent {
+    /// Checks the selected review target within the current sandbox boundary.
+    pub async fn validate_review_target(&self, target: ReviewTarget) -> Result<()> {
+        let environment = self
+            .effective_execution_environment()
+            .context("Code review requires a workspace")?;
+        let request = ReviewRequest {
+            target,
+            paths: Vec::new(),
+            include_untracked: false,
+        };
+        repository::discover(&environment.read_only(), request).await?;
+        Ok(())
+    }
+}
 pub(crate) struct ReviewExecutor {
     agent: Agent,
     environment: Arc<ExecutionEnvironment>,

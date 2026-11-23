@@ -86,7 +86,7 @@ async fn git(cwd: &Path, context: Option<&GitContext>, args: &[String]) -> Resul
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", std::env::var_os("HOME").unwrap_or_default())
-        .env("LANG", "C.UTF-8")
+        .env("LANG", "C")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
