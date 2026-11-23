@@ -29,14 +29,16 @@ export function CompactionSeparator({ compaction }: { compaction: Compaction }) 
     <div
       role="status"
       aria-live="polite"
-      className="my-3 flex items-center gap-2 text-xs font-normal text-muted-foreground"
+      className="my-5 flex w-full items-center gap-3 text-xs font-normal text-muted-foreground"
       data-compaction-status={status}
     >
+      <span aria-hidden className="h-px min-w-4 flex-1 bg-border" />
       <Icon
         aria-hidden
         className={`size-3.5 shrink-0 ${status === "running" ? "animate-spin motion-reduce:animate-none" : ""}`}
       />
       <span>{label}</span>
+      <span aria-hidden className="h-px min-w-4 flex-1 bg-border" />
     </div>
   );
 }
