@@ -3,6 +3,11 @@ name = "kyler-provider"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+description = "Model provider adapters and discovery for Kyler"
+exclude = ["datasets/**", "results/**", ".env", ".env.*"]
 
 [dependencies]
 kyler-protocol.workspace = true

@@ -3,6 +3,11 @@ name = "kyler-gateway"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Agent gateway and session orchestration for Kyler"
+exclude = ["datasets/**", "results/**", ".env", ".env.*"]
 
 [dependencies]
 kyler-core.workspace = true

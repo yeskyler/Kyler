@@ -3,6 +3,11 @@ name = "kyler-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Model Context Protocol integration for Kyler"
+exclude = ["datasets/**", "results/**", ".env", ".env.*"]
 
 [dependencies]
 kyler-protocol.workspace = true

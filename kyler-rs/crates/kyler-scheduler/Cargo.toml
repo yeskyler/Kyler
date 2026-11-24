@@ -3,6 +3,11 @@ name = "kyler-scheduler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Persistent task scheduling for Kyler"
+exclude = ["datasets/**", "results/**", ".env", ".env.*"]
 
 [dependencies]
 kyler-store.workspace = true

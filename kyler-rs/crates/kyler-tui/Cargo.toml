@@ -3,6 +3,11 @@ name = "kyler-tui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "Interactive terminal interface for Kyler"
+exclude = ["datasets/**", "results/**", ".env", ".env.*"]
 
 [dependencies]
 kyler-gateway.workspace = true
