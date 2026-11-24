@@ -1119,3 +1119,117 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
     restarted.state.runs.shutdown().await;
     upstream.abort();
 }
+
+#[tokio::test]
+async fn provider_management_preserves_keys_profiles_and_default_without_inference() {
+    use kyler_protocol::api::providers::ProviderUpdate;
+    let root = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let router = Router::new().route(
+        "/v1/models",
+        axum::routing::get(|| async { Json(json!({"data":[{"id":"new-model"}]})) }),
+    );
+    let mock = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let source = root.path().join("config.toml");
+    std::fs::write(&source, config(&base, &root.path().join("sessions"))).unwrap();
+    let config = loader::load_from(&source).unwrap();
+    let server = Server::from_config(&config).await.unwrap();
+    server
+        .state
+        .runs
+        .set_model_source(source.clone(), Default::default());
+    let request = |key: Option<String>, make_default| ProviderUpdate {
+        adapter: "generic".into(),
+        base_url: base.clone(),
+        key,
+        models: vec!["new-model".into()],
+        make_default,
+    };
+    let tested = server
+        .state
+        .runs
+        .test_provider("work", request(Some("TEST_ONLY_KEY".into()), false))
+        .await
+        .unwrap();
+    assert_eq!(tested.models, ["new-model"]);
+    let before = server.state.runs.model_catalog().unwrap();
+    let saved = server
+        .state
+        .runs
+        .save_provider(
+            "work".into(),
+            Some(request(Some("TEST_ONLY_KEY".into()), false)),
+        )
+        .await
+        .unwrap();
+    let response = serde_json::to_string(&saved).unwrap();
+    assert!(!response.contains("TEST_ONLY_KEY"));
+    assert!(!response.contains("PRIVATE_MODEL_KEY"));
+    assert_eq!(
+        before.default_profile,
+        server.state.runs.model_catalog().unwrap().default_profile
+    );
+    server
+        .state
+        .runs
+        .save_provider("work".into(), Some(request(None, true)))
+        .await
+        .unwrap();
+    let loaded = loader::load_from(&source).unwrap();
+    assert_eq!(
+        loaded.models.providers["work"].api_key.expose(),
+        "TEST_ONLY_KEY"
+    );
+    assert_eq!(
+        loaded.models.profiles["fast"].capabilities,
+        config.models.profiles["fast"].capabilities
+    );
+    let text = std::fs::read_to_string(&source).unwrap();
+    assert!(
+        server
+            .state
+            .runs
+            .save_provider("work".into(), None)
+            .await
+            .is_err()
+    );
+    assert_eq!(text, std::fs::read_to_string(&source).unwrap());
+    assert!(
+        server
+            .state
+            .runs
+            .save_provider("../escape".into(), Some(request(None, false)))
+            .await
+            .is_err()
+    );
+    server
+        .state
+        .runs
+        .save_provider(
+            "fixture".into(),
+            Some(ProviderUpdate {
+                adapter: "generic".into(),
+                base_url: base,
+                key: None,
+                models: vec!["fast-v1".into(), "slow-v1".into()],
+                make_default: true,
+            }),
+        )
+        .await
+        .unwrap();
+    server
+        .state
+        .runs
+        .save_provider("work".into(), None)
+        .await
+        .unwrap();
+    assert!(
+        !loader::load_from(&source)
+            .unwrap()
+            .models
+            .providers
+            .contains_key("work")
+    );
+    mock.abort();
+}

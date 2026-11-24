@@ -14,6 +14,7 @@ pub mod questions;
 pub mod runs;
 pub mod sessions;
 pub mod skills;
+pub mod subagents;
 pub mod tasks;
 pub mod tools;
 pub mod workspaces;
@@ -209,6 +210,16 @@ pub fn router(state: AppState) -> Router {
             "/v1/models/settings",
             get(models::global_connection).put(models::update_global_connection),
         )
+        .route(
+            "/v1/subagents/settings",
+            get(subagents::get).put(subagents::update),
+        )
+        .route("/v1/providers", get(models::providers))
+        .route(
+            "/v1/providers/{id}",
+            axum::routing::put(models::save_provider).delete(models::delete_provider),
+        )
+        .route("/v1/providers/{id}/test", post(models::test_provider))
         .route("/v1/models", get(models::list))
         .route("/v1/models/reload", post(models::reload))
         .route(

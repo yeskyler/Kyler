@@ -12,12 +12,12 @@ import {
   LoaderCircleIcon,
   RefreshCwIcon,
   Trash2Icon,
+  SettingsIcon,
 } from "lucide-react";
-import { ChannelsDialog } from "./channels-dialog";
 import { BrandMark } from "./brand-mark";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { api, redirectToLogin } from "@/lib/kyler/client";
+import { api } from "@/lib/kyler/client";
 import { WorkspacePicker } from "./workspace-picker";
 import { Input } from "@/components/ui/input";
 import {
@@ -48,8 +48,8 @@ export function WorkspaceSidebar({
   active: boolean;
   localSessions: HistorySession[];
   defaultWorkspace?: string;
-  view: "chat" | "resources" | "automations";
-  setView: (view: "chat" | "resources" | "automations") => void;
+  view: "chat" | "resources" | "automations" | "settings";
+  setView: (view: "chat" | "resources" | "automations" | "settings") => void;
   createSession: (workspace?: string | null) => Promise<void>;
   selectSession: (id: string) => void;
   deleteSession: (id: string, fallback?: string) => Promise<void>;
@@ -244,7 +244,6 @@ export function WorkspaceSidebar({
           <CalendarClockIcon className="size-4" />
           Automations
         </Button>
-        <ChannelsDialog workspaces={workspaces} defaultWorkspace={defaultWorkspace} />
       </nav>
       <div className="mt-8 mb-3 flex items-center justify-between pl-3 pr-1">
         <span className="text-xs font-medium text-muted-foreground">Workspaces</span>
@@ -454,18 +453,12 @@ export function WorkspaceSidebar({
       </nav>
       <Button
         variant="ghost"
-        className="mx-2 mb-2 h-9 shrink-0 justify-center text-muted-foreground"
-        onClick={async () => {
-          try {
-            const response = await fetch("/api/auth/logout", { method: "POST" });
-            if (!response.ok) throw new Error("Cannot sign out. Try again.");
-            redirectToLogin();
-          } catch (error) {
-            setError((error as Error).message);
-          }
-        }}
+        aria-current={view === "settings" ? "page" : undefined}
+        className="mt-3 h-11 shrink-0 justify-center gap-3 rounded-lg border-t border-sidebar-border px-3 text-sm font-medium aria-[current=page]:bg-sidebar-accent"
+        onClick={() => setView("settings")}
       >
-        Sign out
+        <SettingsIcon className="size-4" />
+        Settings
       </Button>
 
       {error && !deleting && !removingProject && (

@@ -91,7 +91,9 @@ export function SlashComposerInput(props: ComponentProps<typeof PasteComposerInp
       )}
       <PasteComposerInput
         {...props}
-        placeholder={subagents === undefined ? props.placeholder : "Type / for commands"}
+        placeholder={
+          subagents === undefined ? props.placeholder : "Type a message, or / for commands"
+        }
         aria-autocomplete="list"
         aria-controls={visible ? list : undefined}
         aria-activedescendant={matches[selected] ? `${list}-${matches[selected].name}` : undefined}

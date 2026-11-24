@@ -12,6 +12,7 @@ async-trait.workspace = true
 percent-encoding.workspace = true
 kyler-core.workspace = true
 kyler-config.workspace = true
+kyler-provider.workspace = true
 kyler-logging.workspace = true
 kyler-protocol.workspace = true
 kyler-scheduler.workspace = true

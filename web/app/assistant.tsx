@@ -39,6 +39,7 @@ import { ComposerMenu } from "@/components/kyler/composer-menu";
 import { SidebarToggle } from "@/components/kyler/sidebar-toggle";
 import { WorkspaceSidebar } from "@/components/kyler/workspace-sidebar";
 import { AutomationsPanel } from "@/components/kyler/automations-panel";
+import { SettingsPanel } from "@/components/kyler/settings-panel";
 import { ResourcesPanel } from "@/components/kyler/resources-panel";
 import type { Session } from "@/lib/kyler/types";
 import type { Approval } from "@/lib/kyler/events";
@@ -388,7 +389,9 @@ function Connected({
   publish: (key: string, id: string) => void;
   admit: (key: string, id: string) => void;
 }) {
-  const [view, setView] = useState<"chat" | "resources" | "automations" | "inspection">("chat");
+  const [view, setView] = useState<
+    "chat" | "resources" | "automations" | "settings" | "inspection"
+  >("chat");
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const navigation = useRef<HTMLDivElement>(null);
   const expandSidebar = useRef<HTMLButtonElement>(null);
@@ -599,9 +602,11 @@ function Connected({
                               ? "Plugins"
                               : view === "automations"
                                 ? "Automations"
-                                : loaded.session.draft
-                                  ? "New Chat"
-                                  : name}
+                                : view === "settings"
+                                  ? "Settings"
+                                  : loaded.session.draft
+                                    ? "New Chat"
+                                    : name}
                           </h1>
                         )}
                       </div>
@@ -644,6 +649,9 @@ function Connected({
                     <div className={view === "inspection" ? "min-h-0 flex-1" : "hidden"}>
                       <SessionInspectorPage />
                     </div>
+                    {view === "settings" && (
+                      <SettingsPanel defaultWorkspace={loaded.defaultWorkspace} />
+                    )}
                     {view === "automations" && (
                       <div className="min-h-0 flex-1">
                         <AutomationsPanel

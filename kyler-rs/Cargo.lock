@@ -2781,6 +2781,7 @@ dependencies = [
  "kyler-gateway",
  "kyler-logging",
  "kyler-protocol",
+ "kyler-provider",
  "kyler-scheduler",
  "percent-encoding",
  "reqwest",

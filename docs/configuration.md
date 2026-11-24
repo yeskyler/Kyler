@@ -426,3 +426,42 @@ HTTP access now requires issued gateway tokens for all listeners, including loop
 Run `kyler configure` to provision the managed service credential. Old shared tokens
 and the old server-token environment variable are not imported. See [gateway identity
 and authorization](gateway.md) for roles, grants, rotation, audit and upgrade behavior.
+
+### Web provider management
+
+Open **Settings → Providers** to add, edit, test, or delete provider connections.
+The provider type selector uses the same presets as the CLI. Names identify connections
+in the chat composer, where the first menu level is the provider and the second is the model.
+Provider names accept letters, numbers, underscores, and hyphens.
+
+Connection tests query the provider's model directory without sending inference requests.
+Some services do not support model listing; a failed directory test does not necessarily
+mean that manually configured model IDs cannot be used. Failed discovery connections
+are omitted from the web model picker until discovery succeeds again.
+
+Provider management requires an administrative identity and a trusted configuration source
+registered by the host. Changes are saved atomically and loaded without a server restart.
+API keys are never returned by the management API; leaving a key blank preserves it.
+Setting a provider as default uses its first configured model for new conversations.
+Choose another default before deleting the current default provider or model.
+Existing conversations retain their selected profiles and need a new selection if those
+profiles are removed. Plugins and automation configuration remain separate.
+
+Provider API endpoints: `GET /v1/providers`, `PUT /v1/providers/{id}`,
+`DELETE /v1/providers/{id}`, and `POST /v1/providers/{id}/test`.
+
+### Web subagent settings
+
+Open **Settings → Subagents** to enable delegation and configure its concurrency and
+per-execution task limits. The supported ranges are 1–32 concurrent tasks and 1–64
+tasks per parent execution. The page shows the active runtime separately from saved
+configuration and indicates when a restart is required. Changes are validated and
+saved atomically; restart Kyler to apply them. Running tasks retain their existing limits.
+Queue, retention, and other advanced settings are preserved. If child session persistence
+is enabled, disable `subagent.persist_sessions` in the server configuration before
+turning delegation off. Concurrency must also fit the configured retained-task limit.
+
+`GET /v1/subagents/settings` and `PUT /v1/subagents/settings` require an administrative
+identity and a trusted configuration source. The update body contains `enabled`,
+`max_concurrent_tasks`, and `max_tasks_per_execution`; responses include configured and
+active values, supported ceilings, and `restart_required`. No credentials are returned.

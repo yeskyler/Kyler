@@ -114,3 +114,43 @@ pub async fn select_thinking(
         .await
         .map(Json)
 }
+
+fn provider_admin(principal: &kyler_protocol::api::gateway::Principal) -> Result<(), ApiError> {
+    if !principal.role.administrative() {
+        return Err(crate::gateway::forbidden());
+    }
+    Ok(())
+}
+pub async fn providers(
+    State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
+) -> Result<Json<kyler_protocol::api::providers::ProviderCatalog>, ApiError> {
+    provider_admin(&principal)?;
+    state.runs.providers().await.map(Json)
+}
+pub async fn save_provider(
+    State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
+    Path(id): Path<String>,
+    Json(request): Json<kyler_protocol::api::providers::ProviderUpdate>,
+) -> Result<Json<kyler_protocol::api::providers::ProviderCatalog>, ApiError> {
+    provider_admin(&principal)?;
+    state.runs.save_provider(id, Some(request)).await.map(Json)
+}
+pub async fn delete_provider(
+    State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
+    Path(id): Path<String>,
+) -> Result<Json<kyler_protocol::api::providers::ProviderCatalog>, ApiError> {
+    provider_admin(&principal)?;
+    state.runs.save_provider(id, None).await.map(Json)
+}
+pub async fn test_provider(
+    State(state): State<AppState>,
+    Extension(principal): Extension<kyler_protocol::api::gateway::Principal>,
+    Path(id): Path<String>,
+    Json(request): Json<kyler_protocol::api::providers::ProviderUpdate>,
+) -> Result<Json<kyler_protocol::api::providers::ProviderTest>, ApiError> {
+    provider_admin(&principal)?;
+    state.runs.test_provider(&id, request).await.map(Json)
+}

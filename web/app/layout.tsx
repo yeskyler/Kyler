@@ -13,8 +13,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try { document.documentElement.classList.toggle('dark', localStorage.getItem('kyler.theme') === 'dark'); } catch {}`,
+          }}
+        />
         <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>
