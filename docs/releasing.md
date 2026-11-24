@@ -79,7 +79,7 @@ and third-party notices. It does not contact GitHub or create a version tag.
 
 ```text
 dist/
-├── kyler-v0.1.0-aarch64-apple-darwin.tar.gz
+├── kyler-v0.0.1-aarch64-apple-darwin.tar.gz
 └── SHA256SUMS
 ```
 
@@ -102,7 +102,7 @@ archives supplied to the publisher.
 ## 3. Validate without publishing
 
 ```sh
-sh scripts/release.sh 0.1.0 --dry-run
+sh scripts/release.sh 0.0.1 --dry-run
 ```
 
 Validation checks the source version, clean working tree, origin repository, archive
@@ -119,14 +119,14 @@ platform archives to that Release.
 
 ```sh
 gh auth login
-sh scripts/release.sh 0.1.0
+sh scripts/release.sh 0.0.1
 ```
 
 The script derives the GitHub repository from `origin` and performs these steps:
 
 1. Authenticate and locate any existing Release with the same tag.
 2. Verify existing local and remote tags point to the release commit.
-3. Create an annotated `v0.1.0` tag if needed and push that tag. Branches are not pushed.
+3. Create an annotated `v0.0.1` tag if needed and push that tag. Branches are not pushed.
 4. Generate a version-specific `SHA256SUMS`, leaving other versions out of that upload.
 5. Upload native archives and checksums to a draft Release with generated notes.
 6. Publish new drafts only after all uploads succeed. Versions with a prerelease suffix are marked prerelease.
@@ -148,7 +148,7 @@ require the `gh api --slurp` option.
 Use `--draft` to retain the uploaded Release as a draft for inspection:
 
 ```sh
-sh scripts/release.sh 0.1.0 --draft
+sh scripts/release.sh 0.0.1 --draft
 ```
 
 The implementation uses [gh release
@@ -159,7 +159,7 @@ checksum manifest is updated when platforms are added. The publishing command
 performs the publication operation without an additional interactive confirmation.
 
 If an upload fails, the tag or draft may remain. Inspect it with `gh release view
-v0.1.0`; no automatic tag deletion or replacement is attempted. Retry from the same
+v0.0.1`; no automatic tag deletion or replacement is attempted. Retry from the same
 clean source and artifacts. Uploaded identical files are skipped, and checksum entries
 for completed remote archives can be recovered if a manifest upload failed. Incomplete
 remote assets require inspection before retrying.
@@ -174,7 +174,7 @@ Deploy the same archives and `SHA256SUMS` under
 `/usr/share/caddy/releases/vVERSION/`, served at
 `https://www.kyler.work/releases/vVERSION/`. Upload platform archives first, then the
 checksum file. Finally, atomically publish `/usr/share/caddy/releases/latest.txt`
-containing the version on one line, for example `v0.1.0`. Update this pointer only
+containing the version on one line, for example `v0.0.1`. Update this pointer only
 after all intended platforms are available. Keep earlier version directories for
 pinned installations.
 

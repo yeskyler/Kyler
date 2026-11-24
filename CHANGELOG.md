@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.0.1 — Unreleased
 
-The public release series starts at 0.1.0.
+The public release series starts at 0.0.1.
 
 ### Added
 

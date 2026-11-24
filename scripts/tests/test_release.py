@@ -22,18 +22,18 @@ class ReleaseTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         (self.root / "kyler-rs").mkdir()
-        (self.root / "kyler-rs/Cargo.toml").write_text('[workspace.package]\nversion = "0.1.0"\n')
+        (self.root / "kyler-rs/Cargo.toml").write_text('[workspace.package]\nversion = "0.0.1"\n')
         (self.root / "LICENSE").write_text("Fixture project license")
         self.dist = self.root / "dist"
         self.dist.mkdir()
         (self.dist / "install.sh").write_text("Legacy installer; must never be uploaded")
-        self.name = "kyler-v0.1.0-aarch64-apple-darwin.tar.gz"
+        self.name = "kyler-v0.0.1-aarch64-apple-darwin.tar.gz"
         self.bundle()
         self.patch = patch.object(release, "ROOT", self.root)
         self.patch.start()
         self.addCleanup(self.patch.stop)
 
-    def bundle(self, version="0.1.0", target="aarch64-apple-darwin"):
+    def bundle(self, version="0.0.1", target="aarch64-apple-darwin"):
         body = json.dumps({"version": version, "target": target, "source_revision":"commit-id"}).encode()
         with tarfile.open(self.dist / self.name, "w:gz") as archive:
             item = tarfile.TarInfo(self.name[:-7] + "/bundle.json")
@@ -51,69 +51,69 @@ class ReleaseTests(unittest.TestCase):
         (self.dist / "SHA256SUMS").write_text(f"{digest}  {self.name}\n")
 
     def test_assets_verify_checksum_and_metadata(self):
-        bundles, sums = release.assets(self.dist, "0.1.0", "commit-id")
+        bundles, sums = release.assets(self.dist, "0.0.1", "commit-id")
         self.assertEqual([item.name for item in bundles], [self.name])
         self.assertIn(self.name, sums)
         with (self.dist / self.name).open("ab") as source:
             source.write(b"corrupted")
         with self.assertRaisesRegex(ValueError, "Checksum"):
-            release.assets(self.dist, "0.1.0", "commit-id")
+            release.assets(self.dist, "0.0.1", "commit-id")
 
     def test_standalone_installer_is_excluded_from_github_assets(self):
-        installer = self.dist / "kyler-installer-v0.1.0-aarch64-apple-darwin"
+        installer = self.dist / "kyler-installer-v0.0.1-aarch64-apple-darwin"
         installer.write_bytes(b"fixture-installer")
         sums = self.dist / "SHA256SUMS"
         with sums.open("a") as manifest:
             manifest.write(f"{hashlib.sha256(installer.read_bytes()).hexdigest()}  {installer.name}\n")
-        assets, manifest = release.assets(self.dist, "0.1.0", "commit-id")
+        assets, manifest = release.assets(self.dist, "0.0.1", "commit-id")
         self.assertNotIn(installer, assets)
         self.assertNotIn(installer.name, manifest)
 
     def test_wrong_bundle_version_is_rejected_and_installer_is_not_required(self):
         self.bundle("0.2.0")
         with self.assertRaisesRegex(ValueError, "version or target"):
-            release.assets(self.dist, "0.1.0", "commit-id")
+            release.assets(self.dist, "0.0.1", "commit-id")
         self.bundle()
         (self.dist / "install.sh").write_text("different")
-        bundles, sums = release.assets(self.dist, "0.1.0", "commit-id")
+        bundles, sums = release.assets(self.dist, "0.0.1", "commit-id")
         (self.dist / "install.sh").unlink()
-        self.assertEqual(release.assets(self.dist, "0.1.0", "commit-id"), (bundles, sums))
+        self.assertEqual(release.assets(self.dist, "0.0.1", "commit-id"), (bundles, sums))
 
     def test_release_requires_matching_source_and_license(self):
         with self.assertRaisesRegex(ValueError, "source revision"):
-            release.assets(self.dist, "0.1.0", "another-commit")
+            release.assets(self.dist, "0.0.1", "another-commit")
         (self.root / "LICENSE").write_text("Changed license")
         with self.assertRaisesRegex(ValueError, "LICENSE differs"):
-            release.assets(self.dist, "0.1.0", "commit-id")
+            release.assets(self.dist, "0.0.1", "commit-id")
         (self.root / "LICENSE").unlink()
         with self.assertRaisesRegex(ValueError, "Choose and commit"):
-            release.assets(self.dist, "0.1.0", "commit-id")
+            release.assets(self.dist, "0.0.1", "commit-id")
 
     def test_collect_merges_platform_checksums_without_collisions(self):
         source=self.root / "platforms"
         source.mkdir()
         shutil.copytree(self.dist,source / "macos")
-        self.name="kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+        self.name="kyler-v0.0.1-x86_64-unknown-linux-gnu.tar.gz"
         self.bundle(target="x86_64-unknown-linux-gnu")
-        (self.dist / "kyler-v0.1.0-aarch64-apple-darwin.tar.gz").unlink()
+        (self.dist / "kyler-v0.0.1-aarch64-apple-darwin.tar.gz").unlink()
         shutil.copytree(self.dist,source / "linux")
         destination=self.root / "collected"
-        release.collect_artifacts(source,destination,"0.1.0","commit-id")
-        bundles,sums=release.assets(destination,"0.1.0","commit-id")
+        release.collect_artifacts(source,destination,"0.0.1","commit-id")
+        bundles,sums=release.assets(destination,"0.0.1","commit-id")
         self.assertEqual(len(bundles),2)
         self.assertEqual(len(sums.splitlines()),2)
         with self.assertRaisesRegex(ValueError,"must not already exist"):
-            release.collect_artifacts(source,destination,"0.1.0","commit-id")
+            release.collect_artifacts(source,destination,"0.0.1","commit-id")
         shutil.copytree(source / "macos",source / "duplicate")
         with self.assertRaisesRegex(ValueError,"Duplicate platform"):
-            release.collect_artifacts(source,self.root / "duplicates","0.1.0","commit-id")
+            release.collect_artifacts(source,self.root / "duplicates","0.0.1","commit-id")
 
     def test_repository_and_version_validation(self):
         for origin in ["https://github.com/yeskyler/Kyler.git", "git@github.com:yeskyler/Kyler.git"]:
             self.assertEqual(release.repository(origin), "yeskyler/Kyler")
         with self.assertRaises(ValueError):
             release.repository("https://example.com/yeskyler/Kyler.git")
-        self.assertEqual(release.workspace_version(), "0.1.0")
+        self.assertEqual(release.workspace_version(), "0.0.1")
 
     def invoke(self, arguments=(), releases=None, remote="", dirty=False, local_tag=None, fail_upload=False, remote_assets=None, remote_sums="", remote_installer=None):
         commands = []
@@ -147,7 +147,7 @@ class ReleaseTests(unittest.TestCase):
                 return remote
             return ""
         tag_result = subprocess.CompletedProcess([], 0 if local_tag else 1, stdout=(local_tag or "") + "\n")
-        with patch.object(release, "download_asset", side_effect=download), patch.object(release, "run", side_effect=run), patch.object(release.subprocess, "run", return_value=tag_result), patch("sys.argv", ["release.py", "0.1.0", "--artifacts", str(self.dist), *arguments]), patch("sys.stdout", new_callable=io.StringIO):
+        with patch.object(release, "download_asset", side_effect=download), patch.object(release, "run", side_effect=run), patch.object(release.subprocess, "run", return_value=tag_result), patch("sys.argv", ["release.py", "0.0.1", "--artifacts", str(self.dist), *arguments]), patch("sys.stdout", new_callable=io.StringIO):
             release.main()
         return commands
 
@@ -163,10 +163,10 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("--draft", create)
         self.assertIn("--verify-tag", create)
         self.assertTrue(any(command[:2] == ("git", "push") for command in commands))
-        self.assertEqual(commands[-1][:4], ("gh", "release", "edit", "v0.1.0"))
+        self.assertEqual(commands[-1][:4], ("gh", "release", "edit", "v0.0.1"))
 
     def test_draft_does_not_publish_and_existing_remote_tag_is_not_pushed(self):
-        commands = self.invoke(["--draft"], remote="commit-id\trefs/tags/v0.1.0^{}")
+        commands = self.invoke(["--draft"], remote="commit-id\trefs/tags/v0.0.1^{}")
         self.assertFalse(any(command[:2] == ("git", "push") for command in commands))
         self.assertFalse(any(command[:3] == ("gh", "release", "edit") for command in commands))
 
@@ -176,7 +176,7 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"will not be recreated"):
             self.invoke(["--require-existing-tag"])
         self.assertFalse(any(command[:2] in [("git","tag"),("git","push")] for command in self.commands))
-        commands=self.invoke(["--require-existing-tag"],remote="commit-id\trefs/tags/v0.1.0")
+        commands=self.invoke(["--require-existing-tag"],remote="commit-id\trefs/tags/v0.0.1")
         self.assertFalse(any(command[:2] in [("git","tag"),("git","push")] for command in commands))
 
     def test_upload_failure_never_publishes(self):
@@ -185,15 +185,15 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(any(command[:3] == ("gh", "release", "edit") for command in self.commands))
 
     def test_dirty_tree_existing_release_and_mismatched_tags_are_rejected(self):
-        for options, message in [({"dirty": True}, "Commit or stash"), ({"local_tag": "other"}, "local tag"), ({"remote": "other\trefs/tags/v0.1.0"}, "remote tag")]:
+        for options, message in [({"dirty": True}, "Commit or stash"), ({"local_tag": "other"}, "local tag"), ({"remote": "other\trefs/tags/v0.0.1"}, "remote tag")]:
             with self.subTest(options=options), self.assertRaisesRegex(ValueError, message):
                 self.invoke(**options)
 
     def existing(self, **kwargs):
-        return self.invoke(releases=[{"id": 42, "tag_name": "v0.1.0", "draft": False}], remote="commit-id\trefs/tags/v0.1.0", **kwargs)
+        return self.invoke(releases=[{"id": 42, "tag_name": "v0.0.1", "draft": False}], remote="commit-id\trefs/tags/v0.0.1", **kwargs)
 
     def test_append_preserves_other_platforms_and_merges_checksums(self):
-        other = "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+        other = "kyler-v0.0.1-x86_64-unknown-linux-gnu.tar.gz"
         digest = "a" * 64
         assets = [
             {"id": 1, "name": "SHA256SUMS", "state": "uploaded"},
@@ -241,13 +241,13 @@ class ReleaseTests(unittest.TestCase):
 
     def test_existing_release_requires_matching_tag(self):
         with self.assertRaisesRegex(ValueError, "remote tag"):
-            self.invoke(releases=[{"id": 42, "tag_name": "v0.1.0"}], remote="other\trefs/tags/v0.1.0")
+            self.invoke(releases=[{"id": 42, "tag_name": "v0.0.1"}], remote="other\trefs/tags/v0.0.1")
         with self.assertRaisesRegex(ValueError, "tag is missing"):
-            self.invoke(releases=[{"id": 42, "tag_name": "v0.1.0"}])
+            self.invoke(releases=[{"id": 42, "tag_name": "v0.0.1"}])
         self.assertFalse(any(c[:2] in [("git", "tag"), ("git", "push")] for c in self.commands))
 
     def test_missing_manifest_recovers_other_platform_checksums(self):
-        other = "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+        other = "kyler-v0.0.1-x86_64-unknown-linux-gnu.tar.gz"
         assets = [{"id": 5, "name": other, "state": "uploaded", "digest": "sha256:" + "b" * 64}]
         commands = self.existing(remote_assets=assets)
         self.assertIn("b" * 64 + "  " + other, self.uploaded_manifest)
@@ -275,14 +275,14 @@ class ReleaseTests(unittest.TestCase):
 
     def test_existing_draft_is_published_only_when_requested(self):
         for args in ([], ["--draft"]):
-            commands = self.invoke(arguments=args, releases=[{"id": 42, "tag_name": "v0.1.0", "draft": True}], remote="commit-id\trefs/tags/v0.1.0")
+            commands = self.invoke(arguments=args, releases=[{"id": 42, "tag_name": "v0.0.1", "draft": True}], remote="commit-id\trefs/tags/v0.0.1")
             edits = [c for c in commands if c[:3] == ("gh", "release", "edit")]
             self.assertEqual(len(edits), 0 if args else 1)
 
     def test_concurrent_asset_changes_do_not_replace_shared_manifest(self):
         assets = [{"id": i, "name": name, "state": "uploaded", "digest": "sha256:" + hashlib.sha256((self.dist / name).read_bytes()).hexdigest()} for i, name in enumerate([self.name, "install.sh", "SHA256SUMS"])]
         changed = assets + [{"id": 99, "name": "another-upload", "state": "uploaded"}]
-        with patch.object(release, "github_pages", side_effect=[[{"id": 42, "tag_name": "v0.1.0"}], assets, changed]):
+        with patch.object(release, "github_pages", side_effect=[[{"id": 42, "tag_name": "v0.0.1"}], assets, changed]):
             with self.assertRaisesRegex(ValueError, "concurrently"):
                 self.existing(remote_assets=assets, remote_sums=(self.dist / "SHA256SUMS").read_text())
         self.assertIsNone(self.uploaded_manifest)

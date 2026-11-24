@@ -2488,7 +2488,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-acp"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -2500,7 +2500,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-channel"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "aes 0.8.4",
  "anyhow",
@@ -2531,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-cli"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2572,7 +2572,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-client"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "async-stream",
  "axum",
@@ -2588,7 +2588,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-config"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "kyler-logging",
@@ -2602,7 +2602,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -2647,7 +2647,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-evals"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2671,7 +2671,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-gateway"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2693,7 +2693,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-logging"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -2703,7 +2703,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-mcp"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-protocol"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "libc",
  "schemars 1.2.2",
@@ -2729,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-provider"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -2746,7 +2746,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-scheduler"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2766,7 +2766,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-server"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2800,7 +2800,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-skills"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "kyler-config",
@@ -2817,7 +2817,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-store"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "kyler-protocol",
@@ -2830,7 +2830,7 @@ dependencies = [
 
 [[package]]
 name = "kyler-tui"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "arboard",

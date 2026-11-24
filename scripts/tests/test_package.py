@@ -136,7 +136,7 @@ class PackageSetupTests(unittest.TestCase):
         def version(command, **kwargs):
             if Path(command[0]).name == "node":
                 return json.dumps({"version": "v24.0.0", "platform": "linux", "arch": "x64"})
-            return "kyler 0.1.0"
+            return "kyler 0.0.1"
         def rg_payload(binary, licenses, *args):
             binary.parent.mkdir(parents=True)
             binary.write_bytes(b"fixture-ripgrep")
@@ -150,9 +150,9 @@ class PackageSetupTests(unittest.TestCase):
         positions = [text.index(f"[{number}/9]") for number in range(1, 10)]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("Packaging complete", text)
-        archive = output / "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+        archive = output / "kyler-v0.0.1-x86_64-unknown-linux-gnu.tar.gz"
         self.assertEqual((output / "install.sh").read_text(), "fixture bootstrap")
-        installer = output / "kyler-installer-v0.1.0-x86_64-unknown-linux-gnu"
+        installer = output / "kyler-installer-v0.0.1-x86_64-unknown-linux-gnu"
         self.assertFalse(installer.exists())
         self.assertIn(package.digest(archive), (output / "SHA256SUMS").read_text())
         with tarfile.open(archive) as bundle:

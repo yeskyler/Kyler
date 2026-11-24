@@ -234,7 +234,7 @@ def append_assets(repo, tag, existing, bundles, sums, keep_draft):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("version", help="Release version, for example 0.1.0 or v0.1.0")
+    parser.add_argument("version", help="Release version, for example 0.0.1 or v0.0.1")
     parser.add_argument("--artifacts", type=Path, default=ROOT / "dist")
     parser.add_argument("--collect", type=Path, help="Collect separate platform artifact directories into --artifacts")
     parser.add_argument("--require-target", action="append", default=[], help="Require a native target (repeatable)")
