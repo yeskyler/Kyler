@@ -423,12 +423,12 @@ fn window_policy(config: &AppConfig) -> (ContextPolicy, bool) {
         (policy, config.context.auto_model_window)
     }
 }
-pub(super) fn review(
+pub(super) fn configuration_details(
     config: &AppConfig,
     advanced: bool,
     access: Option<&str>,
     discovered: &[Discovery],
-) -> Result<()> {
+) -> Result<String> {
     let settings = config.effective_models();
     let profile = settings
         .profiles
@@ -469,7 +469,7 @@ pub(super) fn review(
     if let Some(access) = access {
         details.push(format!("Access    {access}"));
     }
-    ui::note("Review setup", &details.join("\n")).map_err(CliError::io)
+    Ok(details.join("\n"))
 }
 
 fn wizard_adapter(provider: &ProviderSettings) -> AdapterKind {

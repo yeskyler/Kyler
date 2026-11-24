@@ -211,6 +211,10 @@ impl Adapter {
             }
         }
     }
+    pub fn accepts_webhook(&self) -> bool {
+        !matches!(self, Self::Telegram(_)) && !self.streams()
+    }
+
     pub fn streams(&self) -> bool {
         matches!(
             self,

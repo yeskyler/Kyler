@@ -109,12 +109,12 @@ pub(super) fn note(title: &str, content: &str) -> std::io::Result<()> {
         Ok(())
     }
 }
-pub(super) fn connection(content: &str) -> std::io::Result<()> {
+pub(super) fn connection(title: &str, content: &str) -> std::io::Result<()> {
     initialize();
     if terminal_controls() {
-        cliclack::outro_note("Connection", content)
+        cliclack::outro_note(title, content)
     } else {
-        eprintln!("{content}");
+        eprintln!("{title}\n{content}");
         Ok(())
     }
 }

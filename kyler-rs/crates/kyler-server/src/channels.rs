@@ -594,7 +594,7 @@ pub(crate) async fn webhook(
         .channels
         .as_ref()
         .and_then(|channels| channels.get(&provider))
-        .filter(|channel| !matches!(channel.bot, Adapter::Telegram(_)) && !channel.bot.streams())
+        .filter(|channel| channel.bot.accepts_webhook())
         .ok_or_else(ApiError::missing)?;
     if *state.runs.stopping.borrow() {
         return Err(ApiError::stopping());

@@ -792,6 +792,9 @@ else:
             ("◆  Configure a channel".encode(), b"Telegram\r"),
             ("◆  Bot Token".encode(), secret + b"\r"),
             ("◆  Kyler Web origin".encode(), b"\r"),
+            ("◆  Configure a channel".encode(), b"QQ Bot\r"),
+            ("◆  App ID".encode(), b"12345678\r"),
+            ("◆  App Secret".encode(), b"QQ_CHANNEL_SECRET\r"),
             ("◆  Configure a channel".encode(), b"Continue setup\r"),
             ("◆  Finish setup".encode(), b"Edit model\r"),
             ("◆  Model".encode(), b"\r"),
@@ -803,6 +806,19 @@ else:
         self.assertIn(b"[channels]", config)
         self.assertIn(b'KYLER_TELEGRAM_BOT_TOKEN = "' + secret + b'"', config)
         self.assertNotIn(secret, output)
+        self.assertNotIn(b"QQ_CHANNEL_SECRET", output)
+        self.assertIn(b"Channels  2 configured", output)
+        sections = [
+            b"Configuration saved",
+            "Channels · 2 configured".encode(),
+            b"Telegram  Configured",
+            b"QQ Bot  Configured",
+            b"/webhooks/channels/qqbot",
+            "Services · Not started".encode(),
+        ]
+        offsets = [output.index(section) for section in sections]
+        self.assertEqual(offsets, sorted(offsets))
+        self.assertNotIn(b"/webhooks/channels/telegram", output)
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
     def test_cancelled_first_install_does_not_publish_default_configuration(self):
@@ -1527,9 +1543,9 @@ class BundleTests(unittest.TestCase):
            preserve_addresses=True, bundle=bundle)
         self.assertEqual(config.read_bytes(), before)
         self.assertNotIn("◆  Provider".encode(), output)
-        self.assertNotIn(b"Web token:", output)
+        self.assertIn("Web · Running".encode(), output)
         self.assertIn(b"Interface  ", output)
-        self.assertRegex(output, rb"Token\s+[A-Za-z0-9_-]+")
+        self.assertRegex(output, rb"Web token\s+[A-Za-z0-9_-]+")
         self.assertLess(output.index("◇  Configure Kyler".encode()), output.index("◇  Launch".encode()))
         self.assertTrue(self.status("status")["running"])
 
@@ -1548,10 +1564,10 @@ class BundleTests(unittest.TestCase):
            preserve_addresses=True, bundle=bundle)
         interface = re.search(rb"Interface\s+[^\r\n]+ \xc2\xb7 ([0-9.]+)", output)
         if interface:
-            self.assertIn(b"Web        http://" + interface.group(1) + b":" + port.encode(), output)
+            self.assertIn(b"URL        http://" + interface.group(1) + b":" + port.encode(), output)
         else:
             self.assertIn(b"Interface  Primary network connection unavailable", output)
-        self.assertRegex(output, rb"Token\s+[A-Za-z0-9_-]+")
+        self.assertRegex(output, rb"Web token\s+[A-Za-z0-9_-]+")
         self.assertTrue(self.status("status")["web"]["running"])
 
     def test_corrupt_bundle_is_rejected_before_installation(self):

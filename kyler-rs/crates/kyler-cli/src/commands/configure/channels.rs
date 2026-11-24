@@ -142,7 +142,41 @@ pub(super) fn write(config: &AppConfig, root: &mut toml::Table) {
     }
 }
 
-pub(super) fn validate(config: &AppConfig) -> Result<()> {
+pub(super) fn count(config: &AppConfig) -> usize {
+    CHANNELS
+        .iter()
+        .filter(|definition| {
+            let key = definition.fields[0].key;
+            std::env::var_os(key).is_some() || config.channels.contains_key(key)
+        })
+        .count()
+}
+
+pub(super) fn show_configured(adapters: &[Adapter]) -> Result<()> {
+    if adapters.is_empty() {
+        ui::field("Channels", "None configured");
+        return Ok(());
+    }
+    let mut details = Vec::new();
+    for adapter in adapters {
+        let id = adapter.name();
+        let name = CHANNELS
+            .iter()
+            .find(|channel| channel.id == id)
+            .map_or(id, |channel| channel.name);
+        details.push(format!("{name}  Configured"));
+        if adapter.accepts_webhook() {
+            details.push(format!("  /webhooks/channels/{id}"));
+        }
+    }
+    ui::note(
+        &format!("Channels · {} configured", adapters.len()),
+        &details.join("\n"),
+    )
+    .map_err(CliError::io)
+}
+
+pub(super) fn validate(config: &AppConfig) -> Result<Vec<Adapter>> {
     let values = config
         .channels
         .iter()
@@ -154,7 +188,7 @@ pub(super) fn validate(config: &AppConfig) -> Result<()> {
             if !adapters.is_empty() {
                 settings.web_origin()?;
             }
-            Ok(())
+            Ok(adapters)
         })
         .map_err(|error| CliError::new(2, format!("Invalid channel configuration: {error}")))
 }

@@ -132,6 +132,14 @@ pub async fn configure(
                     let mut progress = Progress::new();
                     progress.begin("Configure Kyler");
                     progress.complete();
+                    let details = models::configuration_details(
+                        &config,
+                        advanced,
+                        Some(access_label(&config)),
+                        &[],
+                    )?;
+                    let adapters = channels::validate(&config)?;
+                    show_configuration("Configuration kept", &details, &adapters)?;
                     return launch(&path, &config).await;
                 }
                 _ => {}
@@ -205,16 +213,20 @@ pub async fn configure(
                     Err(e) => return Err(e),
                 },
                 Page::Review => {
-                    models::review(
+                    let details = models::configuration_details(
                         &config,
                         advanced,
-                        scope.then_some(if lan {
-                            "Local network"
-                        } else {
-                            "This machine only"
-                        }),
+                        scope.then(|| access_label(&config)),
                         &discovered,
                     )?;
+                    ui::note(
+                        "Review setup",
+                        &format!(
+                            "{details}\nChannels  {} configured",
+                            channels::count(&config)
+                        ),
+                    )
+                    .map_err(CliError::io)?;
                     let mut choices = vec![
                         if can_start {
                             "Save and start".into()
@@ -285,7 +297,17 @@ pub async fn configure(
             .validate()
             .map_err(|error| CliError::new(2, format!("Configuration not saved: {error}")))?;
     }
-    channels::validate(&config)?;
+    let adapters = channels::validate(&config)?;
+    let details = if interactive && output.is_none() {
+        Some(models::configuration_details(
+            &config,
+            advanced,
+            Some(access_label(&config)),
+            &discovered,
+        )?)
+    } else {
+        None
+    };
     super::token::configure(&mut config).await?;
     let root = values
         .as_table_mut()
@@ -466,12 +488,48 @@ pub async fn configure(
     let mut progress = Progress::new();
     progress.begin("Configure Kyler");
     progress.complete();
-    if start_after_save {
-        launch(&path, &config).await?;
+    if let Some(details) = details {
+        show_configuration("Configuration saved", &details, &adapters)?;
+        if start_after_save {
+            launch(&path, &config).await?;
+        } else {
+            ui::note(
+                "Services · Not started",
+                "Run kyler service start to start services.",
+            )
+            .map_err(CliError::io)?;
+        }
     }
     Ok(())
 }
+fn access_label(config: &kyler_config::AppConfig) -> &'static str {
+    if !config.server.bind.ip().is_loopback()
+        || (config.web.enabled && !config.web.bind.ip().is_loopback())
+    {
+        "Local network"
+    } else {
+        "This machine only"
+    }
+}
+
+fn show_configuration(
+    title: &str,
+    details: &str,
+    adapters: &[kyler_channel::Adapter],
+) -> Result<()> {
+    ui::note(title, details).map_err(CliError::io)?;
+    channels::show_configured(adapters)
+}
+
 async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
+    if let Err(error) = start_services(path, config).await {
+        ui::note("Services · Startup failed", &error.message).map_err(CliError::io)?;
+        return Err(error);
+    }
+    Ok(())
+}
+
+async fn start_services(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
     let mut progress = Progress::new();
     progress.begin("Launch");
     let output = tokio::process::Command::new(std::env::current_exe().map_err(CliError::io)?)
@@ -482,9 +540,8 @@ async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
         .env_remove("KYLER_INSTALL_SETUP")
         .kill_on_drop(true)
         .output()
-        .await
-        .map_err(CliError::io)?;
-    if !output.status.success() {
+        .await;
+    if !output.as_ref().is_ok_and(|result| result.status.success()) {
         progress.fail();
         let logs = path.parent().unwrap().join("logs");
         std::fs::create_dir_all(&logs).map_err(CliError::io)?;
@@ -494,13 +551,12 @@ async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
             std::fs::set_permissions(&logs, Permissions::from_mode(0o700)).map_err(CliError::io)?;
         }
         let log = logs.join("launch.log");
-        let mut diagnostics = output.stdout;
-        diagnostics.extend_from_slice(&output.stderr);
+        let diagnostics = match output {
+            Ok(output) => [output.stdout, output.stderr].concat(),
+            Err(error) => error.to_string().into_bytes(),
+        };
         publish(&log, &diagnostics)?;
-        return Err(CliError::new(
-            3,
-            format!("Could not start services. Log:{}", log.display()),
-        ));
+        return Err(CliError::new(3, format!("Log  {}", log.display())));
     }
     progress.complete();
     let saved = loader::load_for_setup(Some(path)).ok();
@@ -520,9 +576,9 @@ async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
             }
             _ => kyler_config::web::connect_url(config.web.bind),
         };
-        details.push(format!("Web        {url}"));
+        details.push(format!("URL        {url}"));
         details.push(format!(
-            "Token      {}",
+            "Web token  {}",
             if config.web.access_token.is_empty() {
                 "Run kyler service token"
             } else {
@@ -530,10 +586,18 @@ async fn launch(path: &Path, config: &kyler_config::AppConfig) -> Result<()> {
             }
         ));
     }
-    if config.web.enabled && config.web.bind.ip().is_loopback() {
-        details.push("Access     This machine only".into());
+    let title = if config.web.enabled {
+        "Web · Running"
+    } else {
+        "Backend · Running"
+    };
+    if !config.web.enabled {
+        details.push(format!(
+            "URL        {}",
+            kyler_config::web::connect_url(config.server.bind)
+        ));
     }
-    ui::connection(&details.join("\n")).map_err(CliError::io)?;
+    ui::connection(title, &details.join("\n")).map_err(CliError::io)?;
     Ok(())
 }
 
