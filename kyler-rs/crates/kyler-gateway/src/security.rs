@@ -57,6 +57,7 @@ impl Security {
         };
         let digest = Sha256::digest(secret.as_bytes());
         if !equal(&digest, &record.digest)
+            || record.info.role != Role::Owner
             || record.info.revoked_at.is_some()
             || record.info.expires_at.is_some_and(|expiry| expiry <= now())
         {
@@ -96,6 +97,10 @@ impl Security {
             .token(id.into())
             .await?
             .ok_or_else(|| anyhow::anyhow!("Token not found"))?;
+        ensure!(
+            old.info.role == Role::Owner,
+            "Token is not an owner credential"
+        );
         ensure!(old.info.revoked_at.is_none(), "Token is already revoked");
         let mut request = CreateToken {
             name: old.info.name,

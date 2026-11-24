@@ -43,10 +43,6 @@ pub async fn execute(explicit: Option<&Path>, command: &TokenCommand, json: bool
     match command {
         TokenCommand::Create {
             name,
-            role,
-            workspace,
-            session,
-            model,
             expires_in_seconds,
             no_expiry,
         } => {
@@ -59,20 +55,14 @@ pub async fn execute(explicit: Option<&Path>, command: &TokenCommand, json: bool
             }
             let expires_at = (!*no_expiry)
                 .then(|| chrono::Utc::now().timestamp_millis() + seconds as i64 * 1000);
-            let role = serde_json::from_value(serde_json::json!(role))
-                .map_err(|_| CliError::new(2, "Invalid role"))?;
             issued(
                 security
                     .issue(
                         &actor,
                         CreateToken {
                             name: name.clone(),
-                            role,
-                            scope: Scope {
-                                workspaces: workspace.clone(),
-                                sessions: session.clone(),
-                                models: model.clone(),
-                            },
+                            role: Role::Owner,
+                            scope: Scope::default(),
                             expires_at,
                         },
                     )
@@ -82,7 +72,8 @@ pub async fn execute(explicit: Option<&Path>, command: &TokenCommand, json: bool
             )
         }
         TokenCommand::List => {
-            let records = security.store.list().await.map_err(failure)?;
+            let mut records = security.store.list().await.map_err(failure)?;
+            records.retain(|record| record.role == Role::Owner);
             if json {
                 output::json(&records)
             } else {
@@ -143,11 +134,11 @@ pub(super) async fn configure(config: &mut AppConfig) -> Result<()> {
         .authenticate(config.server.access_token.expose())
         .await
         .map_err(failure)?
-        .is_some_and(|principal| principal.role.administrative());
+        .is_some();
     if !valid && std::env::var_os("KYLER_GATEWAY_TOKEN").is_some() {
         return Err(CliError::new(
             2,
-            "Unset KYLER_GATEWAY_TOKEN or provide a gateway administrator token issued for this service",
+            "Unset KYLER_GATEWAY_TOKEN or provide a gateway owner token issued for this service",
         ));
     }
     if !valid {
@@ -156,7 +147,7 @@ pub(super) async fn configure(config: &mut AppConfig) -> Result<()> {
                 &Principal::local(),
                 CreateToken {
                     name: "local-service".into(),
-                    role: Role::Admin,
+                    role: Role::Owner,
                     scope: Scope::default(),
                     expires_at: None,
                 },

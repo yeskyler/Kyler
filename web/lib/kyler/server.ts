@@ -60,9 +60,15 @@ export function permittedPath(path: string, method: string) {
   const id = "[a-zA-Z0-9_-]+";
   // Provider call IDs are opaque identifiers, not session UUIDs.
   const toolCallId = "(?!\\.{1,2}$)[a-zA-Z0-9_.:-]{1,512}";
+  const channel =
+    "channels/(?:telegram|slack|feishu|line|whatsapp|dingtalk|wecom|wecom_callback|weixin|qqbot|discord|signal|mattermost|matrix|email|sms|bluebubbles|home_assistant|teams|google_chat|api_server|webhook)";
   const rules: [string, string][] = [
     ["GET", "info"],
     ["GET", "preferences"],
+    ["GET", "channels"],
+    ["GET", channel],
+    ["POST", `${channel}/pair`],
+    ["DELETE", `${channel}/[A-Za-z0-9_-]{1,700}`],
     ["PUT", "preferences"],
     ["GET", `sessions/${id}/active-run`],
     ["GET", "automations"],

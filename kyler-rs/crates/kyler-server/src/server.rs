@@ -125,6 +125,30 @@ impl Server {
                 database.display()
             )));
         }
+        let channel_database = config.session.directory.join("_channels.sqlite3");
+        let channel_settings = config
+            .channels
+            .iter()
+            .map(|(key, value)| (key.clone(), value.expose().to_owned()))
+            .collect();
+        let settings = kyler_channel::Settings(&channel_settings);
+        server.state.channels =
+            crate::channels::Channels::configured(&channel_database, &settings)?.map(Arc::new);
+        if settings.get("KYLER_GOOGLE_CHAT_WEBHOOK_URL").is_some() {
+            let path = settings.required("KYLER_GOOGLE_CHAT_CREDENTIALS_FILE")?;
+            runs.protected_paths.push(
+                Path::new(&path)
+                    .canonicalize()
+                    .map_err(|_| anyhow::anyhow!("Cannot protect Google Chat credentials"))?,
+            );
+        }
+        if server.state.channels.is_some() {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                let mut path = channel_database.clone().into_os_string();
+                path.push(suffix);
+                runs.protected_paths.push(path.into());
+            }
+        }
         let binding = runs
             .store
             .directory()
@@ -158,6 +182,7 @@ impl Server {
                 instance_id: uuid::Uuid::new_v4().to_string(),
                 runs: RunManager::new(agent, store, settings).await?,
                 scheduler: None,
+                channels: None,
             },
         })
     }
@@ -178,12 +203,14 @@ impl Server {
                 .list()
                 .await?
                 .iter()
-                .any(|token| token.role.administrative()
-                    && token.revoked_at.is_none()
-                    && token
-                        .expires_at
-                        .is_none_or(|expiry| expiry > chrono::Utc::now().timestamp_millis())),
-            "No active gateway administrator token. Run kyler configure or kyler token create --name administrator --role owner"
+                .any(
+                    |token| token.role == kyler_protocol::api::gateway::Role::Owner
+                        && token.revoked_at.is_none()
+                        && token
+                            .expires_at
+                            .is_none_or(|expiry| expiry > chrono::Utc::now().timestamp_millis())
+                ),
+            "No active gateway owner token. Run kyler configure or kyler token create --name owner"
         );
         ensure!(
             listener.local_addr()?.ip().is_loopback()
@@ -198,6 +225,13 @@ impl Server {
         } else {
             None
         };
+        let channel_worker = async {
+            if let Some(channels) = &self.state.channels {
+                channels.run(&manager).await;
+            }
+            std::future::pending::<()>().await;
+        };
+        tokio::pin!(channel_worker);
         let mut stopping = manager.stopping.subscribe();
         let http = axum::serve(listener, self.router())
             .with_graceful_shutdown(async move {
@@ -228,6 +262,7 @@ impl Server {
                 tokio::time::timeout_at(deadline,&mut http).await??;
             }
             _=&mut cleaner=>unreachable!(),
+            _=&mut channel_worker=>unreachable!(),
         }
         Ok(())
     }

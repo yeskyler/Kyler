@@ -78,6 +78,9 @@ test("SSE reports expired replay instead of silently ending", async () => {
 });
 
 test("proxy exposes conversation operations but never service control or traversal", () => {
+  assert.equal(permittedPath("channels", "GET"), true);
+  assert.equal(permittedPath("channels", "POST"), false);
+  assert.equal(permittedPath("channels/telegram/pair", "POST"), true);
   assert.equal(permittedPath("sessions/s1/runs", "POST"), true);
   assert.equal(permittedPath("sessions/s1/thinking", "GET"), true);
   assert.equal(permittedPath("sessions/s1/thinking", "PUT"), true);

@@ -23,7 +23,7 @@ fn local_token_lifecycle_requires_no_model_credentials_and_never_lists_secrets()
         assert!(output.stderr.is_empty());
         serde_json::from_slice::<Value>(&output.stdout).unwrap()
     };
-    let created = run(&["create", "--name", "local-test", "--role", "owner"]);
+    let created = run(&["create", "--name", "local-test"]);
     let id = created["info"]["id"].as_str().unwrap();
     let secret = created["token"].as_str().unwrap();
     assert!(secret.starts_with("kyl_"));

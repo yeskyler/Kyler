@@ -149,14 +149,6 @@ pub enum TokenCommand {
     Create {
         #[arg(long)]
         name: String,
-        #[arg(long, default_value="member", value_parser=["owner","admin","member","viewer"])]
-        role: String,
-        #[arg(long)]
-        workspace: Vec<String>,
-        #[arg(long)]
-        session: Vec<String>,
-        #[arg(long)]
-        model: Vec<String>,
         #[arg(long, conflicts_with = "no_expiry")]
         expires_in_seconds: Option<u64>,
         #[arg(long)]

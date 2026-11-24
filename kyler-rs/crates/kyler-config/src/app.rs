@@ -58,6 +58,7 @@ pub struct AppConfig {
     pub subagent: SubagentSettings,
     pub logging: LoggingConfig,
     pub mcp: McpSettings,
+    pub channels: std::collections::BTreeMap<String, SecretString>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -4,9 +4,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
-    Owner,
-    Admin,
     #[default]
+    Owner,
+    // Retained for decoding existing credentials. They cannot authenticate to the gateway.
+    Admin,
+    // Also used for internal workspace-scoped channel credentials.
     Member,
     Viewer,
 }

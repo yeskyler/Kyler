@@ -7,6 +7,10 @@ The standalone Web application runs in a separate Node.js process.
 See the [English architecture overview](agent-architecture.md) for a full-system
 diagram, the reviewed experience feedback loop, and a feature ownership map.
 
+External messages enter through [Channels](channels.md). The `kyler-channel` crate
+handles messaging adapters and durable queues. The server authorizes workspace-bound
+identities through the gateway and submits runs to the existing runtime.
+
 ## Request path
 
 ```mermaid
@@ -18,6 +22,8 @@ flowchart TD
     ACP[ACP adapter] --> Threads
     Threads --> Runtime
     Client --> Server
+    Messaging[Messaging platforms and external bridges] --> Channel[kyler-channel adapter and queues]
+    Channel --> Server
     Server --> Threads
     Runtime[kyler-core runtime]
     Runtime --> Provider[kyler-provider: protocol and capability adaptation]

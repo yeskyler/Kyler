@@ -1,3 +1,4 @@
+mod channels;
 mod input;
 mod models;
 
@@ -104,6 +105,7 @@ pub async fn configure(
         enum Page {
             Model,
             Access,
+            Channels,
             Review,
         }
         let mut prompts = Prompts::new().await?;
@@ -143,10 +145,12 @@ pub async fn configure(
         loop {
             match page {
                 Page::Model => {
+                    let channel_settings = config.channels.clone();
                     discovered = wizard
                         .run(&mut prompts, &mut config, &mut values, advanced)
                         .await?;
-                    page = if scope { Page::Access } else { Page::Review };
+                    config.channels = channel_settings;
+                    page = if scope { Page::Access } else { Page::Channels };
                 }
                 Page::Access => {
                     match prompts.access_scope(lan) {
@@ -191,8 +195,15 @@ pub async fn configure(
                     }
                     config.client.server_url = kyler_config::web::connect_url(config.server.bind);
 
-                    page = Page::Review;
+                    page = Page::Channels;
                 }
+                Page::Channels => match channels::run(&mut prompts, &mut config) {
+                    Ok(()) => page = Page::Review,
+                    Err(e) if e.code == input::BACK => {
+                        page = if scope { Page::Access } else { Page::Model };
+                    }
+                    Err(e) => return Err(e),
+                },
                 Page::Review => {
                     models::review(
                         &config,
@@ -215,6 +226,8 @@ pub async fn configure(
                     if scope {
                         choices.push("Edit access scope".into());
                     }
+                    let edit_channels = choices.len();
+                    choices.push("Edit channels".into());
                     let save_only = can_start.then_some(choices.len());
                     if can_start {
                         choices.push("Save without starting".into());
@@ -230,10 +243,11 @@ pub async fn configure(
                             page = Page::Model;
                         }
                         Ok(2) if scope => page = Page::Access,
+                        Ok(index) if index == edit_channels => page = Page::Channels,
                         Ok(index) if Some(index) == save_only => break,
                         Ok(_) => return Err(input::cancelled()),
                         Err(e) if e.code == input::BACK => {
-                            page = if scope { Page::Access } else { Page::Model };
+                            page = Page::Channels;
                         }
                         Err(e) => return Err(e),
                     }
@@ -271,10 +285,12 @@ pub async fn configure(
             .validate()
             .map_err(|error| CliError::new(2, format!("Configuration not saved: {error}")))?;
     }
+    channels::validate(&config)?;
     super::token::configure(&mut config).await?;
     let root = values
         .as_table_mut()
         .ok_or_else(|| CliError::new(2, "Configuration must be a TOML table"))?;
+    channels::write(&config, root);
     table(root, "server")?.insert(
         "access_token".into(),
         config.server.access_token.expose().into(),
@@ -556,6 +572,7 @@ pub fn apply(explicit: Option<&Path>, candidate: &Path) -> Result<()> {
     config
         .validate()
         .map_err(|e| CliError::new(2, e.to_string()))?;
+    channels::validate(&config)?;
     let bytes = std::fs::read(candidate).map_err(CliError::io)?;
     std::fs::create_dir_all(
         path.parent()

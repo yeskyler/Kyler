@@ -269,7 +269,7 @@ pub async fn prepare(
             &kyler_protocol::api::gateway::Principal::local(),
             kyler_protocol::api::gateway::CreateToken {
                 name: "startup-fixture".into(),
-                role: kyler_protocol::api::gateway::Role::Admin,
+                role: kyler_protocol::api::gateway::Role::Owner,
                 scope: Default::default(),
                 expires_at: None,
             },

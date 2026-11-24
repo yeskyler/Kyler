@@ -196,6 +196,21 @@ impl Prompts {
         )
         .map(|n| n == 1)
     }
+    pub fn channel_value(&mut self, label: &str, default: &str, required: bool) -> Result<String> {
+        Input::new(label)
+            .default_input(default)
+            .validate(move |value: &String| {
+                if required && value.trim().is_empty() {
+                    Err("This value is required.")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact::<String>()
+            .map(|value| value.trim().to_owned())
+            .map_err(prompt_error)
+    }
+
     pub fn key(
         &mut self,
         label: &str,
@@ -207,7 +222,7 @@ impl Prompts {
         } else if optional {
             "Hidden · Enter skips this field"
         } else {
-            "Hidden · API key required"
+            "Hidden · Value required"
         };
         loop {
             let value = read_credential(label, hint)?;
@@ -216,7 +231,7 @@ impl Prompts {
                     .map(SecretString::new)
                     .map_err(|_| "Saved key is invalid. Paste a replacement."),
                 Ok("") if optional => Ok(SecretString::default()),
-                Ok("") => Err("An API key is required."),
+                Ok("") => Err("A credential is required."),
                 Ok(value) => Ok(SecretString::new(value)),
                 Err(error) => Err(error),
             };

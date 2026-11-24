@@ -1,6 +1,6 @@
 mod support;
 
-use std::{sync::atomic::Ordering, time::Duration};
+use std::time::Duration;
 
 use reqwest::Client;
 use serde_json::{Value, json};
@@ -8,141 +8,6 @@ use serde_json::{Value, json};
 use kyler_gateway::security::Security;
 use kyler_protocol::api::gateway::{CreateToken, Principal, Role, Scope};
 use support::Harness;
-
-struct NoCommands;
-#[async_trait::async_trait]
-impl kyler_core::sandbox::Sandbox for NoCommands {
-    async fn run(
-        &self,
-        _: kyler_core::sandbox::SandboxRequest,
-    ) -> anyhow::Result<kyler_core::sandbox::WorkerResponse> {
-        anyhow::bail!("No commands are used by this fixture")
-    }
-}
-
-#[tokio::test]
-async fn workspace_grants_do_not_share_session_ownership_or_allow_other_directories() {
-    let mut h = Harness::new(Default::default()).await;
-    let root = tempfile::tempdir().unwrap();
-    let project = root.path().join("project");
-    let other = root.path().join("other");
-    std::fs::create_dir(&project).unwrap();
-    std::fs::create_dir(&other).unwrap();
-    let mut policy = kyler_core::SandboxPolicy::workspace_write("gateway-project", &project);
-    policy.filesystem.readwrite_paths.push(other.clone());
-    let environment = kyler_core::ExecutionEnvironment::new(
-        &project,
-        &project,
-        policy,
-        std::env::current_exe().unwrap(),
-        std::sync::Arc::new(NoCommands),
-    )
-    .unwrap();
-    h.agent = std::sync::Arc::new(
-        h.agent
-            .as_ref()
-            .clone()
-            .with_environment(std::sync::Arc::new(environment)),
-    );
-    h.restart().await;
-    let security = Security::open(h.store.directory()).unwrap();
-    let mut clients = Vec::new();
-    for _ in 0..2 {
-        let issued = security
-            .issue(
-                &Principal::local(),
-                CreateToken {
-                    name: "project-worker".into(),
-                    role: Role::Member,
-                    scope: Scope {
-                        workspaces: vec![project.to_str().unwrap().into()],
-                        ..Default::default()
-                    },
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
-        clients.push(
-            Client::builder()
-                .default_headers(
-                    [(
-                        reqwest::header::AUTHORIZATION,
-                        format!("Bearer {}", issued.secret).parse().unwrap(),
-                    )]
-                    .into_iter()
-                    .collect(),
-                )
-                .build()
-                .unwrap(),
-        );
-    }
-    let created: Value = clients[0]
-        .post(format!("{}/v1/sessions", h.url))
-        .json(&json!({"cwd":project,"workspace_mode":"project"}))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let id = created["session_id"].as_str().unwrap();
-    assert_eq!(
-        clients[0]
-            .get(format!("{}/v1/sessions/{id}/history", h.url))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        200
-    );
-    assert_eq!(
-        clients[1]
-            .get(format!("{}/v1/sessions/{id}/history", h.url))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        404
-    );
-    assert_eq!(
-        clients[0]
-            .post(format!("{}/v1/sessions", h.url))
-            .json(&json!({"cwd":other,"workspace_mode":"project"}))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        403
-    );
-    let private: Value = clients[0]
-        .post(format!("{}/v1/sessions", h.url))
-        .json(&json!({"cwd":project,"workspace_mode":"isolated"}))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(
-        clients[0]
-            .get(format!(
-                "{}/v1/sessions/{}/history",
-                h.url,
-                private["session_id"].as_str().unwrap()
-            ))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        200
-    );
-    h.close().await;
-}
 
 async fn credential(h: &Harness, role: Role, sessions: Vec<String>) -> (String, Client) {
     let security = Security::open(h.store.directory()).unwrap();
@@ -214,15 +79,47 @@ async fn legacy_and_anonymous_access_are_removed_and_denials_are_audited() {
 }
 
 #[tokio::test]
-async fn resource_authorization_covers_listing_history_tools_and_sensitive_operations() {
+async fn legacy_roles_cannot_authenticate_or_be_issued_or_rotated() {
     let mut h = Harness::new(Default::default()).await;
-    let shared = h.session().await;
-    let other = h.session().await;
-    let (_, viewer) = credential(&h, Role::Viewer, vec![shared.clone()]).await;
-    let (_, member) = credential(&h, Role::Member, vec![shared.clone()]).await;
-    let (_, stranger) = credential(&h, Role::Member, vec![]).await;
-    let page: Value = viewer
-        .get(format!("{}/v1/sessions", h.url))
+    for (role, name) in [
+        (Role::Admin, "admin"),
+        (Role::Member, "member"),
+        (Role::Viewer, "viewer"),
+    ] {
+        let (secret, legacy) = credential(&h, role, vec![]).await;
+        let id = Security::token_id(&secret).unwrap();
+        assert_eq!(
+            legacy
+                .get(format!("{}/v1/gateway/identity", h.url))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+        assert_eq!(
+            h.client
+                .post(format!("{}/v1/gateway/tokens", h.url))
+                .json(&json!({"name":"legacy","role":name}))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+        assert_eq!(
+            h.client
+                .post(format!("{}/v1/gateway/tokens/{id}/rotate", h.url))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    let listed: Vec<Value> = h
+        .client
+        .get(format!("{}/v1/gateway/tokens", h.url))
         .send()
         .await
         .unwrap()
@@ -231,70 +128,8 @@ async fn resource_authorization_covers_listing_history_tools_and_sensitive_opera
         .json()
         .await
         .unwrap();
-    assert_eq!(page["sessions"].as_array().unwrap().len(), 1);
-    assert_eq!(page["sessions"][0]["session_id"], shared);
-    for suffix in [
-        "",
-        "/history",
-        "/attachments",
-        "/workspace-files",
-        "/tool-calls/call",
-        "/usage",
-        "/rollout",
-    ] {
-        assert_eq!(
-            viewer
-                .get(format!("{}/v1/sessions/{other}{suffix}", h.url))
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            404,
-            "{suffix}"
-        );
-    }
-    assert_eq!(
-        stranger
-            .get(format!("{}/v1/sessions/{shared}", h.url))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        404
-    );
-    assert_eq!(
-        viewer
-            .post(format!("{}/v1/sessions/{shared}/runs", h.url))
-            .json(&json!({"input":"forbidden"}))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        403
-    );
-    for path in ["gateway/tokens", "plugins/connectors", "models/settings"] {
-        assert_eq!(
-            member
-                .get(format!("{}/v1/{path}", h.url))
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            403,
-            "{path}"
-        );
-    }
-    assert_eq!(
-        member
-            .put(format!("{}/v1/sessions/{shared}/permissions", h.url))
-            .json(&json!({"mode":"full_access","confirm_full_access":true}))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        403
-    );
-    assert_eq!(h.calls.load(Ordering::SeqCst), 0);
+    assert!(!listed.is_empty());
+    assert!(listed.iter().all(|token| token["role"] == "owner"));
     h.close().await;
 }
 
@@ -302,9 +137,8 @@ async fn resource_authorization_covers_listing_history_tools_and_sensitive_opera
 async fn revoked_tokens_close_sse_without_cancelling_admitted_work() {
     let mut h = Harness::new(Default::default()).await;
     let session = h.session().await;
-    let (secret, member) = credential(&h, Role::Member, vec![session.clone()]).await;
-    let (_, other) = credential(&h, Role::Member, vec![session.clone()]).await;
-    let accepted: Value = member
+    let (secret, owner) = credential(&h, Role::Owner, vec![]).await;
+    let accepted: Value = owner
         .post(format!("{}/v1/sessions/{session}/runs", h.url))
         .json(&json!({"input":"wait-before-reply","client_request_id":"same-client-key"}))
         .send()
@@ -316,16 +150,7 @@ async fn revoked_tokens_close_sse_without_cancelling_admitted_work() {
         .await
         .unwrap();
     let run = accepted["run_id"].as_str().unwrap();
-    assert_eq!(
-        other
-            .post(format!("{}/v1/runs/{run}/cancel", h.url))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        403
-    );
-    let mut stream = member
+    let mut stream = owner
         .get(format!("{}/v1/runs/{run}/events", h.url))
         .send()
         .await
@@ -342,7 +167,7 @@ async fn revoked_tokens_close_sse_without_cancelling_admitted_work() {
     .await
     .unwrap();
     assert_eq!(
-        member
+        owner
             .get(format!("{}/v1/runs/{run}", h.url))
             .send()
             .await
@@ -362,11 +187,10 @@ async fn revoked_tokens_close_sse_without_cancelling_admitted_work() {
 }
 
 #[tokio::test]
-async fn rotation_returns_a_secret_once_and_preserves_resource_grants() {
+async fn rotation_returns_a_secret_once_and_preserves_owner_identity() {
     let mut h = Harness::new(Default::default()).await;
     let session = h.session().await;
-    let request =
-        json!({"name":"reader","role":"viewer","scope":{"sessions":[session]},"expires_at":null});
+    let request = json!({"name":"operator"});
     let created: Value = h
         .client
         .post(format!("{}/v1/gateway/tokens", h.url))
@@ -379,6 +203,7 @@ async fn rotation_returns_a_secret_once_and_preserves_resource_grants() {
         .json()
         .await
         .unwrap();
+    assert_eq!(created["info"]["role"], "owner");
     let id = created["info"]["id"].as_str().unwrap();
     let old = created["token"].as_str().unwrap();
     let rotated: Value = h
@@ -445,11 +270,11 @@ async fn rotation_returns_a_secret_once_and_preserves_resource_grants() {
 async fn admission_keys_are_namespaced_by_identity_and_survive_rotation() {
     let mut h = Harness::new(Default::default()).await;
     let session = h.session().await;
-    let (secret, member) = credential(&h, Role::Member, vec![session.clone()]).await;
-    let (_, other) = credential(&h, Role::Member, vec![session.clone()]).await;
+    let (secret, owner) = credential(&h, Role::Owner, vec![]).await;
+    let (_, other) = credential(&h, Role::Owner, vec![]).await;
     let url = format!("{}/v1/sessions/{session}/runs", h.url);
     let request = json!({"input":"wait-before-reply","client_request_id":"stable"});
-    let first: Value = member
+    let first: Value = owner
         .post(&url)
         .json(&request)
         .send()

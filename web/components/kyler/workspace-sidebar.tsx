@@ -13,6 +13,7 @@ import {
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react";
+import { ChannelsDialog } from "./channels-dialog";
 import { BrandMark } from "./brand-mark";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -243,6 +244,7 @@ export function WorkspaceSidebar({
           <CalendarClockIcon className="size-4" />
           Automations
         </Button>
+        <ChannelsDialog workspaces={workspaces} defaultWorkspace={defaultWorkspace} />
       </nav>
       <div className="mt-8 mb-3 flex items-center justify-between pl-3 pr-1">
         <span className="text-xs font-medium text-muted-foreground">Workspaces</span>

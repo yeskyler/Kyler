@@ -21,6 +21,7 @@ kyler-client.workspace = true
 kyler-tui.workspace = true
 kyler-core.workspace = true
 kyler-config.workspace = true
+kyler-channel.workspace = true
 kyler-protocol.workspace = true
 kyler-server.workspace = true
 kyler-logging.workspace = true

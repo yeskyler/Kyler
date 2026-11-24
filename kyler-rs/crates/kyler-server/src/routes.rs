@@ -69,6 +69,13 @@ pub fn router(state: AppState) -> Router {
             post(crate::gateway::rotate),
         )
         .route("/v1/gateway/audit", get(crate::gateway::audit))
+        .route("/v1/channels", get(crate::channels::catalog))
+        .route("/v1/channels/{provider}", get(crate::channels::status))
+        .route("/v1/channels/{provider}/pair", post(crate::channels::pair))
+        .route(
+            "/v1/channels/{provider}/{chat}",
+            axum::routing::delete(crate::channels::remove),
+        )
         .route(
             "/v1/preferences",
             get(preferences::get).put(preferences::update),
@@ -282,6 +289,22 @@ pub fn router(state: AppState) -> Router {
             crate::gateway::access,
         ))
         .layer(cors)
+        .merge(
+            Router::new().route(
+                "/webhooks/channels/{provider}",
+                post(crate::channels::webhook)
+                    .get(crate::channels::verify_subscription)
+                    .layer(DefaultBodyLimit::max(256 * 1024)),
+            ),
+        )
+        .merge(
+            Router::new()
+                .route("/channel-api/replies", get(crate::channels::pull_reply))
+                .route(
+                    "/channel-api/replies/{id}",
+                    axum::routing::delete(crate::channels::acknowledge_reply),
+                ),
+        )
         .with_state(state)
 }
 

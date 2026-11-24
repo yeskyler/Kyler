@@ -58,164 +58,26 @@ pub(crate) async fn session_allowed(
         .await
         .map_err(ApiError::storage)
 }
-fn permitted(principal: &Principal, method: &Method, route: &str) -> bool {
-    if route.starts_with("/v1/gateway/tokens") {
-        return principal.role == Role::Owner;
-    }
-    if route == "/v1/gateway/audit" {
-        return principal.role.administrative();
-    }
-    if principal.role.administrative() {
-        return true;
-    }
-    if route == "/v1/gateway/identity" {
-        return method == Method::GET;
-    }
-    if ["/v1/info", "/v1/models", "/v1/workspaces", "/v1/sessions"].contains(&route)
-        && method == Method::GET
-    {
-        return true;
-    }
-    if route == "/v1/sessions" && method == Method::POST {
-        return principal.role.executes();
-    }
-    if route.starts_with("/v1/sessions/") {
-        if route.ends_with("/model/settings") {
-            return false;
-        }
-        if method == Method::GET {
-            return matches!(
-                route,
-                "/v1/sessions/{id}"
-                    | "/v1/sessions/{id}/active-run"
-                    | "/v1/sessions/{id}/history"
-                    | "/v1/sessions/{id}/messages"
-                    | "/v1/sessions/{id}/workspace-files"
-                    | "/v1/sessions/{id}/artifacts"
-                    | "/v1/sessions/{session}/artifacts/{id}/content"
-                    | "/v1/sessions/{id}/processes"
-                    | "/v1/sessions/{session}/processes/{id}"
-                    | "/v1/sessions/{session}/processes/{id}/events"
-                    | "/v1/sessions/{session}/tool-calls/{call}"
-                    | "/v1/sessions/{id}/attachments"
-                    | "/v1/sessions/{session}/attachments/{id}"
-                    | "/v1/sessions/{session}/attachments/{id}/content"
-                    | "/v1/sessions/{id}/memory"
-                    | "/v1/sessions/{id}/memory/entries"
-                    | "/v1/sessions/{id}/memory/entry"
-                    | "/v1/sessions/{id}/memory/inspect"
-                    | "/v1/sessions/{id}/tasks"
-                    | "/v1/sessions/{session}/tasks/{kind}/{id}"
-                    | "/v1/sessions/{id}/questions"
-                    | "/v1/sessions/{id}/permissions"
-                    | "/v1/sessions/{id}/approvals"
-                    | "/v1/sessions/{id}/model"
-                    | "/v1/sessions/{id}/thinking"
-                    | "/v1/sessions/{id}/skills"
-                    | "/v1/sessions/{id}/skills/{skill}"
-                    | "/v1/sessions/{id}/skills/drafts"
-                    | "/v1/sessions/{session}/skills/drafts/{name}"
-                    | "/v1/sessions/{id}/usage"
-                    | "/v1/sessions/{id}/rollout"
-                    | "/v1/sessions/{id}/rollout/{seq}"
-                    | "/v1/sessions/{id}/analytics"
-                    | "/v1/sessions/{id}/context"
-                    | "/v1/sessions/{id}/runs"
-            );
-        }
-        if !principal.role.executes() {
-            return false;
-        }
-        return matches!(
-            (method.as_str(), route),
-            (
-                "POST",
-                "/v1/sessions/{id}/runs" | "/v1/sessions/{id}/attachments"
-            ) | (
-                "PUT",
-                "/v1/sessions/{id}/model" | "/v1/sessions/{id}/thinking"
-            ) | (
-                "DELETE",
-                "/v1/sessions/{id}" | "/v1/sessions/{session}/attachments/{id}"
-            ) | ("POST", "/v1/sessions/{session}/questions/{id}/response")
-        );
-    }
-    route.starts_with("/v1/runs/")
-        && ((method == Method::GET && matches!(route, "/v1/runs/{id}" | "/v1/runs/{id}/events"))
-            || (method == Method::POST
-                && route == "/v1/runs/{id}/cancel"
-                && principal.role.executes()))
-}
 async fn authorize(
     state: &AppState,
     principal: &Principal,
-    method: &Method,
     route: &str,
     params: &HashMap<String, String>,
 ) -> ApiResult<()> {
-    if !permitted(principal, method, route) {
-        return Err(forbidden());
-    }
-    if route.starts_with("/v1/sessions/") {
-        let id = params
+    let session = if route.starts_with("/v1/sessions/") {
+        params
             .get("session")
             .or_else(|| params.get("id"))
-            .ok_or_else(forbidden)?;
-        if !session_allowed(state, principal, id).await? {
-            return Err(ApiError::missing());
-        }
-        if !principal.role.administrative()
-            && method == Method::POST
-            && route == "/v1/sessions/{session}/questions/{id}/response"
-        {
-            let question = state
-                .runs
-                .questions
-                .list(id)
-                .into_iter()
-                .find(|question| Some(&question.id) == params.get("id"))
-                .ok_or_else(ApiError::missing)?;
-            let run = {
-                let registry = state.runs.registry.lock().await;
-                registry.runs.values().find_map(|entry| {
-                    let info = entry.info();
-                    (info.session_id == *id
-                        && info.execution_id.as_deref() == Some(question.execution_id.as_str()))
-                    .then_some(info.run_id)
-                })
-            };
-            let Some(run) = run else {
-                return Err(forbidden());
-            };
-            if !state
-                .runs
-                .security
-                .store
-                .owns("run".into(), run, principal.id.clone())
-                .await
-                .map_err(ApiError::storage)?
-            {
-                return Err(forbidden());
-            }
-        }
+            .ok_or_else(forbidden)?
+            .clone()
     } else if route.starts_with("/v1/runs/") {
         let id = params.get("id").ok_or_else(forbidden)?;
-        let info = state.runs.entry(id).await?.info();
-        if !session_allowed(state, principal, &info.session_id).await? {
-            return Err(ApiError::missing());
-        }
-        if method == Method::POST
-            && !principal.role.administrative()
-            && !state
-                .runs
-                .security
-                .store
-                .owns("run".into(), id.clone(), principal.id.clone())
-                .await
-                .map_err(ApiError::storage)?
-        {
-            return Err(forbidden());
-        }
+        state.runs.entry(id).await?.info().session_id
+    } else {
+        return Ok(());
+    };
+    if !session_allowed(state, principal, &session).await? {
+        return Err(ApiError::missing());
     }
     Ok(())
 }
@@ -315,7 +177,7 @@ pub async fn access(State(state): State<AppState>, request: Request, next: Next)
         )
         .into_response()
     } else if let Some(principal) = principal {
-        match authorize(&state, &principal, &parts.method, &route, &params).await {
+        match authorize(&state, &principal, &route, &params).await {
             Err(error) => error.into_response(),
             Ok(()) if *state.runs.stopping.borrow() => ApiError::stopping().into_response(),
             Ok(()) => {
@@ -395,7 +257,14 @@ pub async fn tokens(State(state): State<AppState>) -> ApiResult<Json<Vec<TokenIn
         .store
         .list()
         .await
-        .map(Json)
+        .map(|tokens| {
+            Json(
+                tokens
+                    .into_iter()
+                    .filter(|token| token.role == Role::Owner)
+                    .collect(),
+            )
+        })
         .map_err(ApiError::storage)
 }
 pub async fn issue(
@@ -403,6 +272,9 @@ pub async fn issue(
     Extension(principal): Extension<Principal>,
     Json(request): Json<CreateToken>,
 ) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+    if request.role != Role::Owner {
+        return Err(ApiError::bad("Only owner tokens can be created."));
+    }
     let token = state
         .runs
         .security
@@ -443,7 +315,7 @@ pub async fn rotate(
         .await
         .map_err(|_| {
             ApiError::bad(
-                "Token cannot be rotated; check its ID, revocation, expiry and workspace binding.",
+                "Token cannot be rotated; check its ID, owner role, revocation and expiry.",
             )
         })?;
     Ok(Json(json!({"token":token.secret,"info":token.info})))
@@ -471,43 +343,4 @@ pub async fn audit(
         .map_err(ApiError::storage)?;
     let next = records.last().map(|record| record.id);
     Ok(Json(json!({"records":records,"next_before":next})))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scoped_roles_require_explicit_route_authorization() {
-        let mut principal = Principal::local();
-        for role in [Role::Member, Role::Viewer] {
-            principal.role = role;
-            assert!(permitted(
-                &principal,
-                &Method::GET,
-                "/v1/sessions/{id}/history"
-            ));
-            for route in [
-                "/v1/sessions/{id}/future-operation",
-                "/v1/runs/{id}/future-operation",
-                "/v1/sessions/{id}/model/settings",
-                "/v1/sessions/{id}/mcp",
-                "/v1/gateway/tokens",
-            ] {
-                assert!(
-                    !permitted(&principal, &Method::GET, route),
-                    "{role:?}: {route}"
-                );
-            }
-            assert_eq!(
-                permitted(&principal, &Method::POST, "/v1/sessions/{id}/runs"),
-                role == Role::Member
-            );
-            assert!(!permitted(
-                &principal,
-                &Method::PUT,
-                "/v1/sessions/{id}/permissions"
-            ));
-        }
-    }
 }

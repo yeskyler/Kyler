@@ -240,6 +240,17 @@ untrusted networks.
 Non-loopback backend services restrict project selection to the configured default
 workspace. Local project selection requires a loopback backend listener.
 
+### Channels
+
+Choose **Skip for now** to complete setup without a channel, or **Configure
+channels** to connect one or more platforms. Setup saves the required platform
+fields in the private configuration. To add or edit a channel later, run
+`kyler configure` again and open **Channels**.
+
+In Kyler Web, **Channels** lists every platform. Open a platform to view its
+setup requirements or pair a chat with a workspace. See [Channels](channels.md)
+for provider-specific setup.
+
 ### Service status and management
 
 The installer uses a compact, left-aligned layout without decorative blank lines,

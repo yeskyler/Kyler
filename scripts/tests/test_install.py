@@ -485,7 +485,7 @@ else:
         environment["KYLER_SERVER_BIND"] = "127.0.0.1:0"
         environment["KYLER_WEB_ENABLED"] = "false"
         provision = subprocess.run(
-            [str(binary), "token", "create", "--name", "installer-test", "--role", "owner"],
+            [str(binary), "token", "create", "--name", "installer-test"],
             cwd=self.root, env=environment, capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(provision.returncode, 0, provision.stderr)
@@ -625,7 +625,7 @@ else:
                         addresses.append("127.0.0.1:" + str(listener.getsockname()[1]))
             if complete and expected == 0:
                 answer={"1":b"This machine only\r","2":b"Local network\r","":b"\r"}[access_scope]
-                replies += [("◆  Access scope".encode(), answer),("◆  Finish setup".encode(),b"\r")]
+                replies += [("◆  Access scope".encode(), answer), ("◆  Channels".encode(), b"\r"), ("◆  Finish setup".encode(), b"\r")]
 
         if after_install and not keep_config:
             import re
@@ -749,7 +749,7 @@ else:
         output = self.interactive_install([
             (b"[2] API URL", b"http://127.0.0.1:1/v1\r"),
             (b"[3] API key", b"COLOR_TEST_KEY\r"),
-            (b"[4] Model", b"\r"),
+            (b"[4] Model", b"fixture-model\r"),
         ], colored=True)
         self.assertNotIn(b"COLOR_TEST_KEY", output)
         styles = re.findall(rb"\x1b\[([0-9;]*)m", output)
@@ -779,6 +779,32 @@ else:
             self.assertIn(marker, output)
 
     @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
+    def test_setup_configures_a_channel_and_hides_its_token(self):
+        secret = b"123:CHANNEL_TEST_SECRET"
+        output = self.interactive_install([
+            ("◆  Provider".encode(), "Custom（OpenAI Completion）\r".encode()),
+            ("◆  API URL".encode(), b"http://127.0.0.1:1/v1\r"),
+            ("◆  API key".encode(), b"MODEL_TEST_KEY\r"),
+            ("◆  Model".encode(), b"Enter model ID manually\r"),
+            ("◆  Model ID".encode(), b"fixture-model\r"),
+            ("◆  Access scope".encode(), b"This machine only\r"),
+            ("◆  Channels".encode(), b"Configure channels\r"),
+            ("◆  Configure a channel".encode(), b"Telegram\r"),
+            ("◆  Bot Token".encode(), secret + b"\r"),
+            ("◆  Kyler Web origin".encode(), b"\r"),
+            ("◆  Configure a channel".encode(), b"Continue setup\r"),
+            ("◆  Finish setup".encode(), b"Edit model\r"),
+            ("◆  Model".encode(), b"\r"),
+            ("◆  Access scope".encode(), b"\r"),
+            ("◆  Channels".encode(), b"Keep current channels\r"),
+            ("◆  Finish setup".encode(), b"\r"),
+        ], native=True, direct=True, complete=False)
+        config = (self.home / ".kyler/config.toml").read_bytes()
+        self.assertIn(b"[channels]", config)
+        self.assertIn(b'KYLER_TELEGRAM_BOT_TOKEN = "' + secret + b'"', config)
+        self.assertNotIn(secret, output)
+
+    @unittest.skipUnless(os.name == "posix" and KYLER_BINARY.is_file(), "requires PTY and kyler binary")
     def test_cancelled_first_install_does_not_publish_default_configuration(self):
         self.interactive_install([
             ("◆  Provider".encode(), "Custom（OpenAI Completion）\r".encode()),
@@ -800,9 +826,11 @@ else:
                 config.write_text('[llm]\nadapter="generic"\ndiscover_models=false\nmodel="fixture"\nbase_url="http://127.0.0.1:1/v1"\napi_key="OFFICIAL_FIXTURE_KEY"\n')
                 output = self.interactive_install([
                     ("◆  Provider".encode(), label+b"\r"),
-                    ("◆  API key".encode(), b"\r"),
-                    ("◆  Model".encode(), b"\r"),
+                    ("◆  API key".encode(), b"OFFICIAL_FIXTURE_KEY\r"),
+                    ("◆  Model".encode(), b"Enter model ID manually\r"),
+                    ("◆  Model ID".encode(), b"fixture\r"),
                     ("◆  Access scope".encode(), b"\r"),
+                    ("◆  Channels".encode(), b"\r"),
                     ("◆  Finish setup".encode(), b"\r"),
                 ], native=True, direct=True, complete=False)
                 self.assertNotIn("◆  API URL".encode(), output)
@@ -820,14 +848,17 @@ else:
         output = self.interactive_install([
             ("◆  Provider".encode(), b"\r"),
             ("◆  API URL".encode(), b"http://127.0.0.1:3/v1\r"),
-            ("◆  API key".encode(), b"\r"),
+            ("◆  API key".encode(), b"KEPT_WIZARD_KEY\r"),
             ("◆  Model".encode(), b"Back\r"),
             ("◆  API key".encode(), b"\r"),
             ("◆  Model".encode(), b"Enter model ID manually\r"),
             ("◆  Model ID".encode(), b"changed-model\r"),
             ("◆  Access scope".encode(), b"\x1b[B\r"),
+            ("◆  Channels".encode(), b"\r"),
             ("◆  Finish setup".encode(), b"Back\r"),
+            ("◆  Channels".encode(), b"Back\r"),
             ("◆  Access scope".encode(), b"\x1b[A\r"),
+            ("◆  Channels".encode(), b"\r"),
             ("◆  Finish setup".encode(), b"\r"),
         ], native=True, direct=True, complete=False)
         saved=config.read_text()
@@ -851,6 +882,7 @@ else:
             ("◆  API key".encode(),b"\r"),
             ("◆  Model".encode(),b"\r"),
             ("◆  Access scope".encode(),b"\r"),
+            ("◆  Channels".encode(), b"\r"),
             ("◆  Finish setup".encode(),b"\x03"),
         ], native=True, direct=True, complete=False, expected=130)
         self.assertEqual(config.read_bytes(),before)
@@ -919,7 +951,7 @@ else:
             self.assertRegex(plain, rb"[0-9]+\. retry-model")
             self.assertNotRegex(plain, rb"(?:^|[\r\n])[ \t]*[\^v] [0-9]+\)")
             self.assertIn("│".encode(), plain)
-            self.assertIn("○ OpenAI".encode(), plain)
+            self.assertIn("● Custom（OpenAI Completion）".encode(), plain)
         finally:
             server.shutdown();server.server_close();thread.join(timeout=2)
 
@@ -1378,9 +1410,9 @@ class BundleTests(unittest.TestCase):
         output = InstallTests.interactive_install(self, [
             (b"[2] API URL [https://api.siliconflow.cn/v1]", b"http://127.0.0.1:1/v1\n"),
             (b"[3] API key", b"WIZARD_TEST_KEY\r"),
-            (b"[4] Model [deepseek-ai/DeepSeek-V4-Flash]", b"\n"),
+            (b"[4] Model [deepseek-ai/DeepSeek-V4-Flash]", b"deepseek-ai/DeepSeek-V4-Flash\r"),
         ], bundle=self.bundle("interactive"))
-        titles = [b"Review setup", b"Start services"]
+        titles = [b"Channels", b"Review setup", b"Start services"]
         self.assertEqual([output.index(title) for title in titles], sorted(output.index(title) for title in titles))
         self.assertNotIn(b"Local access:", output)
         self.assertIn(b"OpenAI", output)
@@ -1407,7 +1439,7 @@ class BundleTests(unittest.TestCase):
         output = InstallTests.interactive_install(self, [
             (b"[2] API URL", b"http://127.0.0.1:1/v1\r"),
             (b"[3] API key", b"CONFIGURE_TEST_KEY\r"),
-            (b"[4] Model", b"\r"),
+            (b"[4] Model", b"fixture-model\r"),
         ], direct=True, configure_binary=self.binary)
         self.assertIn(b"Save and start", output)
         self.assertNotIn(b"CONFIGURE_TEST_KEY", output)
@@ -1419,6 +1451,7 @@ class BundleTests(unittest.TestCase):
             ("◆  API key".encode(), b"\r"),
             ("◆  Model".encode(), b"\r"),
             ("◆  Access scope".encode(), b"\r"),
+            ("◆  Channels".encode(), b"\r"),
             ("◆  Finish setup".encode(), b"Save without starting\r"),
         ], native=True, complete=False, direct=True, configure_binary=self.binary)
         self.assertIn("◇  Configure Kyler".encode(), output)
@@ -1431,7 +1464,7 @@ class BundleTests(unittest.TestCase):
         output = InstallTests.interactive_install(self, [
             (b"[2] API URL", b"http://127.0.0.1:1/v1\r"),
             (b"[3] API key", b"FINAL_STEP_TEST_KEY\r"),
-            (b"[4] Model", b"\r"),
+            (b"[4] Model", b"fixture-model\r"),
         ], bundle=self.bundle("final-configuration"), after_install=True)
         labels = ["◇  Prepare package", "◇  Check environment", "◇  Install Kyler", "◆  Configure Kyler"]
         positions = [output.index(label.encode()) for label in labels]

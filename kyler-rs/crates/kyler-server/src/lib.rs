@@ -1,5 +1,6 @@
 //! HTTP API and bounded, reconnectable SSE over Kyler's asynchronous runtime.
 mod automations;
+mod channels;
 pub mod error;
 pub mod routes;
 pub mod runs;
