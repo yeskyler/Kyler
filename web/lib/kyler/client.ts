@@ -1,3 +1,4 @@
+import { skillReferences } from "./composer-skills.ts";
 import { requestFailureMessage, type RequestFailure } from "./errors.ts";
 import { randomUuid } from "./random-uuid.ts";
 import { isSubagentTool, upsertSubagent } from "./subagents.ts";
@@ -220,6 +221,7 @@ export function chatAdapter(
                 ? { input: "", command }
                 : {
                     input,
+                    skills: skillReferences(runConfig?.custom?.kylerSkills),
                     attachment_ids:
                       last?.role === "user" ? last.attachments.map((item) => item.id) : [],
                   }),

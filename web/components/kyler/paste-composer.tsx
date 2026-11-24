@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  cloneElement,
+  isValidElement,
   createContext,
   useContext,
   useRef,
@@ -8,9 +10,11 @@ import {
   type ComponentProps,
   type ClipboardEvent,
 } from "react";
-import { ComposerPrimitive, useAui } from "@assistant-ui/react";
+import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { AlertCircleIcon, FileTextIcon, LoaderCircleIcon, XIcon } from "lucide-react";
 import { attachPastedText, shouldAttachPastedText } from "@/lib/kyler/pasted-document";
+
+import { composerSkills } from "@/lib/kyler/composer-skills";
 
 const PasteContext = createContext({
   busy: false,
@@ -91,11 +95,77 @@ export function PasteComposerInput(props: ComponentProps<typeof ComposerPrimitiv
       }
     })();
   }
-  return <ComposerPrimitive.Input {...props} onPaste={onPaste} />;
+  return (
+    <ComposerPrimitive.Input
+      {...props}
+      onPaste={onPaste}
+      onKeyDown={(event) => {
+        props.onKeyDown?.(event);
+        if (
+          event.defaultPrevented ||
+          event.nativeEvent.isComposing ||
+          event.keyCode === 229 ||
+          event.key !== "Enter" ||
+          event.shiftKey ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          paste.busy
+        )
+          return;
+        const composer = aui.composer();
+        const state = composer.getState();
+        if (
+          !state.text.trim() &&
+          !state.attachments.length &&
+          composerSkills(state.runConfig.custom?.kylerSkills).length
+        ) {
+          event.preventDefault();
+          composer.setText("Use the selected skills.");
+          composer.send();
+        }
+      }}
+    />
+  );
 }
 
 export function PasteComposerSend(props: ComponentProps<typeof ComposerPrimitive.Send>) {
   const { busy } = useContext(PasteContext);
+  const aui = useAui();
+  const skillOnly = useAuiState(
+    (state) =>
+      !state.composer.text.trim() &&
+      state.composer.attachments.length === 0 &&
+      composerSkills(state.composer.runConfig.custom?.kylerSkills).length > 0,
+  );
+  const blocked = useAuiState(
+    (state) =>
+      state.thread.isDisabled ||
+      state.thread.isSendDisabled ||
+      state.thread.isRunning ||
+      !state.composer.isEditing ||
+      state.composer.submission !== undefined,
+  );
+  if (
+    skillOnly &&
+    isValidElement<{
+      disabled?: boolean;
+      onClick?: ComponentProps<"button">["onClick"];
+      children?: React.ReactNode;
+    }>(props.render)
+  ) {
+    return cloneElement(props.render, {
+      disabled: busy || props.disabled || blocked,
+      onClick: (event) => {
+        props.onClick?.(event);
+        if (event.defaultPrevented || busy || blocked) return;
+        const composer = aui.composer();
+        composer.setText("Use the selected skills.");
+        composer.send();
+      },
+      children: props.children,
+    });
+  }
   return <ComposerPrimitive.Send {...props} disabled={busy || props.disabled} />;
 }
 

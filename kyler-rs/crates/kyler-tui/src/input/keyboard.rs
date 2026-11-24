@@ -121,6 +121,10 @@ pub(super) fn handle(
         }
         KeyCode::Enter => {
             let draft = state.composer.lines().join("\n");
+            if crate::components::command_picker::skill_for_alias(state, draft.trim()).is_some() {
+                dispatch_command(draft.trim(), state, effects, client, send);
+                return false;
+            }
             if let Some(command) = COMMANDS.iter().find(|command| {
                 command.name == draft.trim() && !crate::commands::starts_turn(command.name)
             }) {

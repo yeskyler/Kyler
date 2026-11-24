@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { Menu } from "@base-ui/react/menu";
 import {
@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { api } from "@/lib/kyler/client";
-import { filterSkills, skillSources } from "@/lib/kyler/plugins";
+import { filterSkills, skillSources, skillCategory, type SkillCategory } from "@/lib/kyler/plugins";
 import type { Skill } from "@/lib/kyler/types";
 import { useChatSettings } from "./chat-settings-context";
 import {
@@ -41,6 +41,16 @@ export function PluginSkills({ active, addSignal, onCount }: PluginPanelProps) {
   const { startSkillCreation } = useChatSettings();
   const running = useAuiState((state) => state.thread.isRunning);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [category, setCategory] = useState<SkillCategory>("system");
+  const categoryId = useId();
+  useEffect(() => {
+    if (localStorage.getItem("kyler.skills.category") === "user") setCategory("user");
+  }, []);
+  function changeCategory(value: SkillCategory) {
+    setCategory(value);
+    setSource("all");
+    localStorage.setItem("kyler.skills.category", value);
+  }
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("all");
   const [status, setStatus] = useState("all");
@@ -60,6 +70,7 @@ export function PluginSkills({ active, addSignal, onCount }: PluginPanelProps) {
     if (addSignal !== seenAdd.current && active) {
       setError("");
       setArchive(undefined);
+      changeCategory("user");
       setAdding(true);
     }
     seenAdd.current = addSignal;
@@ -114,7 +125,7 @@ export function PluginSkills({ active, addSignal, onCount }: PluginPanelProps) {
       setAdding(false);
       setArchive(undefined);
       setQuery("");
-      setSource("all");
+      changeCategory("user");
       setStatus("all");
       setNotice(`Installed ${skill.name}. Review its instructions before enabling it.`);
       setHighlight(skill.id);
@@ -187,7 +198,8 @@ export function PluginSkills({ active, addSignal, onCount }: PluginPanelProps) {
       setBusy(false);
     }
   }
-  const filtered = filterSkills(skills, query, source, status);
+  const categorySkills = skills.filter((skill) => skillCategory(skill) === category);
+  const filtered = filterSkills(categorySkills, query, source, status);
   const clear = () => {
     setQuery("");
     setSource("all");
@@ -195,129 +207,179 @@ export function PluginSkills({ active, addSignal, onCount }: PluginPanelProps) {
   };
   return (
     <div className="space-y-5">
-      <PluginToolbar
-        kind="Skills"
-        query={query}
-        onQuery={setQuery}
-        source={source}
-        onSource={setSource}
-        sources={skillSources}
-        status={status}
-        onStatus={setStatus}
-        statuses={["enabled", "disabled", "needs_approval", "invalid", "shadowed"]}
-      />
-      <PluginNotice error={!review && !adding ? error : ""} notice={notice} />
-      {loading ? (
-        <PluginSkeletons />
-      ) : (
-        <>
-          <p className="text-xs text-muted-foreground">
-            {filtered.length === skills.length
-              ? `${skills.length} skills`
-              : `${filtered.length} of ${skills.length} skills`}
-          </p>
-          {!filtered.length ? (
-            <PluginEmpty
-              filtered={!!query || source !== "all" || status !== "all"}
-              kind="skills"
-              onAdd={() => setAdding(true)}
-              onClear={clear}
-            />
-          ) : (
-            <div className={pluginGrid}>
-              {filtered.map((skill) => (
-                <article
-                  id={`skill-${skill.id}`}
-                  key={skill.id}
-                  className={`${pluginCard} ${highlight === skill.id ? "ring-2 ring-ring/20" : ""}`}
-                >
-                  <div className="mb-4 flex items-start gap-3">
-                    <div className={pluginIcon}>
-                      <BookOpenIcon className="size-5" strokeWidth={1.5} />
-                    </div>
-                    <div className="min-w-0 flex-1 pt-0.5">
-                      <h3>
-                        <button
-                          type="button"
+      <div
+        role="tablist"
+        aria-label="Skill categories"
+        className="flex w-fit gap-1 rounded-xl border bg-muted/40 p-1"
+      >
+        {(["system", "user"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            id={`${categoryId}-${value}`}
+            aria-controls={`${categoryId}-panel`}
+            aria-selected={category === value}
+            tabIndex={category === value ? 0 : -1}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground outline-none aria-selected:bg-background aria-selected:text-foreground aria-selected:shadow-xs focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => changeCategory(value)}
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const next =
+                event.key === "Home"
+                  ? "system"
+                  : event.key === "End"
+                    ? "user"
+                    : value === "system"
+                      ? "user"
+                      : "system";
+              changeCategory(next);
+              document.getElementById(`${categoryId}-${next}`)?.focus();
+            }}
+          >
+            {value === "system" ? "System" : "User"}
+            <span className="ml-2 text-xs text-muted-foreground">
+              {skills.filter((skill) => skillCategory(skill) === value).length}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div
+        role="tabpanel"
+        id={`${categoryId}-panel`}
+        aria-labelledby={`${categoryId}-${category}`}
+        className="space-y-5"
+      >
+        <PluginToolbar
+          kind="Skills"
+          query={query}
+          onQuery={setQuery}
+          source={source}
+          onSource={setSource}
+          sources={{ user: "Personal", project: "Project" }}
+          showSource={category === "user"}
+          status={status}
+          onStatus={setStatus}
+          statuses={["enabled", "disabled", "needs_approval", "invalid", "shadowed"]}
+        />
+        <PluginNotice error={!review && !adding ? error : ""} notice={notice} />
+        {loading ? (
+          <PluginSkeletons />
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {filtered.length === categorySkills.length
+                ? `${categorySkills.length} skills`
+                : `${filtered.length} of ${categorySkills.length} skills`}
+            </p>
+            {!filtered.length && category === "system" && !categorySkills.length ? (
+              <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                No system skills available.
+              </p>
+            ) : !filtered.length ? (
+              <PluginEmpty
+                filtered={!!query || source !== "all" || status !== "all"}
+                kind="skills"
+                onAdd={() => setAdding(true)}
+                onClear={clear}
+              />
+            ) : (
+              <div className={pluginGrid}>
+                {filtered.map((skill) => (
+                  <article
+                    id={`skill-${skill.id}`}
+                    key={skill.id}
+                    className={`${pluginCard} ${highlight === skill.id ? "ring-2 ring-ring/20" : ""}`}
+                  >
+                    <div className="mb-4 flex items-start gap-3">
+                      <div className={pluginIcon}>
+                        <BookOpenIcon className="size-5" strokeWidth={1.5} />
+                      </div>
+                      <div className="min-w-0 flex-1 pt-0.5">
+                        <h3>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            className="max-w-full truncate text-left text-sm font-semibold outline-none hover:underline focus-visible:underline"
+                            title={skill.display_name ?? skill.name}
+                            onClick={() => void inspect(skill)}
+                          >
+                            {skill.display_name ?? skill.name}
+                          </button>
+                        </h3>
+                        <div className="mt-1.5">
+                          <SourceBadge>{skillSources[skill.source]}</SourceBadge>
+                        </div>
+                      </div>
+                      <PluginActions label={skill.display_name ?? skill.name} disabled={busy}>
+                        <Menu.Item
+                          className={pluginMenuItem}
                           disabled={busy}
-                          className="max-w-full truncate text-left text-sm font-semibold outline-none hover:underline focus-visible:underline"
-                          title={skill.display_name ?? skill.name}
                           onClick={() => void inspect(skill)}
                         >
-                          {skill.display_name ?? skill.name}
-                        </button>
-                      </h3>
-                      <div className="mt-1.5">
-                        <SourceBadge>{skillSources[skill.source]}</SourceBadge>
-                      </div>
+                          View details
+                        </Menu.Item>
+                        {skill.status === "enabled" && (
+                          <Menu.Item
+                            className={pluginMenuItem}
+                            disabled={busy || running}
+                            onClick={() => void toggle(skill)}
+                          >
+                            <PowerIcon className="size-3.5" />
+                            Disable
+                          </Menu.Item>
+                        )}
+                        {skill.source === "user" && (
+                          <>
+                            <div className="my-1 border-t" role="separator" />
+                            <Menu.Item
+                              className={`${pluginMenuItem} text-destructive`}
+                              disabled={busy || running || skill.status === "invalid"}
+                              onClick={() => {
+                                setRemoveError("");
+                                setRemoving(skill);
+                              }}
+                            >
+                              <Trash2Icon className="size-3.5" />
+                              Uninstall
+                            </Menu.Item>
+                          </>
+                        )}
+                      </PluginActions>
                     </div>
-                    <PluginActions label={skill.display_name ?? skill.name} disabled={busy}>
-                      <Menu.Item
-                        className={pluginMenuItem}
+                    <p className="mb-5 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
+                      {skill.description || "No description provided."}
+                    </p>
+                    {skill.error && (
+                      <p className="mb-4 line-clamp-2 text-xs text-destructive" title={skill.error}>
+                        {skill.error}
+                      </p>
+                    )}
+                    <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-4">
+                      <StatusPill status={skill.status} />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
                         disabled={busy}
                         onClick={() => void inspect(skill)}
                       >
-                        View details
-                      </Menu.Item>
-                      {skill.status === "enabled" && (
-                        <Menu.Item
-                          className={pluginMenuItem}
-                          disabled={busy || running}
-                          onClick={() => void toggle(skill)}
-                        >
-                          <PowerIcon className="size-3.5" />
-                          Disable
-                        </Menu.Item>
-                      )}
-                      {skill.source === "user" && (
-                        <>
-                          <div className="my-1 border-t" role="separator" />
-                          <Menu.Item
-                            className={`${pluginMenuItem} text-destructive`}
-                            disabled={busy || running || skill.status === "invalid"}
-                            onClick={() => {
-                              setRemoveError("");
-                              setRemoving(skill);
-                            }}
-                          >
-                            <Trash2Icon className="size-3.5" />
-                            Uninstall
-                          </Menu.Item>
-                        </>
-                      )}
-                    </PluginActions>
-                  </div>
-                  <p className="mb-5 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
-                    {skill.description || "No description provided."}
-                  </p>
-                  {skill.error && (
-                    <p className="mb-4 line-clamp-2 text-xs text-destructive" title={skill.error}>
-                      {skill.error}
-                    </p>
-                  )}
-                  <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-4">
-                    <StatusPill status={skill.status} />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => void inspect(skill)}
-                    >
-                      {busy && busyId === skill.id ? (
-                        <LoaderCircleIcon className="animate-spin" />
-                      ) : null}
-                      {!["enabled", "invalid", "shadowed"].includes(skill.status)
-                        ? "Review & enable"
-                        : "View details"}
-                    </Button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+                        {busy && busyId === skill.id ? (
+                          <LoaderCircleIcon className="animate-spin" />
+                        ) : null}
+                        {!["enabled", "invalid", "shadowed"].includes(skill.status)
+                          ? "Review & enable"
+                          : "View details"}
+                      </Button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
       <Dialog
         open={adding}
         onOpenChange={(open) => {

@@ -2,7 +2,7 @@ use super::{ready, render, result};
 use crate::agent::AgentHandle;
 use crate::{
     app,
-    components::{command_picker::COMMANDS, status, transcript},
+    components::{status, transcript},
     effects::{Effects, Event},
     layout::View,
     state::{Entry, Phase},
@@ -85,6 +85,7 @@ async fn mcp_command_opens_management_panel_without_submitting_to_model() {
 fn slash_menu_filters_completes_and_dispatches_commands_without_a_model_request() {
     let client = AgentHandle::new(Default::default(), None);
     let mut state = ready();
+    state.skills = vec![builtin_skill("review-agent")];
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(16);
     let mut view = View::default();
@@ -92,11 +93,16 @@ fn slash_menu_filters_completes_and_dispatches_commands_without_a_model_request(
     assert!(transcript::lines(&[]).is_empty());
     state.composer.insert_str("/");
     let menu = render(&mut terminal, &mut view, &mut state);
-    assert!(menu.contains("Commands") && menu.contains("/mcp") && menu.contains("/help"));
-    assert!(menu.contains("/compact") && menu.contains("/review") && menu.contains("/memory"));
+    assert!(
+        menu.contains("Commands") && menu.contains("System skills") && menu.contains("/review")
+    );
+    let commands = crate::components::command_picker::matches(&state);
+    for name in ["/mcp", "/help", "/compact", "/memory"] {
+        assert!(commands.iter().any(|command| command.name == name));
+    }
     let bottom = view.input.bottom();
     let key = |code| Input::Key(KeyEvent::new(code, KeyModifiers::NONE));
-    let help_index = COMMANDS
+    let help_index = crate::components::command_picker::matches(&state)
         .iter()
         .position(|command| command.name == "/help")
         .unwrap();
@@ -886,7 +892,7 @@ async fn skills_actions_prepare_explicit_drafts_without_starting_a_run() {
         let panel = render(&mut terminal, &mut view, &mut state);
         assert!(panel.contains("Create skill…"));
         assert!(panel.contains("Install skill…"));
-        assert!(panel.contains("Built-in"));
+        assert!(panel.contains("System skills"));
         assert!(panel.contains("Review Agent"));
         assert_eq!(view.panel.bottom(), view.input.y);
         app::handle_input(
@@ -975,4 +981,132 @@ async fn dollar_completion_only_inserts_enabled_skills_and_preserves_draft_prefi
     );
     assert!(crate::components::skill_picker::candidates(&state).is_empty());
     assert_eq!(state.composer.lines().join("\n"), "$");
+}
+
+#[tokio::test]
+async fn review_command_selects_the_ordinary_skill_without_starting_a_turn() {
+    use kyler_protocol::api::skills::SkillStatus;
+    let client = AgentHandle::new(Default::default(), None);
+    let mut state = ready();
+    state.skills = vec![
+        builtin_skill("review-agent"),
+        builtin_skill("skill-creator"),
+    ];
+    let attachment = crate::attachments::from_rgba(1, 1, &[0, 0, 0, 255]).unwrap();
+    let attachment_path = attachment.path.clone();
+    state.attachments.push(attachment);
+    let mut effects = Effects::default();
+    let (send, _receive) = tokio::sync::mpsc::channel(16);
+    let mut view = View::default();
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    for key in [KeyCode::Enter, KeyCode::Tab] {
+        for prefix in [
+            "",
+            "$skill-creator ",
+            "$review-agent ",
+            "$skill-creator\u{3000}",
+        ] {
+            state.composer = crate::components::composer::new();
+            state.composer.insert_str(format!("{prefix}/review"));
+            render(&mut terminal, &mut view, &mut state);
+            app::handle_input(
+                Input::Key(KeyEvent::new(key, KeyModifiers::NONE)),
+                &mut state,
+                &mut effects,
+                &client,
+                &send,
+                &view,
+            );
+            let expected = if prefix.contains("review-agent") {
+                prefix.to_owned()
+            } else {
+                format!("{prefix}$review-agent ")
+            };
+            assert_eq!(state.composer.lines().join("\n"), expected);
+            assert_eq!(state.attachments.len(), 1);
+            assert_eq!(state.attachments[0].path, attachment_path);
+            assert!(attachment_path.exists());
+            assert!(state.pending.is_none());
+            assert!(state.entries.is_empty());
+            assert_eq!(state.phase, Phase::Ready);
+        }
+    }
+    state.skills[0].status = SkillStatus::Disabled;
+    state.composer = crate::components::composer::new();
+    state.composer.insert_str("/review");
+    app::handle_input(
+        Input::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        &mut state,
+        &mut effects,
+        &client,
+        &send,
+        &view,
+    );
+    assert_eq!(state.composer.lines(), &["/review"]);
+    assert!(state.pending.is_none());
+}
+
+#[tokio::test]
+async fn slash_categories_include_active_user_skills_without_confusing_reserved_commands() {
+    use kyler_protocol::api::skills::{SkillSource, SkillStatus};
+    let client = AgentHandle::new(Default::default(), None);
+    let mut state = ready();
+    let system = builtin_skill("review-agent");
+    let mut personal = builtin_skill("compact");
+    personal.source = SkillSource::User;
+    let mut project = builtin_skill("project-helper");
+    project.source = SkillSource::Project;
+    let mut disabled = builtin_skill("disabled");
+    disabled.status = SkillStatus::Disabled;
+    state.skills = vec![system, personal, project, disabled];
+    state.composer.insert_str("/");
+    let entries = crate::components::command_picker::matches(&state);
+    assert_eq!(entries[0].group, "System skills");
+    assert_eq!(entries[1].group, "User skills");
+    assert_eq!(entries[2].group, "User skills");
+    assert!(
+        entries[3..]
+            .iter()
+            .all(|entry| entry.group == "Conversation")
+    );
+    assert!(!entries.iter().any(|entry| entry.name == "/disabled"));
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.name == "/compact" && entry.skill.is_none())
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.name == "/skill:compact" && entry.skill.is_some())
+    );
+    state.composer = crate::components::composer::new();
+    state.composer.insert_str("$review-agent /skill:compact");
+    let mut effects = Effects::default();
+    let (send, _receive) = tokio::sync::mpsc::channel(16);
+    let mut view = View::default();
+    let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+    let menu = render(&mut terminal, &mut view, &mut state);
+    assert!(menu.contains("User skills"));
+    app::handle_input(
+        Input::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        &mut state,
+        &mut effects,
+        &client,
+        &send,
+        &view,
+    );
+    assert_eq!(state.composer.lines().join("\n"), "$review-agent $compact ");
+    assert!(state.pending.is_none() && state.entries.is_empty());
+    state.composer = crate::components::composer::new();
+    state.composer.insert_str("/disabled");
+    app::handle_input(
+        Input::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        &mut state,
+        &mut effects,
+        &client,
+        &send,
+        &view,
+    );
+    assert!(state.pending.is_none());
 }

@@ -1,139 +1,69 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Menu } from "@base-ui/react/menu";
+import { Popover } from "@base-ui/react/popover";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import {
   BookOpenIcon,
-  BlocksIcon,
-  ChevronRightIcon,
+  CheckIcon,
   LoaderCircleIcon,
   PaperclipIcon,
-  PlugIcon,
   PlusIcon,
+  SearchIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useChatSettings } from "./chat-settings-context";
 import { api } from "@/lib/kyler/client";
-import { appendPluginReference, type PluginReference } from "@/lib/kyler/plugin-references";
-import type { Connector, Skill } from "@/lib/kyler/types";
-
-const itemClass =
-  "flex min-h-9 cursor-default items-center gap-2 rounded-lg px-2.5 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:opacity-45";
-const popupClass =
-  "min-w-52 max-w-[calc(100vw-2rem)] rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-lg outline-none";
+import { composerSkills, selectComposerSkill } from "@/lib/kyler/composer-skills";
+import { skillSelected } from "@/lib/kyler/plugin-references";
+import { filterSkills, skillCategory, pluginStatuses } from "@/lib/kyler/plugins";
+import type { Skill } from "@/lib/kyler/types";
 
 export function ComposerMenu() {
   const aui = useAui();
   const { session } = useChatSettings();
+  const text = useAuiState((state) => state.composer.text);
+  const selected = useAuiState((state) => state.composer.runConfig.custom?.kylerSkills);
   const running = useAuiState((state) => state.thread.isRunning);
   const accept = useAuiState((state) => state.composer.attachmentAccept);
   const [open, setOpen] = useState(false);
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selecting, setSelecting] = useState("");
+  const [query, setQuery] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [reload, setReload] = useState(0);
   const files = useRef<HTMLInputElement>(null);
-  const operation = useRef<AbortController | null>(null);
-  const fetching = useRef(false);
-  useEffect(() => () => operation.current?.abort(), []);
+  const search = useRef<HTMLInputElement>(null);
+  const options = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(""), 4000);
-    return () => clearTimeout(timer);
-  }, [notice]);
-
-  async function loadPlugins() {
-    if (fetching.current) return;
-    fetching.current = true;
-    setLoading(true);
-    setError("");
-    try {
-      const [skills, connectors] = await Promise.all([
-        api<Skill[]>("plugins/skills"),
-        api<Connector[]>("plugins/connectors"),
-      ]);
-      setSkills(skills);
-      setConnectors(connectors);
-    } catch (error) {
-      setError((error as Error).message);
-    } finally {
-      fetching.current = false;
-      setLoading(false);
-    }
-  }
-  function insert(reference: PluginReference) {
-    aui.composer().setText(appendPluginReference(aui.composer().getState().text, reference));
-    setOpen(false);
-  }
-  async function selectConnector(connector: Connector) {
-    setSelecting(connector.id);
-    setError("");
+    if (!open) return;
     const controller = new AbortController();
-    operation.current?.abort();
-    operation.current = controller;
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, 12_000);
-    try {
-      let current = connector;
-      if (!["connected", "connecting"].includes(current.status))
-        await api(`plugins/connectors/${connector.id}/connect`, {
-          method: "POST",
-          body: "{}",
-          signal: controller.signal,
+    const load = () => {
+      setLoading(true);
+      api<Skill[]>("plugins/skills", { signal: controller.signal })
+        .then((skills) => {
+          if (!controller.signal.aborted) {
+            setSkills(skills);
+          }
+        })
+        .catch((error: Error) => {
+          if (!controller.signal.aborted) setError(error.message);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
         });
-      while (current.status !== "connected") {
-        const next = await api<Connector[]>("plugins/connectors", { signal: controller.signal });
-        setConnectors(next);
-        current = next.find((item) => item.id === connector.id) ?? {
-          ...connector,
-          status: "failed",
-          error: "Connector is unavailable.",
-        };
-        if (current.status === "failed")
-          throw new Error(
-            current.error ?? "Cannot connect to this service under the current sandbox policy.",
-          );
-        if (current.status !== "connected")
-          await new Promise<void>((resolve, reject) => {
-            const stop = () => {
-              clearTimeout(timer);
-              reject(new Error("Selection cancelled."));
-            };
-            const timer = setTimeout(() => {
-              controller.signal.removeEventListener("abort", stop);
-              resolve();
-            }, 250);
-            controller.signal.addEventListener("abort", stop, { once: true });
-            if (controller.signal.aborted) stop();
-          });
-      }
-      if (!current.tools.length) throw new Error("This connector does not expose any tools.");
-      insert({ kind: "connector", name: connector.id });
-    } catch (error) {
-      if (timedOut)
-        setError("Connection timed out. Check the connector configuration and try again.");
-      else if (!controller.signal.aborted) setError((error as Error).message);
-    } finally {
-      clearTimeout(timeout);
-      if (operation.current === controller) operation.current = null;
-      setSelecting("");
-    }
-  }
-  const pluginPopup = (children: React.ReactNode) => (
-    <Menu.Portal>
-      <Menu.Positioner side="right" align="start" sideOffset={5} className="z-50">
-        <Menu.Popup className={`${popupClass} max-h-[min(24rem,70dvh)] w-64 overflow-y-auto`}>
-          {children}
-        </Menu.Popup>
-      </Menu.Positioner>
-    </Menu.Portal>
+    };
+    load();
+    window.addEventListener("kyler-skills-changed", load);
+    return () => {
+      controller.abort();
+      window.removeEventListener("kyler-skills-changed", load);
+    };
+  }, [open, reload]);
+  const filtered = filterSkills(skills, query, "all", "all").filter(
+    (skill) => skill.status !== "shadowed" && skill.status !== "invalid",
   );
   return (
     <div className="relative shrink-0">
@@ -151,221 +81,206 @@ export function ComposerMenu() {
             for (const file of selected) await aui.composer().addAttachment(file);
           } catch (error) {
             setError((error as Error).message);
+            setOpen(true);
           }
         }}
       />
-      <Menu.Root
+      <Popover.Root
         open={open}
         onOpenChange={(value) => {
           setOpen(value);
           if (value) {
+            setQuery("");
             setError("");
-            setNotice("");
-          } else operation.current?.abort();
+          }
         }}
       >
-        <Menu.Trigger
+        <Popover.Trigger
           render={
             <Button
               type="button"
               variant="ghost"
               size="icon"
               className="size-7 rounded-full text-muted-foreground"
-              aria-label="Add to message"
+              aria-label="Add files or skills"
               disabled={running}
             />
           }
         >
           <PlusIcon className="size-4" />
-        </Menu.Trigger>
-        <Menu.Portal>
-          <Menu.Positioner side="top" align="start" sideOffset={8} className="z-50">
-            <Menu.Popup
-              className={popupClass}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Positioner side="top" align="start" sideOffset={8} className="z-50">
+            <Popover.Popup
+              initialFocus={search}
               finalFocus={() =>
                 document.querySelector<HTMLTextAreaElement>(
                   'textarea[aria-label="Message input"]',
                 ) ?? true
               }
+              className="w-80 max-w-[calc(100vw-2rem)] rounded-2xl border bg-popover p-2 text-popover-foreground shadow-xl outline-none"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && document.activeElement === search.current) {
+                  event.preventDefault();
+                  options.current
+                    ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+                    ?.click();
+                  return;
+                }
+                if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                const items = Array.from(
+                  options.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ??
+                    [],
+                );
+                if (!items.length) return;
+                event.preventDefault();
+                const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                items[
+                  current < 0
+                    ? event.key === "ArrowDown"
+                      ? 0
+                      : items.length - 1
+                    : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length
+                ]?.focus();
+              }}
             >
-              <Menu.Item
-                className={itemClass}
+              <Popover.Title className="sr-only">Add files or skills</Popover.Title>
+              <Popover.Description className="sr-only">
+                Upload files or choose skills for your next message.
+              </Popover.Description>
+              <button
+                type="button"
+                disabled={!session.project}
+                title={!session.project ? "Choose a workspace to upload files." : undefined}
+                className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent disabled:opacity-45"
                 onClick={() => {
-                  if (!session.project) {
-                    setNotice("Choose a workspace to upload attachments.");
-                    return;
-                  }
                   files.current?.click();
+                  setOpen(false);
                 }}
               >
                 <PaperclipIcon className="size-4 text-muted-foreground" />
-                Upload
-              </Menu.Item>
-              <Menu.SubmenuRoot
-                onOpenChange={(value) => {
-                  if (value) void loadPlugins();
-                }}
-              >
-                <Menu.SubmenuTrigger className={itemClass}>
-                  <BlocksIcon className="size-4 text-muted-foreground" />
-                  Plugins
-                  <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground" />
-                </Menu.SubmenuTrigger>
-                {pluginPopup(
-                  <>
-                    <Menu.SubmenuRoot>
-                      <Menu.SubmenuTrigger className={itemClass}>
-                        <BookOpenIcon className="size-4 text-muted-foreground" />
-                        Skills
-                        <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground" />
-                      </Menu.SubmenuTrigger>
-                      {pluginPopup(
-                        <>
-                          {[
-                            {
-                              label: "System",
-                              items: skills.filter((skill) => skill.source === "builtin"),
-                            },
-                            {
-                              label: "User",
-                              items: skills.filter((skill) => skill.source !== "builtin"),
-                            },
-                          ].map((group) => (
-                            <Menu.SubmenuRoot key={group.label}>
-                              <Menu.SubmenuTrigger className={itemClass}>
-                                {group.label}
-                                <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground" />
-                              </Menu.SubmenuTrigger>
-                              {pluginPopup(
-                                <>
-                                  {loading ? (
-                                    <p role="status" className="p-3 text-xs text-muted-foreground">
-                                      Loading skills…
-                                    </p>
-                                  ) : !group.items.length ? (
-                                    <p className="p-3 text-xs text-muted-foreground">
-                                      No {group.label.toLowerCase()} skills available.
-                                    </p>
-                                  ) : (
-                                    group.items.map((skill) => (
-                                      <Menu.Item
-                                        key={skill.id}
-                                        className={itemClass}
-                                        label={skill.display_name ?? skill.name}
-                                        disabled={skill.status !== "enabled" || !!selecting}
-                                        title={skill.description}
-                                        onClick={() => insert({ kind: "skill", name: skill.name })}
-                                      >
-                                        <span className="min-w-0">
-                                          <span className="block break-all">
-                                            {skill.display_name ?? `@${skill.name}`}
-                                          </span>
-                                          {skill.status !== "enabled" && (
-                                            <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                              {skill.status.replaceAll("_", " ")}
-                                            </span>
-                                          )}
-                                        </span>
-                                      </Menu.Item>
-                                    ))
-                                  )}
-                                </>,
-                              )}
-                            </Menu.SubmenuRoot>
-                          ))}
-                        </>,
-                      )}
-                    </Menu.SubmenuRoot>
-                    <Menu.SubmenuRoot>
-                      <Menu.SubmenuTrigger className={itemClass}>
-                        <PlugIcon className="size-4 text-muted-foreground" />
-                        Connectors
-                        <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground" />
-                      </Menu.SubmenuTrigger>
-                      {pluginPopup(
-                        <>
-                          {[
-                            {
-                              label: "System",
-                              items: connectors.filter((connector) => !connector.removable),
-                            },
-                            {
-                              label: "User",
-                              items: connectors.filter((connector) => connector.removable),
-                            },
-                          ].map((group) => (
-                            <Menu.SubmenuRoot key={group.label}>
-                              <Menu.SubmenuTrigger className={itemClass}>
-                                {group.label}
-                                <ChevronRightIcon className="ml-auto size-3.5 text-muted-foreground" />
-                              </Menu.SubmenuTrigger>
-                              {pluginPopup(
-                                <>
-                                  {loading ? (
-                                    <p role="status" className="p-3 text-xs text-muted-foreground">
-                                      Loading connectors…
-                                    </p>
-                                  ) : !group.items.length ? (
-                                    <p className="p-3 text-xs text-muted-foreground">
-                                      No {group.label.toLowerCase()} connectors configured.
-                                    </p>
-                                  ) : (
-                                    group.items.map((connector) => (
-                                      <Menu.Item
-                                        key={connector.id}
-                                        className={itemClass}
-                                        label={connector.id}
-                                        closeOnClick={false}
-                                        disabled={!!selecting}
-                                        onClick={() => void selectConnector(connector)}
-                                      >
-                                        {selecting === connector.id ? (
-                                          <LoaderCircleIcon className="size-4 animate-spin" />
-                                        ) : (
-                                          <PlugIcon className="size-4 text-muted-foreground" />
-                                        )}
-                                        <span className="min-w-0">
-                                          <span className="block break-all">{connector.id}</span>
-                                          <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                                            {connector.status}
-                                          </span>
-                                        </span>
-                                      </Menu.Item>
-                                    ))
-                                  )}
-                                </>,
-                              )}
-                            </Menu.SubmenuRoot>
-                          ))}
-                        </>,
-                      )}
-                    </Menu.SubmenuRoot>
-                  </>,
+                Upload files
+              </button>
+              <div className="my-2 border-t" />
+              <div className="relative mx-1">
+                <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                <Input
+                  ref={search}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search skills…"
+                  aria-label="Search skills to add"
+                  className="h-9 bg-muted/40 pl-9 pr-8 shadow-none"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    aria-label="Clear skill search"
+                    onClick={() => {
+                      setQuery("");
+                      search.current?.focus();
+                    }}
+                    className="absolute right-2 top-2.5 text-muted-foreground"
+                  >
+                    <XIcon className="size-4" />
+                  </button>
                 )}
-              </Menu.SubmenuRoot>
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
-      {notice && (
-        <div
-          role="status"
-          className="absolute bottom-full left-0 z-50 mb-2 w-64 rounded-lg border bg-popover p-3 text-xs text-popover-foreground shadow-md"
-        >
-          {notice}
-        </div>
-      )}
-      {error && (
-        <div
-          role="alert"
-          className="absolute bottom-full left-0 z-50 mb-2 flex w-64 gap-2 rounded-lg border bg-popover p-3 text-xs text-destructive shadow-md"
-        >
-          <span className="flex-1">{error}</span>
-          <button type="button" aria-label="Dismiss plugin error" onClick={() => setError("")}>
-            <XIcon className="size-3.5" />
-          </button>
-        </div>
-      )}
+              </div>
+              <div ref={options} className="mt-2 max-h-[min(22rem,55dvh)] overflow-y-auto">
+                {loading ? (
+                  <p
+                    role="status"
+                    className="flex items-center gap-2 p-3 text-xs text-muted-foreground"
+                  >
+                    <LoaderCircleIcon className="size-3.5 animate-spin" />
+                    Loading skills…
+                  </p>
+                ) : (
+                  (["system", "user"] as const).map((category) => {
+                    const items = filtered.filter((skill) => skillCategory(skill) === category);
+                    return (
+                      items.length > 0 && (
+                        <section
+                          key={category}
+                          aria-label={`${category === "system" ? "System" : "User"} skills`}
+                        >
+                          <h3 className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            {category === "system" ? "System skills" : "User skills"}
+                          </h3>
+                          {items.map((skill) => {
+                            const checked =
+                              composerSkills(selected).some((item) => item.name === skill.name) ||
+                              skillSelected(text, skill.name);
+                            return (
+                              <button
+                                key={skill.id}
+                                type="button"
+                                aria-pressed={checked}
+                                disabled={skill.status !== "enabled" || running}
+                                title={skill.description}
+                                className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent disabled:opacity-45"
+                                onClick={() => {
+                                  try {
+                                    selectComposerSkill(aui.composer(), skill, !checked);
+                                    setOpen(false);
+                                  } catch (error) {
+                                    setError((error as Error).message);
+                                  }
+                                }}
+                              >
+                                <BookOpenIcon className="size-4 shrink-0 text-muted-foreground" />
+                                <span className="min-w-0 flex-1 truncate">
+                                  {skill.display_name ?? skill.name}
+                                </span>
+                                {skill.status !== "enabled" ? (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {pluginStatuses[skill.status] ??
+                                      skill.status.replaceAll("_", " ")}
+                                  </span>
+                                ) : (
+                                  skill.source === "project" && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      Project
+                                    </span>
+                                  )
+                                )}
+                                {checked && <CheckIcon className="size-4 shrink-0" aria-hidden />}
+                              </button>
+                            );
+                          })}
+                        </section>
+                      )
+                    );
+                  })
+                )}
+                {!loading && !filtered.length && !error && (
+                  <p className="p-3 text-sm text-muted-foreground">
+                    {query
+                      ? "No matching skills."
+                      : "No skills available. Manage skills in Plugins."}
+                  </p>
+                )}
+              </div>
+              {error && (
+                <div role="alert" className="space-y-2 p-3 text-xs text-destructive">
+                  <p>{error}</p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setError("");
+                      setReload((value) => value + 1);
+                    }}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
     </div>
   );
 }

@@ -7,7 +7,7 @@ use crate::{
 };
 
 pub(crate) fn starts_turn(name: &str) -> bool {
-    matches!(name, "/resume" | "/compact" | "/review" | "/memory")
+    matches!(name, "/resume" | "/compact" | "/memory")
 }
 
 pub(crate) fn dispatch_command(
@@ -17,6 +17,20 @@ pub(crate) fn dispatch_command(
     client: &AgentHandle,
     send: &Sender,
 ) {
+    if let Some(skill_name) = crate::components::command_picker::skill_for_alias(state, name) {
+        if !state.skills.iter().any(|skill| {
+            skill.name == skill_name
+                && skill.status == kyler_protocol::api::skills::SkillStatus::Enabled
+        }) {
+            state.notice("Enable this skill in Skills before selecting it.");
+            return;
+        }
+        let prefix = crate::components::command_picker::query(state)
+            .map(|draft| draft.0)
+            .unwrap_or_default();
+        crate::components::skill_picker::insert(state, &skill_name, &prefix);
+        return;
+    }
     let parent = (state.composer.lines().join("\n"), state.slash_selected);
     state.composer = composer::new();
     state.slash_selected = 0;

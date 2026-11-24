@@ -1,6 +1,11 @@
 import type { Connector, Skill } from "./types.ts";
 
-export const skillSources = { builtin: "Built-in", user: "Custom", project: "Project" } as const;
+export const skillSources = { builtin: "System", user: "Personal", project: "Project" } as const;
+export type SkillCategory = "system" | "user";
+export function skillCategory(skill: Pick<Skill, "source">): SkillCategory {
+  return skill.source === "builtin" ? "system" : "user";
+}
+
 export const pluginStatuses: Record<string, string> = {
   enabled: "Enabled",
   disabled: "Disabled",

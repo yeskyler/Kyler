@@ -93,7 +93,9 @@ export function PluginToolbar({
   onStatus,
   statuses,
   kind,
+  showSource = true,
 }: {
+  showSource?: boolean;
   query: string;
   onQuery: (query: string) => void;
   source: string;
@@ -142,27 +144,29 @@ export function PluginToolbar({
               statuses.map((value) => [value, pluginStatuses[value] ?? value]),
             ),
           },
-        ].map(({ label, value, change, options }) => (
-          <div key={label} className="relative min-w-0 flex-1 sm:flex-none">
-            <select
-              aria-label={`Filter ${kind.toLowerCase()} by ${label.toLowerCase()}`}
-              value={value}
-              onChange={(event) => change(event.target.value)}
-              className="h-9 w-full appearance-none rounded-lg border border-input bg-background pl-3 pr-8 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:w-auto"
-            >
-              <option value="all">All {label === "Status" ? "statuses" : "sources"}</option>
-              {Object.entries(options).map(([id, name]) => (
-                <option key={id} value={id}>
-                  {name}
-                </option>
-              ))}
-            </select>
-            <ChevronDownIcon
-              aria-hidden
-              className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            />
-          </div>
-        ))}
+        ]
+          .filter(({ label }) => showSource || label !== "Source")
+          .map(({ label, value, change, options }) => (
+            <div key={label} className="relative min-w-0 flex-1 sm:flex-none">
+              <select
+                aria-label={`Filter ${kind.toLowerCase()} by ${label.toLowerCase()}`}
+                value={value}
+                onChange={(event) => change(event.target.value)}
+                className="h-9 w-full appearance-none rounded-lg border border-input bg-background pl-3 pr-8 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:w-auto"
+              >
+                <option value="all">All {label === "Status" ? "statuses" : "sources"}</option>
+                {Object.entries(options).map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon
+                aria-hidden
+                className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+              />
+            </div>
+          ))}
       </div>
     </div>
   );

@@ -26,6 +26,7 @@ import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-ic
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { ComposerSkillTags } from "@/components/kyler/composer-skill-tags";
 import {
   PasteComposerRoot,
   PasteComposerInput,
@@ -526,6 +527,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           }
         >
           <ComposerAttachments />
+          <ComposerSkillTags />
           <ComposerInput
             placeholder=""
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-64 min-h-17 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-7 outline-none"

@@ -5,6 +5,21 @@ use ratatui::{Frame, layout::Rect};
 
 use kyler_protocol::api::skills::{SkillInfo, SkillStatus};
 
+pub fn insert(state: &mut State, name: &str, prefix: &str) {
+    let selected = prefix
+        .split_whitespace()
+        .any(|token| token == format!("${name}") || token == format!("@{name}"));
+    let text = if selected {
+        prefix.to_owned()
+    } else {
+        format!("{prefix}${name} ")
+    };
+    state.composer = crate::components::composer::new();
+    state.composer.insert_str(text);
+    state.skill_selected = 0;
+    state.slash_selected = 0;
+}
+
 pub fn query(state: &State) -> Option<(String, String)> {
     if state.panel_open() {
         return None;

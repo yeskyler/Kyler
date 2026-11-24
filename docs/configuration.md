@@ -480,10 +480,48 @@ Selectors are passed as `review.paths` to the existing delegated read-only execu
 they do not authorize access outside the workspace. Commit and local base-branch
 reviews remain available. The executor retains immutable evidence capture, restricted
 tools, structured report validation, and stale-evidence checks. It never applies fixes.
-Direct review commands remain compatible with the same execution mechanism.
+`/review` selects the Review Agent skill in the composer without starting a run.
+Add the review scope or instructions and send when ready. It uses the same selection
+reference as other skills. Explicit review API commands retain their execution behavior.
 
 To customize the instructions and reference files, create a user/project skill
 named `review-agent` using the normal skill installation and review flow. Package
 resources use relative paths, distinct from the code paths selected for review.
 An optional `metadata.display-name` in `SKILL.md` controls the label shown in Web and
 TUI; the lowercase `name` remains the identifier used in calls and approval records.
+
+### Skill categories and slash menus
+
+The Web Plugins skill page separates **System** (bundled skills) from **User**
+(personal and project packages). The selected category is remembered in this browser.
+Personal and Project origin badges remain visible in the User category.
+
+Typing `/` lists enabled skills under **System skills** and **User skills**, followed
+by **Conversation** operations. The list is searchable, and keyboard navigation skips
+category headings. Selecting a skill adds it to the composer through the shared skill-selection flow;
+it does not send a message or start a task. Conversation operations keep their existing
+behavior. The TUI uses the same grouping and skill-selection distinction, while keeping
+its existing local settings commands available.
+
+`/review` selects `review-agent`. Other skills use their invocation name as the slash
+entry, for example `/skill-creator`. A skill whose name collides with a reserved command
+uses `/skill:<name>`, such as `/skill:compact`; `/compact` remains the conversation
+operation. Disabled, invalid, and shadowed packages are omitted from selectable entries.
+
+### Composer attachments and skill tags
+
+The Web composer `+` panel contains file uploads and a searchable, single-level skill
+list grouped as System skills and User skills. Labels use the display name, falling
+back to the invocation name, without adding an `@` prefix. Selected skills appear as
+removable tags above the input. The `+` and slash menus share the same selected state.
+Completed manual `@skill-name` or `$skill-name` references can also become tags.
+
+Selections are submitted as exact skill IDs and fingerprints through the existing
+`skills` request field; visible message text and attachments are preserved. Sending
+only selected skills uses a short default instruction. Tags clear when a draft is
+sent and are restored when an attachment send returns that draft for retry.
+
+MCP connections are managed in Plugins, with no connector-selection entry in `+`.
+System-connected connectors activate authorized project-scoped tools through existing
+MCP discovery/retrieval. Discovery does not bypass sandbox or tool approval policy,
+and disconnected services are not connected merely by searching for a tool.

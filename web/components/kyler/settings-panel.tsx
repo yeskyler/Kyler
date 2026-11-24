@@ -6,6 +6,9 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CpuIcon,
+  GitBranchIcon,
+  InfoIcon,
+  ArrowUpRightIcon,
   MessagesSquareIcon,
   SlidersHorizontalIcon,
   UserIcon,
@@ -43,6 +46,12 @@ const sections = [
     label: "Channels",
     icon: MessagesSquareIcon,
     description: "Connect external chats to your workspaces.",
+  },
+  {
+    id: "about",
+    label: "About",
+    icon: InfoIcon,
+    description: "Project information and source code.",
   },
 ] as const;
 type Section = (typeof sections)[number]["id"];
@@ -188,6 +197,32 @@ export function SettingsPanel({ defaultWorkspace }: { defaultWorkspace?: string 
           {section === "subagents" && <SubagentsPanel />}
           {section === "channels" && (
             <ChannelsSettings workspaces={workspaces} defaultWorkspace={defaultWorkspace} />
+          )}
+          {section === "about" && (
+            <div className="space-y-6">
+              <a
+                href="https://github.com/yeskyler/Kyler"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-4 rounded-xl border bg-card p-5 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <GitBranchIcon className="size-6 shrink-0" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-medium">GitHub repository</h3>
+                  <p className="mt-1 break-all text-sm text-muted-foreground">
+                    https://github.com/yeskyler/Kyler
+                  </p>
+                </div>
+                <ArrowUpRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="sr-only">Opens in a new tab</span>
+              </a>
+              <section className="space-y-2 px-1">
+                <h3 className="text-lg font-semibold tracking-tight">Kyler</h3>
+                <p className="text-sm text-muted-foreground">
+                  An AI assistant for coding, research, and everyday work.
+                </p>
+              </section>
+            </div>
           )}
           {error && (
             <p role="alert" className="text-sm text-destructive">

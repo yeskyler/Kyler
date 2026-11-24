@@ -212,35 +212,50 @@ pub fn render(frame: &mut Frame, state: &mut State, input: Rect) -> Rect {
             ));
         }
         lines.push(Line::from("──────────────────────────"));
-        for (index, skill) in state.skills.iter().enumerate() {
-            let index = index + 2;
-            if index == state.skills_selected {
-                selected_row = lines.len();
+        for (system, label) in [(true, "System skills"), (false, "User skills")] {
+            if !state
+                .skills
+                .iter()
+                .any(|skill| (skill.source == SkillSource::Builtin) == system)
+            {
+                continue;
             }
-            let status = match skill.status {
-                SkillStatus::Enabled => "Enabled",
-                SkillStatus::Disabled => "Disabled",
-                SkillStatus::NeedsApproval => "Needs approval",
-                SkillStatus::Shadowed => "Shadowed",
-                SkillStatus::Invalid => "Invalid",
-            };
-            lines.push(panel::selected(
-                format!(
-                    "{} {} · {} · {status}",
-                    if index == state.skills_selected {
-                        ">"
-                    } else {
-                        " "
-                    },
-                    clean(skill.label()),
-                    match skill.source {
-                        SkillSource::Builtin => "Built-in",
-                        SkillSource::User => "User",
-                        SkillSource::Project => "Project",
-                    }
-                ),
-                index == state.skills_selected,
-            ));
+            lines.push(Line::styled(label, Style::default().fg(Color::Cyan)));
+            for (index, skill) in state
+                .skills
+                .iter()
+                .enumerate()
+                .filter(|(_, skill)| (skill.source == SkillSource::Builtin) == system)
+            {
+                let index = index + 2;
+                if index == state.skills_selected {
+                    selected_row = lines.len();
+                }
+                let status = match skill.status {
+                    SkillStatus::Enabled => "Enabled",
+                    SkillStatus::Disabled => "Disabled",
+                    SkillStatus::NeedsApproval => "Needs approval",
+                    SkillStatus::Shadowed => "Shadowed",
+                    SkillStatus::Invalid => "Invalid",
+                };
+                lines.push(panel::selected(
+                    format!(
+                        "{} {} · {} · {status}",
+                        if index == state.skills_selected {
+                            ">"
+                        } else {
+                            " "
+                        },
+                        clean(skill.label()),
+                        match skill.source {
+                            SkillSource::Builtin => "System",
+                            SkillSource::User => "Personal",
+                            SkillSource::Project => "Project",
+                        }
+                    ),
+                    index == state.skills_selected,
+                ));
+            }
         }
         if state.skills.is_empty() && !state.skills_busy {
             lines.push(Line::from("No skills found"));

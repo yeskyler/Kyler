@@ -40,8 +40,7 @@ pub(super) fn handle(
                 let name = skills[state.skill_selected].clone();
                 let prefix = crate::components::skill_picker::query(state).unwrap().0;
                 state.composer = composer::new();
-                state.composer.insert_str(format!("{prefix}${name} "));
-                state.skill_selected = 0;
+                crate::components::skill_picker::insert(state, &name, &prefix);
                 return true;
             }
             _ => state.skill_selected = 0,
@@ -111,7 +110,11 @@ pub(super) fn handle(
                 return true;
             }
             KeyCode::Tab => {
-                let name = commands[state.slash_selected].name;
+                let name = commands[state.slash_selected].name.clone();
+                if commands[state.slash_selected].skill.is_some() {
+                    dispatch_command(&name, state, effects, client, send);
+                    return true;
+                }
                 state.composer = composer::new();
                 state.composer.insert_str(name);
                 state.slash_selected = 0;
@@ -122,8 +125,8 @@ pub(super) fn handle(
                     .modifiers
                     .intersects(KeyModifiers::ALT | KeyModifiers::SHIFT) =>
             {
-                let name = commands[state.slash_selected].name;
-                if crate::commands::starts_turn(name) {
+                let name = commands[state.slash_selected].name.clone();
+                if crate::commands::starts_turn(&name) {
                     state.composer = composer::new();
                     state.composer.insert_str(name);
                     if let (Some(submission), Some(session)) =
@@ -139,7 +142,7 @@ pub(super) fn handle(
                     }
                     return true;
                 }
-                dispatch_command(name, state, effects, client, send);
+                dispatch_command(&name, state, effects, client, send);
                 return true;
             }
             _ => {

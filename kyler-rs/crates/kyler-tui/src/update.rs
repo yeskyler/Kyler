@@ -189,9 +189,29 @@ pub(crate) fn apply(
                 state.notice("This session has an active task. Use the CLI to inspect / cancel it, or create a new session.");
             }
         }
-        Event::Skills(skills) => {
+        Event::Skills(mut skills) => {
+            let selected_id = state
+                .skills_selected
+                .checked_sub(2)
+                .and_then(|index| state.skills.get(index))
+                .map(|skill| skill.id.clone());
+            skills.sort_by(|a, b| {
+                let rank = |source| {
+                    if source == kyler_protocol::api::skills::SkillSource::Builtin {
+                        0
+                    } else {
+                        1
+                    }
+                };
+                rank(a.source)
+                    .cmp(&rank(b.source))
+                    .then_with(|| a.name.cmp(&b.name))
+            });
             state.skills = skills;
-            state.skills_selected = state.skills_selected.min(state.skills.len() + 1);
+            state.skills_selected = selected_id
+                .and_then(|id| state.skills.iter().position(|skill| skill.id == id))
+                .map(|index| index + 2)
+                .unwrap_or_else(|| state.skills_selected.min(state.skills.len() + 1));
             state.skills_busy = false;
             state.skills_error = None;
             if let Some(details) = &mut state.skill_details {
