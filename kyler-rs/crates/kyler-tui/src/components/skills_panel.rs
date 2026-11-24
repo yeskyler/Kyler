@@ -166,7 +166,7 @@ pub fn render(frame: &mut Frame, state: &mut State, input: Rect) -> Rect {
     let mut selected_row = 0;
     if let Some(details) = &state.skill_details {
         lines.push(Line::styled(
-            clean(&details.info.name),
+            clean(details.info.label()),
             Style::default().fg(Color::Cyan),
         ));
         lines.push(Line::from(clean(&details.info.description)));
@@ -232,7 +232,7 @@ pub fn render(frame: &mut Frame, state: &mut State, input: Rect) -> Rect {
                     } else {
                         " "
                     },
-                    clean(&skill.name),
+                    clean(skill.label()),
                     match skill.source {
                         SkillSource::Builtin => "Built-in",
                         SkillSource::User => "User",

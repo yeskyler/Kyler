@@ -169,6 +169,7 @@ async fn skills_command_requires_review_before_project_approval_and_does_not_sub
     );
     assert!(state.skills_open && state.pending.is_none() && state.entries.is_empty());
     let info = SkillInfo {
+        display_name: None,
         id: "a".repeat(64),
         name: "review".into(),
         description: "Review changes".into(),
@@ -849,6 +850,7 @@ fn builtin_skill(name: &str) -> kyler_protocol::api::skills::SkillInfo {
     use kyler_protocol::api::skills::{SkillInfo, SkillSource, SkillStatus};
 
     SkillInfo {
+        display_name: None,
         id: name.into(),
         name: name.into(),
         description: "Built-in guidance".into(),
@@ -868,6 +870,11 @@ async fn skills_actions_prepare_explicit_drafts_without_starting_a_run() {
     state.skills = vec![
         builtin_skill("skill-creator"),
         builtin_skill("skill-installer"),
+        {
+            let mut skill = builtin_skill("review-agent");
+            skill.display_name = Some("Review Agent".into());
+            skill
+        },
     ];
     let mut effects = Effects::default();
     let (send, _receive) = tokio::sync::mpsc::channel(16);
@@ -880,6 +887,7 @@ async fn skills_actions_prepare_explicit_drafts_without_starting_a_run() {
         assert!(panel.contains("Create skill…"));
         assert!(panel.contains("Install skill…"));
         assert!(panel.contains("Built-in"));
+        assert!(panel.contains("Review Agent"));
         assert_eq!(view.panel.bottom(), view.input.y);
         app::handle_input(
             Input::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -908,6 +916,11 @@ async fn dollar_completion_only_inserts_enabled_skills_and_preserves_draft_prefi
     state.skills = vec![
         builtin_skill("skill-creator"),
         builtin_skill("skill-installer"),
+        {
+            let mut skill = builtin_skill("review-agent");
+            skill.display_name = Some("Review Agent".into());
+            skill
+        },
         disabled,
     ];
     state.composer.insert_str("Please use $skill-c");
@@ -930,6 +943,24 @@ async fn dollar_completion_only_inserts_enabled_skills_and_preserves_draft_prefi
     assert_eq!(
         state.composer.lines().join("\n"),
         "Please use $skill-creator "
+    );
+    assert!(state.pending.is_none());
+    state.composer = crate::components::composer::new();
+    state.composer.insert_str("Please use $review");
+    let screen = render(&mut terminal, &mut view, &mut state);
+    assert!(screen.contains("Review Agent"));
+    assert!(screen.contains("$review-agent"));
+    app::handle_input(
+        Input::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        &mut state,
+        &mut effects,
+        &client,
+        &send,
+        &view,
+    );
+    assert_eq!(
+        state.composer.lines().join("\n"),
+        "Please use $review-agent "
     );
     assert!(state.pending.is_none());
     state.composer = crate::components::composer::new();

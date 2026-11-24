@@ -377,3 +377,78 @@ async fn draft_paths_cannot_escape_or_execute_resources() {
         assert!(manager.draft_details("linked").await.is_err());
     }
 }
+
+#[tokio::test]
+async fn review_agent_builtin_is_discoverable_resource_scoped_and_fingerprint_bound() {
+    let temp = tempfile::tempdir().unwrap();
+    let settings = settings(temp.path());
+    let manager = Arc::new(SkillManager::new(settings.clone()).unwrap());
+    let snapshot = manager.snapshot(None).await.unwrap();
+    let info = snapshot.available["review-agent"].info.clone();
+    assert_eq!(info.label(), "Review Agent");
+    assert_eq!(info.path, "builtin://review-agent");
+    assert_eq!(info.source, SkillSource::Builtin);
+    assert_eq!(info.status, SkillStatus::Enabled);
+    assert!(!settings.user_directory.exists());
+    let reference = SkillReference {
+        id: info.id.clone(),
+        fingerprint: info.fingerprint.clone(),
+    };
+    let loaded = snapshot.load_reference(&reference).unwrap();
+    assert_eq!(loaded.info.name, "review-agent");
+    for resource in &info.resources {
+        assert!(
+            !snapshot
+                .resource_bytes("review-agent", resource)
+                .unwrap()
+                .bytes
+                .is_empty()
+        );
+    }
+    assert!(
+        snapshot
+            .resource_bytes("review-agent", "../SKILL.md")
+            .is_err()
+    );
+    manager
+        .action(None, &info.id, SkillAction::Disable, &info.fingerprint)
+        .await
+        .unwrap();
+    let disabled = manager.snapshot(None).await.unwrap();
+    assert!(!disabled.available.contains_key("review-agent"));
+    manager
+        .action(None, &info.id, SkillAction::Enable, "wrong-fingerprint")
+        .await
+        .unwrap_err();
+    manager
+        .action(None, &info.id, SkillAction::Enable, &info.fingerprint)
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .snapshot(None)
+            .await
+            .unwrap()
+            .load_reference(&reference)
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn skill_display_names_are_optional_and_do_not_change_invocation_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let settings = settings(temp.path());
+    package(&settings.user_directory, "custom", "Custom instructions");
+    fs::write(settings.user_directory.join("custom/SKILL.md"), "---\nname: custom\ndescription: Review this project\nmetadata:\n  display-name: Project Reviewer\n---\nCustom instructions").unwrap();
+    let manager = Arc::new(SkillManager::new(settings).unwrap());
+    let snapshot = manager.snapshot(None).await.unwrap();
+    let info = &snapshot.available["custom"].info;
+    assert_eq!(info.label(), "Project Reviewer");
+    assert_eq!(info.name, "custom");
+    assert!(snapshot.load("Project Reviewer").is_err());
+    let mut serialized = serde_json::to_value(info).unwrap();
+    serialized.as_object_mut().unwrap().remove("display_name");
+    let legacy: kyler_protocol::api::skills::SkillInfo =
+        serde_json::from_value(serialized).unwrap();
+    assert_eq!(legacy.label(), "custom");
+}

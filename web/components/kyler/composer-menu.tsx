@@ -251,13 +251,15 @@ export function ComposerMenu() {
                                       <Menu.Item
                                         key={skill.id}
                                         className={itemClass}
-                                        label={skill.name}
+                                        label={skill.display_name ?? skill.name}
                                         disabled={skill.status !== "enabled" || !!selecting}
                                         title={skill.description}
                                         onClick={() => insert({ kind: "skill", name: skill.name })}
                                       >
                                         <span className="min-w-0">
-                                          <span className="block break-all">@{skill.name}</span>
+                                          <span className="block break-all">
+                                            {skill.display_name ?? `@${skill.name}`}
+                                          </span>
                                           {skill.status !== "enabled" && (
                                             <span className="mt-0.5 block text-[11px] text-muted-foreground">
                                               {skill.status.replaceAll("_", " ")}

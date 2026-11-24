@@ -33,6 +33,7 @@ fn owner() -> TaskOwner {
 async fn review_delegation_uses_scoped_tools_and_persists_validated_findings_without_writes() {
     let (root, environment) = fixture();
     std::fs::write(root.path().join("code.rs"), "pub fn value() -> u32 { 0 }\n").unwrap();
+    std::fs::write(root.path().join("README.md"), "Unrelated changed context\n").unwrap();
     let finding = json!({"assessment":"issues_found","summary":"Value changed unexpectedly.","findings":[{"priority":"P1","title":"Unexpected zero return value","explanation":"Callers expecting a positive value now receive zero.","location":{"path":"code.rs","start_line":1,"end_line":1},"confidence":0.9}],"coverage":{"status":"complete","limitations":[]}});
     let (url,requests,model)=server(vec![
         json!({"role":"assistant","tool_calls":[{"id":"read","type":"function","function":{"name":"read_review_file","arguments":"{\"path\":\"code.rs\"}"}},{"id":"write","type":"function","function":{"name":"apply_patch","arguments":"{\"input\":\"fake\"}"}}]}),
@@ -49,7 +50,9 @@ async fn review_delegation_uses_scoped_tools_and_persists_validated_findings_wit
     let scope = manager
         .open_scope(owner(), runtime.child_executor(&manager))
         .unwrap();
-    let task = scope.delegate(request(), "review-call").unwrap();
+    let mut selected = request();
+    selected.review.as_mut().unwrap().paths = vec!["code.rs".into()];
+    let task = scope.delegate(selected, "review-call").unwrap();
     let done = scope
         .wait(&[task.task_id], WaitMode::All, 10)
         .await
@@ -66,6 +69,7 @@ async fn review_delegation_uses_scoped_tools_and_persists_validated_findings_wit
     assert_eq!(review.report.assessment, ReviewAssessment::IssuesFound);
     assert_eq!(review.report.findings.len(), 1);
     assert!(!review.snapshot.stale);
+    assert_eq!(review.snapshot.files, ["code.rs"]);
     assert!(
         review
             .report
@@ -310,4 +314,38 @@ async fn cancelling_a_review_waiting_for_the_model_persists_a_cancelled_child() 
     assert!(child.state.get("kyler.review.result").is_none());
     release.add_permits(1);
     model.abort();
+}
+
+#[tokio::test]
+async fn selected_review_agent_skill_loads_before_model_input() {
+    let root = tempfile::tempdir().unwrap();
+    let settings = kyler_config::SkillSettings {
+        user_directory: root.path().join("skills"),
+        state_file: root.path().join("state.json"),
+        ..Default::default()
+    };
+    let manager = Arc::new(crate::skills::SkillManager::new(settings).unwrap());
+    let (url, requests, model) = server(vec![
+        json!({"role":"assistant","content":"Review skill loaded."}),
+    ])
+    .await;
+    let runtime = agent(url).with_skill_manager(manager);
+    let mut session = crate::Session::new();
+    runtime
+        .run_in_session(&mut session, "$review-agent Review changes in code.rs")
+        .await
+        .unwrap();
+    model.await.unwrap();
+    assert_eq!(
+        session.current_execution().unwrap().selected_skills.len(),
+        1
+    );
+    let requests = requests.lock().await;
+    let messages = requests[0]["messages"].as_array().unwrap();
+    assert!(messages.iter().any(|m| {
+        m["role"] == "tool"
+            && m["content"]
+                .as_str()
+                .is_some_and(|text| text.contains("review-agent") && text.contains("delegate_task"))
+    }));
 }

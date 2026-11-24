@@ -241,17 +241,17 @@ export function PluginSkills({ active, addSignal, onCount }: PluginPanelProps) {
                           type="button"
                           disabled={busy}
                           className="max-w-full truncate text-left text-sm font-semibold outline-none hover:underline focus-visible:underline"
-                          title={skill.name}
+                          title={skill.display_name ?? skill.name}
                           onClick={() => void inspect(skill)}
                         >
-                          {skill.name}
+                          {skill.display_name ?? skill.name}
                         </button>
                       </h3>
                       <div className="mt-1.5">
                         <SourceBadge>{skillSources[skill.source]}</SourceBadge>
                       </div>
                     </div>
-                    <PluginActions label={skill.name} disabled={busy}>
+                    <PluginActions label={skill.display_name ?? skill.name} disabled={busy}>
                       <Menu.Item
                         className={pluginMenuItem}
                         disabled={busy}
@@ -455,7 +455,7 @@ export function PluginSkills({ active, addSignal, onCount }: PluginPanelProps) {
               <BookOpenIcon className="size-5" />
             </div>
             <SheetTitle className="break-words text-xl font-semibold">
-              {review?.info.name}
+              {review?.info.display_name ?? review?.info.name}
             </SheetTitle>
             <SheetDescription className="mt-2 leading-relaxed">
               {review?.info.description || "Skill details and instructions."}

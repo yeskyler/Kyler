@@ -465,3 +465,25 @@ turning delegation off. Concurrency must also fit the configured retained-task l
 identity and a trusted configuration source. The update body contains `enabled`,
 `max_concurrent_tasks`, and `max_tasks_per_execution`; responses include configured and
 active values, supported ceilings, and `restart_required`. No credentials are returned.
+
+### Review Agent skill
+
+**Review Agent** is a bundled skill with invocation name `review-agent`.
+Select it from the Web or TUI skill list, or write `@review-agent` / `$review-agent`
+followed by the review request. Its package source is `builtin://review-agent`;
+it is embedded in the binary rather than installed into the user's home directory.
+Its reference files are read through the ordinary skill-resource mechanism.
+
+The skill organizes review targets, workspace-relative file/directory selectors,
+and reporting. For example: `@review-agent Review uncommitted changes in web/`.
+Selectors are passed as `review.paths` to the existing delegated read-only executor;
+they do not authorize access outside the workspace. Commit and local base-branch
+reviews remain available. The executor retains immutable evidence capture, restricted
+tools, structured report validation, and stale-evidence checks. It never applies fixes.
+Direct review commands remain compatible with the same execution mechanism.
+
+To customize the instructions and reference files, create a user/project skill
+named `review-agent` using the normal skill installation and review flow. Package
+resources use relative paths, distinct from the code paths selected for review.
+An optional `metadata.display-name` in `SKILL.md` controls the label shown in Web and
+TUI; the lowercase `name` remains the identifier used in calls and approval records.

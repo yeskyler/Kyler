@@ -130,7 +130,7 @@ pub(super) fn unpack(
         files.keys().all(|name| name.starts_with(prefix)),
         "files outside skill folder are not supported"
     );
-    let (name, _, _) = loader::instructions(&files[manifest])?;
+    let (name, _, _, _) = loader::instructions(&files[manifest])?;
     Ok((
         name,
         files

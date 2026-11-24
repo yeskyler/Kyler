@@ -51,7 +51,7 @@ impl SkillSnapshot {
         let mut rows = Vec::new();
         let mut used = tokens(header, tokenizer);
         for package in packages {
-            let row=json!({"name":package.info.name,"description":package.info.description,"source":package.info.source,"skill_ref":{"id":package.info.id,"fingerprint":package.info.fingerprint}}).to_string()+"\n";
+            let row=json!({"name":package.info.name,"display_name":package.info.label(),"description":package.info.description,"source":package.info.source,"skill_ref":{"id":package.info.id,"fingerprint":package.info.fingerprint}}).to_string()+"\n";
             let count = tokens(&row, tokenizer);
             if used + count + 64 <= budget {
                 used += count;

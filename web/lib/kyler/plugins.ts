@@ -18,7 +18,10 @@ export function filterSkills(items: Skill[], query: string, source: string, stat
     (item) =>
       (source === "all" || item.source === source) &&
       (status === "all" || item.status === status) &&
-      (!term || `${item.name} ${item.description}`.toLocaleLowerCase().includes(term)),
+      (!term ||
+        `${item.name} ${item.display_name ?? ""} ${item.description}`
+          .toLocaleLowerCase()
+          .includes(term)),
   );
 }
 export function filterConnectors(

@@ -105,7 +105,7 @@ impl Catalog {
                     }
                 }
                 Err(_) => self.invalid.push(SkillInfo {
-                    id:loader::digest(path.to_string_lossy().as_bytes()), name:entry.file_name().to_string_lossy().into_owned(), description:String::new(), source, path:path.to_string_lossy().into_owned(), fingerprint:String::new(), status:SkillStatus::Invalid, resources:Vec::new(), error:Some("Invalid skill package: check frontmatter, names, symlinks and size limits.".into()),
+                    id:loader::digest(path.to_string_lossy().as_bytes()), name:entry.file_name().to_string_lossy().into_owned(), display_name:None, description:String::new(), source, path:path.to_string_lossy().into_owned(), fingerprint:String::new(), status:SkillStatus::Invalid, resources:Vec::new(), error:Some("Invalid skill package: check frontmatter, names, symlinks and size limits.".into()),
                 }),
             }
         }

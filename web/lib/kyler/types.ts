@@ -58,6 +58,7 @@ export const permissionLabels: Record<PermissionMode, string> = {
   full_access: "Full access",
 };
 export type Skill = {
+  display_name?: string | null;
   path: string;
   resources: string[];
   id: string;

@@ -14,6 +14,20 @@ struct BuiltinSkill {
 
 const SKILLS: &[BuiltinSkill] = &[
     BuiltinSkill {
+        name: "review-agent",
+        files: &[
+            ("SKILL.md", include_str!("builtin/review-agent/SKILL.md")),
+            (
+                "references/review-guidelines.md",
+                include_str!("builtin/review-agent/references/review-guidelines.md"),
+            ),
+            (
+                "references/report-format.md",
+                include_str!("builtin/review-agent/references/report-format.md"),
+            ),
+        ],
+    },
+    BuiltinSkill {
         name: "skill-creator",
         files: &[
             ("SKILL.md", include_str!("builtin/skill-creator/SKILL.md")),
@@ -49,7 +63,8 @@ pub fn packages(_settings: &SkillSettings) -> anyhow::Result<Vec<Package>> {
                 .find(|(path, _)| *path == "SKILL.md")
                 .map(|(_, text)| *text)
                 .ok_or_else(|| anyhow::anyhow!("built-in skill is missing SKILL.md"))?;
-            let (name, description, instructions) = loader::instructions(text.as_bytes())?;
+            let (name, display_name, description, instructions) =
+                loader::instructions(text.as_bytes())?;
             anyhow::ensure!(name == skill.name, "built-in skill name mismatch");
             let mut files = BTreeMap::new();
             for (path, text) in skill.files {
@@ -72,6 +87,7 @@ pub fn packages(_settings: &SkillSettings) -> anyhow::Result<Vec<Package>> {
                 info: SkillInfo {
                     id: loader::digest(path.as_bytes()),
                     name,
+                    display_name,
                     description,
                     source: SkillSource::Builtin,
                     path: path.clone(),

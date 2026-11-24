@@ -56,9 +56,13 @@ pub fn render(frame: &mut Frame, state: &State, input: Rect) -> Rect {
         .map(|(index, skill)| {
             super::panel::selected(
                 format!(
-                    "{} ${}",
+                    "{} {}",
                     if index == selected { ">" } else { " " },
-                    skill.name
+                    if skill.display_name.is_some() {
+                        format!("{} (${})", skill.label(), skill.name)
+                    } else {
+                        format!("${}", skill.name)
+                    }
                 ),
                 index == selected,
             )

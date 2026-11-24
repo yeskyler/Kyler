@@ -32,6 +32,8 @@ pub enum SkillStatus {
 pub struct SkillInfo {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub description: String,
     pub source: SkillSource,
     pub path: String,
@@ -40,6 +42,12 @@ pub struct SkillInfo {
     pub resources: Vec<String>,
     pub error: Option<String>,
 }
+impl SkillInfo {
+    pub fn label(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillDetails {
     pub info: SkillInfo,

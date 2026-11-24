@@ -25,6 +25,13 @@ pub struct Package {
 struct Metadata {
     name: String,
     description: String,
+    #[serde(default)]
+    metadata: UiMetadata,
+}
+#[derive(Default, Deserialize)]
+struct UiMetadata {
+    #[serde(rename = "display-name")]
+    display_name: Option<String>,
 }
 pub fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -93,7 +100,7 @@ pub fn package_with_policy(
         policy.check_read(&root, &root.join("SKILL.md"))?;
     }
     let bytes = read_file(&root, Path::new("SKILL.md"), settings.max_instruction_bytes)?;
-    let (name, description, instructions) = instructions(&bytes)?;
+    let (name, display_name, description, instructions) = instructions(&bytes)?;
     let mut files = BTreeMap::new();
     let mut total = 0;
     collect(
@@ -115,6 +122,7 @@ pub fn package_with_policy(
         info: SkillInfo {
             id,
             name,
+            display_name,
             description,
             source,
             path: root.to_string_lossy().into_owned(),
@@ -229,7 +237,7 @@ fn open_resource(root: &Path, relative: &Path) -> Result<fs::File> {
     Ok(fs::File::open(root.join(relative))?)
 }
 
-pub(super) fn instructions(bytes: &[u8]) -> Result<(String, String, String)> {
+pub(super) fn instructions(bytes: &[u8]) -> Result<(String, Option<String>, String, String)> {
     let text = std::str::from_utf8(bytes)
         .context("SKILL.md must be UTF-8")?
         .replace("\r\n", "\n");
@@ -270,5 +278,16 @@ pub(super) fn instructions(bytes: &[u8]) -> Result<(String, String, String)> {
         !instructions.is_empty(),
         "skill instructions cannot be empty"
     );
-    Ok((metadata.name, metadata.description, instructions))
+    if let Some(label) = &metadata.metadata.display_name {
+        ensure!(
+            !label.trim().is_empty() && label.len() <= 128 && !label.chars().any(char::is_control),
+            "invalid skill display name"
+        );
+    }
+    Ok((
+        metadata.name,
+        metadata.metadata.display_name,
+        metadata.description,
+        instructions,
+    ))
 }
