@@ -254,6 +254,14 @@ Failures preserve previously discovered models and expose a safe per-provider
 status through `/v1/models`. Credentials and provider response bodies are never
 stored in this cache. Set `discover_models = false` to use manual profiles only.
 
+The Web Providers overview shows connection evidence from the latest discovery attempt:
+authentication failure (401), permission denial (403), rate limiting (429), timeout,
+network failure, or provider unavailability (5xx). An HTTP response without a usable
+model list is shown as reachable with authentication unverified, rather than a failed
+connection. Before a check, connection status is unverified. These checks do not run
+inference or assert that a chat request will succeed. Model-list freshness and its
+sanitized error appear inside the provider's Models section.
+
 Model lists may omit capability details. Reasoning capability precedence is explicit
 per-model configuration, validated provider metadata, then adapter rules. Unknown
 capabilities remain unknown; the installation model never defines other models'

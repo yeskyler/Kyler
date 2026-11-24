@@ -4,6 +4,40 @@ use std::time::Duration;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
+/// Sanitized connection evidence, independent of model-list parsing.
+#[derive(Debug)]
+struct ConnectionFailure {
+    status: &'static str,
+    message: String,
+}
+impl std::fmt::Display for ConnectionFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+impl std::error::Error for ConnectionFailure {}
+fn failure(status: &'static str, message: impl Into<String>) -> anyhow::Error {
+    ConnectionFailure {
+        status,
+        message: message.into(),
+    }
+    .into()
+}
+pub fn connection_status(error: &anyhow::Error) -> &'static str {
+    error
+        .downcast_ref::<ConnectionFailure>()
+        .map_or("reachable", |e| e.status)
+}
+fn http_status(status: u16) -> &'static str {
+    match status {
+        401 => "authentication_failed",
+        403 => "permission_denied",
+        429 => "rate_limited",
+        500..=599 => "unavailable",
+        _ => "reachable",
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoveredModel {
     pub id: String,
@@ -27,8 +61,8 @@ pub async fn list_models(
             .build()
     })
     .await
-    .map_err(|_| anyhow::anyhow!("Model discovery client initialization failed"))?
-    .map_err(|_| anyhow::anyhow!("Model discovery client initialization failed"))?;
+    .map_err(|_| failure("untested", "Model discovery client initialization failed"))?
+    .map_err(|_| failure("untested", "Model discovery client initialization failed"))?;
     let gemini = adapter.0 == crate::AdapterKind::Gemini;
     let base = base_url.trim_end_matches('/');
     let base = if gemini {
@@ -63,7 +97,7 @@ pub async fn list_models(
         }
         let value = tokio::time::timeout_at(deadline, discovery_response(page))
             .await
-            .map_err(|_| anyhow::anyhow!("Model discovery timed out"))??;
+            .map_err(|_| failure("timeout", "Model discovery timed out"))??;
         let field = if gemini { "models" } else { "data" };
         entries.extend(
             value[field]
@@ -139,15 +173,23 @@ pub async fn list_models(
 }
 
 async fn discovery_response(request: reqwest::RequestBuilder) -> Result<serde_json::Value> {
-    let mut response = request
-        .send()
-        .await
-        .map_err(|_| anyhow::anyhow!("Model discovery connection failed"))?;
-    ensure!(
-        response.status().is_success(),
-        "Model discovery returned HTTP {}",
-        response.status().as_u16()
-    );
+    let mut response = request.send().await.map_err(|e| {
+        failure(
+            if e.is_timeout() {
+                "timeout"
+            } else {
+                "network_error"
+            },
+            "Model discovery connection failed",
+        )
+    })?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        return Err(failure(
+            http_status(status),
+            format!("Model discovery returned HTTP {status}"),
+        ));
+    }
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
@@ -243,5 +285,48 @@ mod capability_tests {
                 .levels
                 .is_empty()
         );
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn connection_evidence_is_independent_of_model_list_support() {
+        use axum::{Router, http::StatusCode, routing::get};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let router = Router::new().route(
+            "/{code}/models",
+            get(
+                |axum::extract::Path(code): axum::extract::Path<u16>,
+                 headers: axum::http::HeaderMap| async move {
+                    assert_eq!(headers["authorization"], "Bearer TEST_KEY");
+                    (StatusCode::from_u16(code).unwrap(), "private response body")
+                },
+            ),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        for (code, expected) in [
+            (401, "authentication_failed"),
+            (403, "permission_denied"),
+            (429, "rate_limited"),
+            (503, "unavailable"),
+            (404, "reachable"),
+            (200, "reachable"),
+        ] {
+            let error = list_models(
+                &format!("{base}/{code}"),
+                "TEST_KEY",
+                crate::Adapter(crate::AdapterKind::Generic),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(connection_status(&error), expected);
+            assert!(!error.to_string().contains("private response body"));
+            assert!(!error.to_string().contains("TEST_KEY"));
+        }
+        server.abort();
     }
 }

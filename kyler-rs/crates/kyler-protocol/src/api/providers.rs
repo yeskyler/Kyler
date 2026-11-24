@@ -17,6 +17,8 @@ pub struct ProviderInfo {
     pub models: Vec<String>,
     pub default_model: Option<String>,
     pub status: String,
+    pub discovery_status: String,
+    pub discovery_error: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct ProviderCatalog {

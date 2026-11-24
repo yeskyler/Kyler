@@ -209,6 +209,11 @@ impl ModelRegistry {
         let mut live = Cache::default();
         for (name, p, result) in results {
             let key = identity(&name, &p);
+            let connection_status = match &result {
+                Some(Ok(_)) => "connected",
+                Some(Err(e)) => kyler_provider::discovery::connection_status(e),
+                None => "untested",
+            };
             let (status, error) = match result {
                 Some(Ok(entries)) => {
                     cache.0.insert(key.clone(), entries);
@@ -221,6 +226,7 @@ impl ModelRegistry {
                 live.0.insert(key, entries);
             }
             statuses.push(ProviderDiscoveryState {
+                connection_status: connection_status.into(),
                 provider: name,
                 status: status.into(),
                 error,
@@ -309,6 +315,10 @@ mod tests {
         let stale = restarted.refresh_discovery().await.unwrap();
         assert_eq!(stale.models.len(), 1);
         assert_eq!(stale.providers[0].status, "stale");
+        assert_eq!(
+            stale.providers[0].connection_status,
+            "authentication_failed"
+        );
         assert!(!serde_json::to_string(&stale).unwrap().contains("PRIVATE"));
         assert_eq!(old.info.revision, catalog.revision);
         config.models.providers.get_mut("fixture").unwrap().api_key =

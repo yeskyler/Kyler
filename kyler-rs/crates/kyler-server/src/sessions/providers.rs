@@ -148,8 +148,20 @@ impl RunManager {
                         .providers
                         .iter()
                         .find(|p| p.provider == *id)
-                        .map(|p| p.status.clone())
+                        .map(|p| p.connection_status.clone())
+                        .filter(|s| !s.is_empty())
                         .unwrap_or_else(|| "untested".into()),
+                    discovery_status: catalog
+                        .providers
+                        .iter()
+                        .find(|p| p.provider == *id)
+                        .map(|p| p.status.clone())
+                        .unwrap_or_else(|| "pending".into()),
+                    discovery_error: catalog
+                        .providers
+                        .iter()
+                        .find(|p| p.provider == *id)
+                        .and_then(|p| p.error.clone()),
                 }
             })
             .collect();
@@ -186,11 +198,7 @@ impl RunManager {
             Adapter::resolve(provider.adapter, &provider.base_url),
         )
         .await
-        .map_err(|_| {
-            ApiError::bad(
-                "Connection test failed. Check the URL, credentials and model-list support.",
-            )
-        })?;
+        .map_err(|error| ApiError::bad(&format!("Model list refresh failed: {error}")))?;
         Ok(ProviderTest {
             models: models.into_iter().map(|m| m.id).collect(),
         })

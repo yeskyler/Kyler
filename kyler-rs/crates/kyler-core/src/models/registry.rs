@@ -52,6 +52,7 @@ impl ModelRegistry {
                 .map(
                     |(name, p)| kyler_protocol::api::models::ProviderDiscoveryState {
                         provider: name.clone(),
+                        connection_status: "untested".into(),
                         status: if p.discover_models {
                             "pending"
                         } else {

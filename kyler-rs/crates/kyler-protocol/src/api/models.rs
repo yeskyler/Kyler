@@ -66,6 +66,8 @@ pub struct ModelCatalog {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderDiscoveryState {
+    #[serde(default)]
+    pub connection_status: String,
     pub provider: String,
     pub status: String,
     pub error: Option<String>,

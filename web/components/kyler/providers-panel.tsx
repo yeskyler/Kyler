@@ -6,6 +6,7 @@ import { ArrowLeftIcon, CheckIcon, ChevronDownIcon, PlusIcon } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/kyler/client";
+import { providerConnection, modelDiscovery } from "@/lib/kyler/provider-status";
 
 type Provider = {
   id: string;
@@ -15,6 +16,8 @@ type Provider = {
   models: string[];
   default_model: string | null;
   status: string;
+  discovery_status: string;
+  discovery_error: string | null;
 };
 type Preset = { adapter: string; name: string; base_url: string | null; key_required: boolean };
 type Catalog = { providers: Provider[]; presets: Preset[] };
@@ -211,6 +214,16 @@ export function ProvidersPanel() {
             </label>
             <fieldset className="space-y-2" disabled={busy}>
               <legend className="mb-2 text-sm font-medium">Models</legend>
+              {previous && (
+                <div className="space-y-1 text-xs font-normal text-muted-foreground">
+                  <p>{modelDiscovery(previous.discovery_status)}</p>
+                  {previous.discovery_error && <p>{previous.discovery_error}</p>}
+                  <p>
+                    Model discovery is separate from chat availability. Status refers to the saved
+                    configuration.
+                  </p>
+                </div>
+              )}
               {draft.models.map((model, index) => (
                 <div key={index} className="flex gap-2">
                   <Input
@@ -267,7 +280,7 @@ export function ProvidersPanel() {
                       `providers/${encodeURIComponent(draft.id)}/test`,
                       { method: "POST", body: JSON.stringify(request) },
                     );
-                    setNotice(`Connected. ${result.models.length} models found.`);
+                    setNotice(`Model list fetched. ${result.models.length} models found.`);
                     if (result.models.length)
                       setDraft((current) =>
                         current
@@ -285,7 +298,7 @@ export function ProvidersPanel() {
                   })
                 }
               >
-                Test connection
+                Fetch model list
               </Button>
               <Button type="submit" disabled={busy || !valid}>
                 {busy ? "Working…" : "Save"}
@@ -396,13 +409,9 @@ export function ProvidersPanel() {
               <span className="inline-flex items-center gap-2 rounded-full bg-accent px-3 py-1 text-xs">
                 <span
                   aria-hidden="true"
-                  className={`size-2 shrink-0 rounded-full ${provider.status === "ready" ? "bg-emerald-500" : provider.status === "stale" ? "bg-destructive" : "bg-muted-foreground/50"}`}
+                  className={`size-2 shrink-0 rounded-full ${providerConnection(provider.status).tone}`}
                 />
-                {provider.status === "ready"
-                  ? "Connected"
-                  : provider.status === "stale"
-                    ? "Connection failed"
-                    : "Not tested"}
+                {providerConnection(provider.status).label}
               </span>
             </button>
           ))}
