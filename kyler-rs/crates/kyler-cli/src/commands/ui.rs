@@ -188,12 +188,6 @@ impl Progress {
         self.pause();
         self.active = None;
     }
-    pub fn skipped(&mut self, reason: &str) {
-        self.pause();
-        if let Some(label) = self.active.take() {
-            warning(&format!("{label}: {reason}"));
-        }
-    }
     pub fn complete(&mut self) {
         self.pause();
         if let Some(label) = self.active.take() {

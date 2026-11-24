@@ -264,17 +264,8 @@ def main():
         step(9, "Write release checksums")
         sums = args.output / "SHA256SUMS"
         lines = sums.read_text().splitlines() if sums.exists() else []
-        installer = args.output / f"kyler-installer-v{version}-{target}"
-        with tempfile.NamedTemporaryFile(dir=args.output, prefix=".installer-", delete=False) as stage:
-            installer_stage = Path(stage.name)
-        try:
-            shutil.copy2(binary, installer_stage)
-            installer_stage.chmod(0o755)
-            installer_stage.replace(installer)
-        finally:
-            installer_stage.unlink(missing_ok=True)
-        lines = [line for line in lines if line.split()[-1] not in (output.name, installer.name)]
-        sums.write_text("\n".join(sorted([*lines, f"{digest(output)}  {output.name}", f"{digest(installer)}  {installer.name}"])) + "\n")
+        lines = [line for line in lines if line.split()[-1] != output.name and not line.split()[-1].startswith("kyler-installer-")]
+        sums.write_text("\n".join(sorted([*lines, f"{digest(output)}  {output.name}"])) + "\n")
         shutil.copy2(ROOT / "scripts/install.sh", args.output / "install.sh")
         print(f"\nPackaging complete.\nBundle: {output}\nSize: {output.stat().st_size / (1024 * 1024):.1f} MiB", flush=True)
         print(f"Install: sh scripts/install.sh --bundle {output}")

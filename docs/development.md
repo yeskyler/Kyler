@@ -132,12 +132,11 @@ SDK stream waiting; it does not separately measure DNS, TLS, or provider queuein
 
 ## Installer and release checks
 
-Build the CLI before running installer tests so integration cases are not skipped:
+Build the CLI and run isolated installation and release checks:
 
 ```sh
 cargo build --manifest-path kyler-rs/Cargo.toml -p kyler-cli
 python3 scripts/prepare_runtime.py --profile debug
-cargo test --manifest-path kyler-rs/Cargo.toml -p kyler-cli --lib commands::install
 python3 scripts/tests/test_install.py
 python3 scripts/tests/test_release.py
 python3 scripts/tests/test_package.py
@@ -145,12 +144,10 @@ python3 scripts/tests/test_package_runtime.py
 sh -n scripts/install.sh scripts/package.sh scripts/release.sh
 ```
 
-The installer tests use temporary homes and ports. Node.js is needed for the
-complete-bundle fixture tests. Runtime tests reject missing payloads and verify private-tool selection with a
-broken host rg; they never install host packages. Shell tests cover
-bootstrap download/verification and delegate activation to the real CLI. Installer
-tests verify package activation, configuration
-preservation, service startup, and rollback. Release validation also requires a
+The shell installation tests use temporary homes and mock executables. They cover
+archive installation, repeated installation, file integrity, rejection of links and
+unlisted files, configuration and service invocation, and configuration failure.
+They make no network or model requests. Release validation also requires a
 standalone Web startup check against the native bundle.
 
 See [releasing](releasing.md) for producing a native package. Documentation validation
@@ -298,13 +295,13 @@ prompt handler must spawn connection-owned work so permission responses and
 `session/cancel` remain receivable. Never log raw protocol frames or model keys.
 See [ACP integration](acp.md) for capabilities, storage and test commands.
 
-For installer work from source, use the built CLI as the trusted bootstrap:
+To test the shell script with a local release bundle:
 
 ```sh
-KYLER_INSTALLER_BINARY="$PWD/kyler-rs/target/debug/kyler" sh scripts/install.sh --bundle /path/to/bundle.tar.gz
+sh scripts/install.sh --bundle /path/to/bundle.tar.gz
 ```
 
-Use a temporary HOME when testing; the CLI accepts both directories and archives.
+Use a temporary HOME when testing; the script accepts both directories and archives.
 
 ## Gateway and provider validation
 
@@ -314,9 +311,9 @@ thread operations, cancellation, or channel event projection. Provider tests and
 the core Responses fixture cover protocol routing and complete tool continuations
 without credentials or paid model calls. Local fixture tests need loopback sockets.
 
-The installer and configuration wizard use the upstream `cliclack` crate with a
+The configuration wizard uses the upstream `cliclack` crate with a
 shared foreground-only theme, grouped review/connection notes and searchable model
-selection. `indicatif` renders installation progress; prompts and progress never
+selection. `indicatif` renders CLI progress; prompts and progress never
 render concurrently. Escape and Ctrl+C cancel a prompt, while explicit Back items
 navigate selection pages. Noninteractive installation uses plain status lines.
 Secret input uses a bracketed-paste reader with the same Clack theme; this

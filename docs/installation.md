@@ -1,165 +1,43 @@
 # Installation
 
-A complete Kyler bundle contains the backend, Web application, TUI, CLI, and a native
-Node.js runtime. Installation does not require Rust, Cargo, npm, or a separate Node.js
-installation. The archive must match the host operating system and CPU architecture.
-
-Run source-repository commands from the repository root.
-
-## Release installation
-
-Download and execute the installer:
+Complete release bundles contain Kyler, the Web application, Node.js and private
+runtime tools. No Rust or npm installation is required.
 
 ```sh
-curl -fsSL http://www.kyler.work/install.sh -o install.sh
+curl -fsSL https://www.kyler.work/install.sh -o install.sh
 sh install.sh
 ```
 
-The installer is hosted separately from Release assets. It reads the latest version
-from `https://www.kyler.work/releases/latest.txt`, detects the host platform, and
-fetches the archive and `SHA256SUMS` from the server's `/releases/vVERSION/` directory.
-If version discovery fails, it queries GitHub Releases. If a server download fails,
-it downloads both files again from GitHub for the same version. Checksum failures
-stop installation; they do not silently switch sources. `--version VERSION` skips
-latest-version discovery.
+The shell script downloads the release archive and SHA256SUMS, verifies the archive,
+extracts it, verifies its files and installs it. It then runs `kyler configure
+--web --addresses` and, after successful configuration, `kyler service start --restart`.
+There is no separate installer executable or `kyler install` command. Installation
+performs no environment diagnostics; run `kyler doctor` manually when needed.
+If configuration is cancelled, the program stays installed; configuration and
+service startup can be retried manually.
 
-The shell bootstrap only obtains and verifies a native CLI executable, then hands
-control to `kyler install`. All bundle downloading, archive extraction, integrity
-checks, native sandbox checks, activation and configuration UI run in Rust. The
-bootstrap uses one brief preparation line. Installation groups its checks into
-**Prepare package**, **Check environment**, and **Install Kyler**, then opens
-configuration and launch. All stages share inline `indicatif` progress and
-`cliclack` setup controls. Diagnostics are saved to
-private installation logs; failures show a concise reason and the log path.
+Downloads use the installation server first, with GitHub Releases as a fallback.
+Checksum failures stop installation. Use `--version VERSION` to select a release.
 
-Native packaging also emits a standalone CLI installer for the installation server.
-GitHub Releases provide the complete platform archives and their checksums.
-Pass a downloaded archive with `--bundle` to bootstrap from the CLI inside it.
-For source development or a trusted offline installer, set `KYLER_INSTALLER_BINARY`
-to its executable path. This explicit override is trusted executable code, not a
-replacement for verification of the selected bundle.
-
-An interactive installation opens `kyler configure` as the final step, after
-activation and PATH setup. Choose **Save and start** or **Save without starting**.
-Cancelling setup keeps the installed program; run `kyler configure` to resume.
-On upgrades with valid saved settings, choose **Keep current configuration and start**
-to avoid model discovery and repeated credential entry, or **Edit configuration**.
-Running `kyler configure` directly always opens the editing flow.
-Non-interactive installs skip this wizard unless `--configure` is explicitly requested. Upgrades preserve existing configuration and restore
-previously running services; stopped services remain stopped. During interactive
-upgrades, restoration waits until configuration finishes. Choosing **Save without
-starting** leaves services stopped; cancelling setup restores previously running
-services using their saved configuration. For explicit automation,
-use `--configure --start` (with `--non-interactive` when appropriate).
-Local bundles skip downloading but retain integrity and sandbox verification.
-
-Verified downloads are kept in `${XDG_CACHE_HOME:-$HOME/.cache}/kyler/downloads/vVERSION/`.
-Before downloading an archive, the installer fetches the selected source's current
-checksums and checks both this cache and the current directory. Matching archives
-are reused; corrupt or replaced versions are downloaded again. The cache survives
-configuration or startup failures.
-
-### Host compatibility and bundled runtime
-
-Release bundles contain their own ripgrep. Kyler never selects a host `rg`, even
-when one is installed. macOS uses a standalone native build without Homebrew/PCRE2
-dylib dependencies and the operating system's Seatbelt backend.
-
-Linux uses system-installed Bubblewrap >= 0.5.0, slirp4netns, ip, unshare,
-nsenter, iptables/ip6tables and their restore commands, sh and sleep. These tools
-and their libraries are managed by the operating system, not copied into the
-release. Installation checks executable paths and versions, then exercises both
-native sandbox modes. See [Linux sandbox dependencies](linux-sandbox.md) for
-package-manager commands and host-policy diagnostics.
-
-The installer does not invoke brew, apt, sudo or another package manager. Missing
-system tools produce an actionable dependency error. Ripgrep and Node.js remain
-covered by the bundle manifest and version switching/rollback; system packages
-are not changed or rolled back by Kyler. Install the complete native archive;
-copying only `bin/kyler` is insufficient.
-
-macOS/Linux and x86_64/ARM64 builds are supported. Linux still requires the host's
-glibc ABI, kernel namespace capabilities and compatible security policy. Those
-cannot be bundled as user-space executables. Both offline and outbound native
-sandbox execution are mandatory checks before activation. No host security setting
-is weakened and there is no unrestricted-execution fallback.
-
-The Shell bootstrap needs basic shell/checksum utilities and curl for remote
-downloads. The CLI also uses curl for HTTPS transfer and parses archives internally;
-installation with an adjacent installer no longer requires a host tar executable.
-For a standalone offline archive without that executable, the bootstrap can use tar
-to read only its CLI and checksum manifest; the CLI verifies and extracts the
-complete package. These bootstrap utilities are separate from Kyler's private
-runtime. Node.js is included; Rust is only needed when building from source.
-
-### Native sandbox self-check
-
-After verification, before replacing the old installation or stopping services, the
-new binary runs `kyler doctor` as the installing user. It uses temporary fixtures and
-a disposable local TCP listener, without reading application configuration, contacting
-a model or using an API key. Both offline and outbound sandbox policies must launch
-successfully and enforce workspace writes, protected/denied/outside paths and denial
-of host loopback access. A child shell and a real `grep_files` search over a
-disposable fixture are also executed inside each sandbox. This verifies ripgrep discovery and access through
-the same runtime PATH and read-only executable roots used by workspace tools. Worker
-execution uses the same MXC supervision and cleanup as application tools.
-
-The check exercises network-policy setup and local isolation; it does not verify
-public internet reachability or every possible destination. Linux user namespaces,
-AppArmor, namespace tooling versions, firewall backends, kernel modules and container
-host restrictions can prevent execution even when packages are installed. Failures
-stop before activation and preserve the previous installation/configuration. The
-installer never disables host security or falls back to unrestricted execution.
-For a restricted container or cloud image, ask its administrator to resolve the
-reported policy/kernel limitation rather than running Kyler as root to bypass it.
-
-Run checks independently, including before starting a source build:
+## Local installation
 
 ```sh
-kyler doctor
-kyler --json doctor
+sh scripts/install.sh --bundle /path/to/bundle.tar.gz
+sh scripts/install.sh --bundle /path/to/unpacked-bundle
 ```
 
-Bundles must provide both `install` and `doctor`; use a newly built complete
-bundle. The new bootstrap does not fall back to legacy Shell installation logic. Updating only `install.sh` does not update an existing release binary.
+Local bundles require their internal SHA256SUMS. Only regular files and directories
+are accepted. Obtain local bundles from a trusted source.
 
-Unauthenticated download URLs require a publicly accessible repository. Private release
-assets require authenticated download followed by local bundle installation.
+## Options
 
-## Local bundle installation
+- `--version VERSION`: download a specific release.
+- `--bundle PATH`: install a local archive or directory.
+- `--no-configure`: skip configuration.
+- `--no-start`: skip service startup.
+- `--non-interactive`: configure using the CLI's unattended configuration mode.
 
-Build and install a native bundle from source:
-
-```sh
-sh scripts/package.sh
-```
-
-On macOS Apple Silicon, the generated archive is installed with:
-
-```sh
-sh scripts/install.sh --bundle ./dist/kyler-v0.1.0-aarch64-apple-darwin.tar.gz
-```
-
-An already unpacked bundle can be installed without the shell bootstrap:
-
-```sh
-./path/to/bundle/bin/kyler install --bundle ./path/to/bundle
-```
-
-The CLI accepts unpacked directories and `.tar.gz` archives, or downloads a release:
-
-```sh
-kyler install --bundle ./kyler-v0.3.0-aarch64-apple-darwin.tar.gz
-kyler install --version 0.3.0
-```
-
-These paths share the same transaction and UI. Archive links, special files,
-duplicate entries and paths outside the extraction directory are rejected before
-any bundled program runs.
-
-Archive names follow `kyler-v<version>-<target>.tar.gz`. The target identifies the
-operating system and architecture. [Release management](releasing.md) defines packaging
-requirements and artifact validation.
+For unattended file installation only, use `--no-configure --no-start`.
 
 ## Configuration stages
 
@@ -253,7 +131,7 @@ for provider-specific setup.
 
 ### Service status and management
 
-The installer uses a compact, left-aligned layout without decorative blank lines,
+The configuration wizard uses a compact, left-aligned layout without decorative blank lines,
 boxed headings or alignment padding. It inherits the terminal background and normal
 text colors. Active controls use the terminal's cyan palette, success green,
 attention yellow and errors red; selected options are bold without a background
@@ -301,85 +179,19 @@ updates the shell startup file for new terminals. To use the command in the curr
 export PATH=~/.local/bin:"$PATH"
 ```
 
-## Installation paths and upgrades
+## Paths and updates
 
-| Path | Contents |
-| --- | --- |
-| `~/.local/bin/kyler` | Command entry point |
-| `~/.local/share/kyler/versions/<version>/` | Versioned backend, Web application, and Node.js runtime |
-| `~/.local/share/kyler/current` | Active-version symbolic link |
-| `~/.kyler/config.toml` | Private application configuration |
-| `~/.kyler/logs/server.log` | Backend log |
-| `~/.kyler/logs/web.log` | Web log |
-| `~/.kyler/workspace/` | Default project directory |
+Versions are installed under `~/.local/share/kyler/versions/`, selected through
+`~/.local/share/kyler/current`. The command is linked at `~/.local/bin/kyler`.
+The script adds that directory to `.zshrc` for Zsh or `.profile` otherwise.
+Configuration remains at `~/.kyler/config.toml`; installation preserves it.
+Run the script again to upgrade. Previous version directories remain available,
+but the script does not automatically roll back a failed configuration or startup.
 
-Reinstall a complete bundle to upgrade. The installer validates checksums and prepares a
-candidate configuration before activating the new version. Existing configuration,
-sessions, skills, and project files are preserved.
-
-If startup fails, the installer attempts to stop the new services and restore the
-previous installation, configuration, shell startup content, and service state. When cleanup cannot be
-verified, installation reports the failure for inspection. Old version directories remain available during activation for rollback and are
-removed after successful activation and service recovery. A local installation lock prevents simultaneous activations.
-Cancellation during activation also invokes recovery; cancellation during setup
-does not publish the candidate configuration. [Troubleshooting](troubleshooting.md) covers service diagnostics
-and recovery.
-
-## Installation options
-
-Run `sh install.sh` to install the latest release and configure it in the final step.
-The installer automatically configures PATH for new terminals.
-
-| Option | Behavior |
-| --- | --- |
-| `--bundle PATH` | Install a complete local archive or bundle directory |
-| `--version VERSION` | Select a published release version |
-| `-h`, `--help` | Display installation help |
-
-Advanced options support automation and maintenance:
-
-| Option | Behavior |
-| --- | --- |
-| `--configure` | Open configuration during installation |
-| `--start` | Start services explicitly after activation |
-| `--no-start` | Install without starting services or opening automatic setup; existing managed services are stopped during upgrades |
-| `--no-configure` | Skip the configuration wizard; create defaults only when configuration is absent |
-| `--non-interactive` | Use saved configuration and process environment without prompts |
-
-These advanced options are also available on `kyler install`. The CLI accepts
-`--config` for a separate configuration path and rejects `--server` and `--json`.
-Runtime checks are validation-only, including in non-interactive mode; missing
-payloads must be repaired with a complete bundle.
-
-Non-interactive setup accepts the environment overrides listed in
-[configuration](configuration.md). Installations always include the backend, Web UI,
-and Node.js runtime. `KYLER_REPOSITORY` selects the GitHub repository used for release
-downloads.
-
-### Local terminal agent
-
-Run `kyler` from your project directory; it defaults to `kyler tui`. It loads local model credentials and
-executes the agent in the terminal process; backend and Web services do not need
-to be running. The backend access token and `--server` option are not used by TUI.
-
-For backend-connected text chat, explicitly run `kyler chat`. For piped input use
-`kyler chat` or `kyler run`; the default TUI requires an interactive terminal and
-rejects `--json` and `--server` just like an explicit `kyler tui` invocation.
-
-Resume a local session with `kyler tui --session <session-id>`. Local TUI sessions
-are separate from Web sessions and normally live in `~/.kyler/tui/sessions`.
-The saved workspace must still exist and match the configured sandbox policy.
-
-Reasoning streams in a muted preview showing the latest six display lines. It
-collapses by default when the agent starts an answer or tool call. Click its
-heading or press `Ctrl+O` to toggle the latest reasoning block; expanding retains
-the full text. A manual disclosure choice stays in effect as new fragments arrive.
-Completed live blocks show their elapsed thinking time. Restored history starts
-collapsed and does not invent timing information that was not saved.
-
-### Installation diagnostics
-
-Successful environment and sandbox checks show short status messages. Their detailed
-output is retained in `~/.kyler/logs/install.log` with private file permissions. Failed
-checks show the diagnostic needed to understand the failure. API-key input and the
-interactive configuration transcript are not written to this log.
+```sh
+kyler configure
+kyler service start --restart
+kyler service status
+kyler logs
+kyler doctor
+```

@@ -153,8 +153,7 @@ class PackageSetupTests(unittest.TestCase):
         archive = output / "kyler-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
         self.assertEqual((output / "install.sh").read_text(), "fixture bootstrap")
         installer = output / "kyler-installer-v0.1.0-x86_64-unknown-linux-gnu"
-        self.assertEqual(installer.read_bytes(), (self.bin / "kyler").read_bytes())
-        self.assertIn(package.digest(installer), (output / "SHA256SUMS").read_text())
+        self.assertFalse(installer.exists())
         self.assertIn(package.digest(archive), (output / "SHA256SUMS").read_text())
         with tarfile.open(archive) as bundle:
             prefix = archive.name[:-7]

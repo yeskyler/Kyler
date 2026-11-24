@@ -183,9 +183,7 @@ allow `/install.sh` and `/releases/*`; directory listing is not required. The Gi
 publisher does not deploy files to this server. Installation prefers the server and
 falls back to GitHub for the same selected version.
 
-### CLI installer assets
+### Installation assets
 
-Native packaging also emits `kyler-installer-vVERSION-TARGET` for the installation
-server. GitHub release publishing includes only the platform archives and a
-checksum manifest for those archives. For a GitHub download, run the installation
-script with `--bundle` so it can bootstrap from the CLI inside the archive.
+Native packaging emits complete platform archives and checksums. The shell script
+installs these directly; no standalone installer binary is published.

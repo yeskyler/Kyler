@@ -73,7 +73,8 @@ pub async fn configure(
     }
     config.session.enabled = true;
     let mut discovered = Vec::new();
-    let can_start = output.is_none()
+    let can_start = std::env::var("KYLER_CONFIGURE_NO_START").as_deref() != Ok("1")
+        && output.is_none()
         && std::env::current_exe()
             .ok()
             .and_then(|worker| kyler_core::sandbox::paths::bundled_runtime_root(&worker))

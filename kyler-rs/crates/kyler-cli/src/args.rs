@@ -31,29 +31,6 @@ pub enum Command {
         #[command(subcommand)]
         command: GatewayCommand,
     },
-    /// Install a complete release bundle and open setup as the final interactive step.
-    Install {
-        /// Local bundle directory or .tar.gz archive; omit to download a release.
-        #[arg(long)]
-        bundle: Option<PathBuf>,
-        /// Release version to download (default: latest).
-        #[arg(long, conflicts_with = "bundle")]
-        version: Option<String>,
-        /// Start services even on a first install (requires valid saved configuration).
-        #[arg(long, conflicts_with = "no_start")]
-        start: bool,
-        /// Prepare configuration before activation, including unattended installation.
-        #[arg(long, conflicts_with = "no_configure")]
-        configure: bool,
-        #[arg(long)]
-        no_start: bool,
-        #[arg(long)]
-        no_configure: bool,
-        #[arg(long, hide = true)]
-        bootstrap: bool,
-        #[arg(long)]
-        non_interactive: bool,
-    },
     /// Review local learning candidates or publish an inspected skill draft; no model call.
     Learning {
         #[command(subcommand)]
