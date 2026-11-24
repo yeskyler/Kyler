@@ -104,7 +104,7 @@ pub struct AgentSettings {
 impl Default for AgentSettings {
     fn default() -> Self {
         Self {
-            max_steps: 50,
+            max_steps: 100,
             additional_instructions: None,
             tool_output_max_bytes: 8192,
             max_parallel_calls: 8,

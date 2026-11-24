@@ -13,7 +13,7 @@ api_key = "file-key"
 fn defaults_validation_and_unknown_fields() {
     let config = loader::parse(VALID).unwrap();
     config.validate().unwrap();
-    assert_eq!(config.agent.max_steps, 50);
+    assert_eq!(config.agent.max_steps, 100);
     assert_eq!(config.agent.max_parallel_calls, 8);
     assert_eq!(config.agent.parallel_tool_calls, None);
     assert!(!config.session.enabled);
