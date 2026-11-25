@@ -93,7 +93,26 @@ pub(super) fn run(prompts: &mut Prompts, config: &mut AppConfig) -> Result<()> {
                 .get(field.key)
                 .map(String::as_str)
                 .unwrap_or_default();
-            let value = if field.secret {
+            let value = if field.key == "KYLER_QQBOT_MODE" {
+                let existing = Settings(&values).get("KYLER_QQBOT_APP_ID").is_some();
+                let selected = prompts.select(
+                    "QQ Bot delivery mode",
+                    vec![
+                        "WebSocket · no public callback required".into(),
+                        "Webhook · public HTTPS callback".into(),
+                    ],
+                    if current == "webhook" || (current.is_empty() && existing) {
+                        1
+                    } else {
+                        0
+                    },
+                )?;
+                if selected == 0 {
+                    "websocket".into()
+                } else {
+                    "webhook".into()
+                }
+            } else if field.secret {
                 prompts
                     .key(field.label, &SecretString::new(current), !field.required)?
                     .expose()
@@ -196,6 +215,28 @@ pub(super) fn validate(config: &AppConfig) -> Result<Vec<Adapter>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_qq_websocket_mode_activates_an_outbound_listener() {
+        let config = kyler_config::loader::parse(
+            r#"[channels]
+KYLER_CHANNEL_WEB_URL = "http://127.0.0.1:30002"
+KYLER_QQBOT_APP_ID = "123456"
+KYLER_QQBOT_APP_SECRET = "TEST_ONLY_SECRET"
+KYLER_QQBOT_MODE = "websocket"
+"#,
+        )
+        .unwrap();
+        let mut values = toml::Table::new();
+        write(&config, &mut values);
+        let restored = kyler_config::loader::parse(&toml::to_string(&values).unwrap()).unwrap();
+        assert!(!format!("{restored:?}").contains("TEST_ONLY_SECRET"));
+        let adapters = validate(&restored).unwrap();
+        assert_eq!(adapters.len(), 1);
+        assert!(adapters[0].streams());
+        assert!(!adapters[0].accepts_webhook());
+        assert_eq!(adapters[0].namespace(), "qqbot:123456");
+    }
 
     #[test]
     fn saved_channels_round_trip_and_activate_the_selected_adapter() {

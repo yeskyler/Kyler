@@ -134,6 +134,12 @@ pub const CHANNELS: &[ChannelDefinition] = &[
         fields: &[
             field("KYLER_QQBOT_APP_ID", "App ID", false, true),
             field("KYLER_QQBOT_APP_SECRET", "App Secret", true, true),
+            field(
+                "KYLER_QQBOT_MODE",
+                "Delivery mode (websocket or webhook)",
+                false,
+                false,
+            ),
         ],
     },
     ChannelDefinition {

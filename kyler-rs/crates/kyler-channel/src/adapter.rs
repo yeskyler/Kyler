@@ -39,6 +39,16 @@ pub enum Adapter {
     Email(Email),
 }
 
+/// A safe, actionable error for a stream that requires configuration changes.
+#[derive(Debug)]
+pub struct StreamStopped(pub &'static str);
+impl std::fmt::Display for StreamStopped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+impl std::error::Error for StreamStopped {}
+
 pub enum Webhook {
     Challenge(String),
     Messages(Vec<Incoming>),
@@ -216,22 +226,24 @@ impl Adapter {
     }
 
     pub fn streams(&self) -> bool {
-        matches!(
-            self,
-            Self::DingTalk(_)
-                | Self::Mattermost(_)
-                | Self::Matrix(_)
-                | Self::HomeAssistant(_)
-                | Self::BlueBubbles(_)
-                | Self::Signal(_)
-                | Self::WeCom(_)
-                | Self::Weixin(_)
-                | Self::Email(_)
-        )
+        matches!(self, Self::QqBot(bot) if bot.websocket)
+            || matches!(
+                self,
+                Self::DingTalk(_)
+                    | Self::Mattermost(_)
+                    | Self::Matrix(_)
+                    | Self::HomeAssistant(_)
+                    | Self::BlueBubbles(_)
+                    | Self::Signal(_)
+                    | Self::WeCom(_)
+                    | Self::Weixin(_)
+                    | Self::Email(_)
+            )
     }
 
     pub async fn listen(&self, store: &crate::ChannelStore) -> Result<()> {
         match self {
+            Self::QqBot(bot) => bot.listen(store).await,
             Self::DingTalk(bot) => bot.listen(store).await,
             Self::Mattermost(bot) => bot.listen(store).await,
             Self::Matrix(bot) => bot.listen(store).await,

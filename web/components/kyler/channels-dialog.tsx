@@ -143,6 +143,12 @@ export function ChannelsSettings({
               : "To enable this channel, run "}
             <code>kyler configure</code> on the server and open Channels.
           </p>
+          {provider.id === "qqbot" && (
+            <p className="text-muted-foreground">
+              Select WebSocket in the setup wizard and QQ developer console for local use without a
+              public callback. Webhook mode requires a public HTTPS callback.
+            </p>
+          )}
           <ul className="grid gap-1 text-muted-foreground sm:grid-cols-2">
             {provider.fields.map((field) => (
               <li key={field.key}>

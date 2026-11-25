@@ -5,7 +5,7 @@ mod catalog;
 mod message;
 mod store;
 
-pub use adapter::{Adapter, Webhook};
+pub use adapter::{Adapter, StreamStopped, Webhook};
 pub use bindings::Binding;
 pub use catalog::{CHANNELS, ChannelDefinition, Settings, WEB_ORIGIN_KEY};
 pub use message::Incoming;

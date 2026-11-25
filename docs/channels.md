@@ -265,20 +265,56 @@ See [WeCom callback configuration](https://developer.work.weixin.qq.com/document
 
 ## QQ Bot
 
-Create a QQ bot and configure `KYLER_QQBOT_APP_ID` and
-`KYLER_QQBOT_APP_SECRET` on the Kyler server. Configure its public HTTPS
-callback path as `/webhooks/channels/qqbot` and subscribe to
-`C2C_MESSAGE_CREATE`. Authorize the Kyler deployment in the bot console
-if your bot requires an OpenAPI IP allowlist.
+Create a QQ bot and configure **Channels → QQ Bot** with `kyler configure`.
+Enter the App ID and App Secret, then choose a delivery mode. New setup recommends
+**WebSocket**; existing configurations without a mode keep using **Webhook**.
+Save and restart the backend to apply the setting. Credentials remain on the server.
 
-Select **QQ Bot** in Channels and pair from a private bot conversation.
-Kyler verifies the callback signature, completes the URL verification,
-and acknowledges events after persisting them. Replies retain the
-original QQ message ID and a stable sequence number. Reply delivery
-uses QQ's one-hour private reply window and its five-reply limit per
-message. Open the session in Kyler Web for results that exceed those
-limits. Previous bridge bindings require pairing again.
-See the [QQ Bot SDK](https://github.com/tencent-connect/botgo) and [reply API](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md).
+| Variable | Value |
+| --- | --- |
+| `KYLER_QQBOT_APP_ID` | QQ bot App ID |
+| `KYLER_QQBOT_APP_SECRET` | QQ bot App Secret |
+| `KYLER_QQBOT_MODE` | `websocket` or `webhook`; omitted preserves legacy `webhook` behavior |
+
+### WebSocket (local or server deployments)
+
+Select **WebSocket** in the QQ developer console under **Development settings →
+Event subscriptions and callbacks**, and select the same mode in Kyler's wizard.
+Kyler opens an outbound connection to the official gateway, authenticates, maintains
+heartbeats, and reconnects with exponential backoff. No public inbound port, domain,
+or HTTPS callback is required. Allow outbound HTTPS/WSS access to the QQ APIs and
+gateway. Use only one running Kyler listener for a bot.
+
+The adapter subscribes to `GROUP_AND_C2C_EVENT` (`1 << 25`) and processes only
+`C2C_MESSAGE_CREATE` private text messages. Grant the required permissions in the
+QQ console; group events are ignored. Transient reconnects resume the session from
+the last durably processed event, and replayed messages are deduplicated. A backend
+restart creates a fresh gateway session; existing paired chats remain stored.
+Permission, shard, and bot-status rejections stop the listener with an actionable
+server log; fix the console configuration and restart. If your bot requires an
+OpenAPI IP allowlist, authorize the deployment's public outbound IP.
+
+### Webhook (public HTTPS deployments)
+
+Choose **Webhook** in both Kyler's wizard and the QQ console. Configure the public
+HTTPS callback path `/webhooks/channels/qqbot`, proxy it to the Kyler backend, and
+subscribe to `C2C_MESSAGE_CREATE`. Kyler verifies callback signatures and completes
+URL verification. The webhook route does not accept events in WebSocket mode.
+
+### Pairing and replies
+
+Select **QQ Bot** in Kyler Web's Channels and generate a workspace pairing code.
+Send `!pair <code>` from a private bot conversation, then send a text prompt.
+Both delivery modes share the same stored bindings, sessions, deduplication, and
+reply flow, so switching modes does not require pairing again.
+
+Replies retain the original QQ message ID and a stable sequence number. Reply
+delivery uses QQ's one-hour private reply window and its five-reply limit per
+message. Open the session in Kyler Web for results that exceed those limits.
+Previous bridge bindings require pairing again.
+See [QQ event subscriptions and Gateway lifecycle](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html),
+the [QQ Bot SDK](https://github.com/tencent-connect/botgo), and the
+[reply API](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md).
 
 ## Weixin (iLink)
 

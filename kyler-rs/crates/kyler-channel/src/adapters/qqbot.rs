@@ -1,3 +1,5 @@
+mod socket;
+
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
@@ -10,6 +12,8 @@ use crate::{Incoming, ReplyReceipt, Settings, Webhook, adapter::client};
 
 pub struct QqBot {
     pub(crate) app: String,
+    pub(crate) websocket: bool,
+    session: Mutex<socket::Session>,
     secret: String,
     signing: Ed25519KeyPair,
     http: reqwest::Client,
@@ -25,6 +29,8 @@ impl QqBot {
             "Invalid QQ Bot App ID"
         );
         Ok(Self {
+            websocket: websocket_mode(settings)?,
+            session: Mutex::new(Default::default()),
             app,
             signing: key(&secret)?,
             secret,
@@ -34,6 +40,10 @@ impl QqBot {
     }
 
     pub(crate) fn webhook(&self, headers: &HeaderMap, body: &[u8]) -> Result<Webhook> {
+        ensure!(
+            !self.websocket,
+            "QQ Bot is configured for WebSocket delivery"
+        );
         decode(&self.signing, headers, body, chrono::Utc::now().timestamp())
     }
 
@@ -52,7 +62,7 @@ impl QqBot {
             .await
             .map_err(|_| None)?;
         if !response.status().is_success() {
-            return Err(None);
+            return Err(Some(response.status().as_u16()));
         }
         let data: Value = response.json().await.map_err(|_| None)?;
         let access = data["access_token"].as_str().ok_or(None)?.to_owned();
@@ -98,6 +108,17 @@ impl QqBot {
             Err(Some(status.as_u16()))
         }
     }
+}
+
+fn websocket_mode(settings: &Settings<'_>) -> Result<bool> {
+    let mode = settings
+        .get("KYLER_QQBOT_MODE")
+        .unwrap_or_else(|| "webhook".into());
+    ensure!(
+        matches!(mode.as_str(), "websocket" | "webhook"),
+        "QQ Bot mode must be websocket or webhook"
+    );
+    Ok(mode == "websocket")
 }
 
 fn key(secret: &str) -> Result<Ed25519KeyPair> {
@@ -192,6 +213,18 @@ fn incoming(payload: &Value, now: i64) -> Option<Incoming> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delivery_mode_preserves_legacy_webhook_and_validates_explicit_selection() {
+        let mut values = std::collections::BTreeMap::new();
+        assert!(!websocket_mode(&Settings(&values)).unwrap());
+        values.insert("KYLER_QQBOT_MODE".into(), "websocket".into());
+        assert!(websocket_mode(&Settings(&values)).unwrap());
+        values.insert("KYLER_QQBOT_MODE".into(), "webhook".into());
+        assert!(!websocket_mode(&Settings(&values)).unwrap());
+        values.insert("KYLER_QQBOT_MODE".into(), "typo".into());
+        assert!(websocket_mode(&Settings(&values)).is_err());
+    }
 
     #[test]
     fn signed_private_message_is_bound_to_its_reply_id() -> Result<()> {

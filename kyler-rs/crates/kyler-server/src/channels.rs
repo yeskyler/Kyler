@@ -79,7 +79,11 @@ impl Channel {
             let mut backoff = Duration::from_secs(2);
             loop {
                 let started = std::time::Instant::now();
-                if self.bot.listen(&self.store).await.is_err() {
+                if let Err(error) = self.bot.listen(&self.store).await {
+                    if let Some(reason) = error.downcast_ref::<kyler_channel::StreamStopped>() {
+                        tracing::error!(channel = self.bot.name(), error = %reason, "Channel stream stopped; update configuration and restart");
+                        return;
+                    }
                     tracing::warn!(
                         channel = self.bot.name(),
                         "Channel stream disconnected or unavailable"
