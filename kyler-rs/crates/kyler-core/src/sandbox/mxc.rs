@@ -149,7 +149,7 @@ fn supervise(mut request: SandboxRequest, cancel: Arc<AtomicBool>) -> Result<Wor
         !cancel.load(Ordering::SeqCst),
         "sandbox execution cancelled before spawn"
     );
-    let mut readonly = request.policy.filesystem.readonly_paths.clone();
+    let mut readonly = readonly_mount_paths(&request.policy.filesystem)?;
     readonly.extend(request.policy.runtime_readonly_paths.clone());
     readonly.push(request.worker_path.clone());
     let mut writable = request.policy.filesystem.readwrite_paths.clone();
@@ -368,4 +368,61 @@ fn supervise(mut request: SandboxRequest, cancel: Arc<AtomicBool>) -> Result<Wor
         "sandbox output limit exceeded"
     );
     serde_json::from_slice(&bytes).context("invalid sandbox worker response")
+}
+
+/// Protected settings may not exist in a workspace. Keep their logical write
+/// protection, but do not pass absent sources to strict native bind mounts.
+fn readonly_mount_paths(policy: &super::policy::FilesystemPolicy) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for path in &policy.readonly_paths {
+        if policy.write_protected_paths.contains(path) && !path.try_exists()? {
+            continue;
+        }
+        paths.push(path.clone());
+    }
+    Ok(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_protected_mounts_follow_current_filesystem_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let settings = [".agents", ".codex", ".kyler/config.toml"].map(|p| root.join(p));
+        let required = root.join("required");
+        let policy = super::super::policy::FilesystemPolicy {
+            readonly_paths: settings.iter().cloned().chain([required.clone()]).collect(),
+            readwrite_paths: vec![root.clone()],
+            write_protected_paths: settings.to_vec(),
+            ..Default::default()
+        };
+        assert_eq!(
+            readonly_mount_paths(&policy).unwrap(),
+            vec![required.clone()]
+        );
+        for path in &settings {
+            assert!(policy.check_write(&root, path).is_err());
+            assert!(!path.exists());
+        }
+        std::fs::create_dir(&settings[0]).unwrap();
+        std::fs::create_dir(&settings[1]).unwrap();
+        std::fs::create_dir(root.join(".kyler")).unwrap();
+        std::fs::write(&settings[2], "fixture").unwrap();
+        assert_eq!(
+            readonly_mount_paths(&policy).unwrap(),
+            policy.readonly_paths
+        );
+        for path in &settings {
+            assert!(policy.check_write(&root, path).is_err());
+        }
+        std::fs::remove_dir(&settings[0]).unwrap();
+        assert!(
+            !readonly_mount_paths(&policy)
+                .unwrap()
+                .contains(&settings[0])
+        );
+    }
 }
