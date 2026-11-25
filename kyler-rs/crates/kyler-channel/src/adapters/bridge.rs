@@ -157,6 +157,7 @@ fn parse(
         return Ok(Webhook::Ignore);
     }
     Ok(Webhook::Messages(vec![Incoming {
+        attachments: Vec::new(),
         update: event.id,
         chat: event.chat,
         text: event.text,

@@ -2511,6 +2511,8 @@ dependencies = [
  "hex",
  "hmac",
  "kyler-store",
+ "md-5",
+ "pulldown-cmark",
  "quick-xml",
  "reqwest",
  "ring",

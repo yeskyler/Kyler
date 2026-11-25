@@ -89,6 +89,7 @@ impl Feishu {
                     && !text.trim().is_empty() =>
             {
                 Ok(Webhook::Messages(vec![Incoming {
+                    attachments: Vec::new(),
                     update: update.into(),
                     chat: chat.into(),
                     text: text.into(),

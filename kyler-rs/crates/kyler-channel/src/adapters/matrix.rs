@@ -215,6 +215,7 @@ fn incoming<'a>(bot: &str, room: &str, event: &'a Value) -> Option<(&'a str, Inc
     Some((
         sender,
         Incoming {
+            attachments: Vec::new(),
             update: update.into(),
             chat,
             text: text.into(),

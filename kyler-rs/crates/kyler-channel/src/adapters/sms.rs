@@ -78,6 +78,7 @@ impl Sms {
                     && !text.trim().is_empty() =>
             {
                 vec![Incoming {
+                    attachments: Vec::new(),
                     update: id.to_owned(),
                     chat: format!("sms_{}", &from[1..]),
                     text: text.to_owned(),

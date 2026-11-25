@@ -139,6 +139,7 @@ impl Update {
             && user.id == message.chat.id
             && !text.trim().is_empty())
         .then_some(Incoming {
+            attachments: Vec::new(),
             update: self.update_id.to_string(),
             chat: user.id.to_string(),
             text,

@@ -144,6 +144,7 @@ fn message(chat: &str, after: i64, before: i64, row: &Value) -> Option<Incoming>
         return None;
     }
     Some(Incoming {
+        attachments: Vec::new(),
         update: format!("bb_{guid}"),
         chat: format!("bb_{}", URL_SAFE_NO_PAD.encode(chat)),
         text: text.into(),

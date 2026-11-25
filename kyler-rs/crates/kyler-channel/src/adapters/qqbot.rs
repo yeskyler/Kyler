@@ -1,3 +1,4 @@
+pub mod files;
 mod socket;
 
 use std::time::{Duration, Instant};
@@ -18,6 +19,8 @@ pub struct QqBot {
     signing: Ed25519KeyPair,
     http: reqwest::Client,
     access: Mutex<Option<(String, Instant)>>,
+    #[cfg(test)]
+    api_base: Option<String>,
 }
 
 impl QqBot {
@@ -36,6 +39,8 @@ impl QqBot {
             secret,
             http: client()?,
             access: Mutex::new(None),
+            #[cfg(test)]
+            api_base: None,
         })
     }
 
@@ -85,13 +90,8 @@ impl QqBot {
         text: &str,
         receipt: Option<&ReplyReceipt>,
     ) -> Result<(), Option<u16>> {
-        let openid = chat
-            .strip_prefix("qq_")
-            .filter(|openid| valid_openid(openid))
-            .ok_or(Some(400))?;
-        let receipt = receipt
-            .filter(|receipt| receipt.expires > chrono::Utc::now().timestamp())
-            .ok_or(Some(403))?;
+        let openid = chat_openid(chat)?;
+        let receipt = active_receipt(receipt)?;
         let message_id = receipt.message_id.strip_prefix("qq_").ok_or(Some(400))?;
         let token = self.token().await?;
         let response = self.http.post(format!("https://api.bot.qq.com/v2/users/{openid}/messages"))
@@ -194,16 +194,28 @@ fn incoming(payload: &Value, now: i64) -> Option<Incoming> {
         .timestamp();
     let openid = data["author"]["user_openid"].as_str()?;
     let update = data["id"].as_str()?;
-    let text = data["content"].as_str()?;
+    let text = data["content"].as_str().unwrap_or_default();
+    let attachments = data["attachments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|file| crate::IncomingAttachment {
+            name: file["filename"].as_str().unwrap_or("attachment").to_owned(),
+            url: file["url"].as_str().unwrap_or_default().to_owned(),
+            content_type: file["content_type"].as_str().unwrap_or_default().to_owned(),
+            size: file["size"].as_u64(),
+        })
+        .collect::<Vec<_>>();
     if !valid_openid(openid)
         || update.is_empty()
         || update.len() > 256
-        || text.trim().is_empty()
+        || (text.trim().is_empty() && attachments.is_empty())
         || !(now - 3600..=now + 300).contains(&event_time)
     {
         return None;
     }
     Some(Incoming {
+        attachments,
         update: format!("qq_{update}"),
         chat: format!("qq_{openid}"),
         text: text.into(),
@@ -213,6 +225,23 @@ fn incoming(payload: &Value, now: i64) -> Option<Incoming> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_only_and_mixed_private_messages_are_preserved() {
+        let mut event = json!({"t":"C2C_MESSAGE_CREATE","d":{
+            "id":"file-id","author":{"user_openid":"user"},"timestamp":"1970-01-01T00:16:40Z",
+            "attachments":[{"filename":"report.pdf","url":"https://a.qpic.cn/report.pdf","content_type":"application/pdf","size":12}]
+        }});
+        let file = incoming(&event, 1000).unwrap();
+        assert!(file.text.is_empty());
+        assert_eq!(file.attachments.len(), 1);
+        assert_eq!(file.attachments[0].name, "report.pdf");
+        event["d"]["content"] = json!("Please read");
+        assert_eq!(incoming(&event, 1000).unwrap().text, "Please read");
+        event["d"]["attachments"] = json!([]);
+        event["d"]["content"] = json!("");
+        assert!(incoming(&event, 1000).is_none());
+    }
 
     #[test]
     fn delivery_mode_preserves_legacy_webhook_and_validates_explicit_selection() {
@@ -244,5 +273,26 @@ mod tests {
         assert!(decode(&key, &headers, b"{}", 1000).is_err());
         assert!(decode(&key, &headers, &body, 1301).is_err());
         Ok(())
+    }
+}
+
+fn chat_openid(chat: &str) -> Result<&str, Option<u16>> {
+    chat.strip_prefix("qq_")
+        .filter(|id| valid_openid(id))
+        .ok_or(Some(400))
+}
+fn active_receipt(receipt: Option<&ReplyReceipt>) -> Result<&ReplyReceipt, Option<u16>> {
+    receipt
+        .filter(|r| r.expires > chrono::Utc::now().timestamp())
+        .ok_or(Some(403))
+}
+
+impl QqBot {
+    fn api_endpoint(&self, openid: &str, action: &str) -> String {
+        #[cfg(test)]
+        if let Some(base) = &self.api_base {
+            return format!("{base}/v2/users/{openid}/{action}");
+        }
+        format!("https://api.bot.qq.com/v2/users/{openid}/{action}")
     }
 }

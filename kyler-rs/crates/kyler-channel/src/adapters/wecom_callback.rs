@@ -127,6 +127,7 @@ impl WeComCallback {
                     && !text.trim().is_empty() =>
             {
                 vec![Incoming {
+                    attachments: Vec::new(),
                     update: format!("wc_{id}"),
                     chat: format!("wc_{}", message.sender),
                     text,

@@ -1,3 +1,5 @@
+mod files;
+
 use crate::{
     error::{ApiError, ApiResult},
     runs::RunManager,
@@ -148,23 +150,70 @@ impl Channel {
         loop {
             match self.store.next_reply().await {
                 Ok(Some(reply)) => {
-                    let active = match reply.token {
+                    let active = match &reply.token {
                         Some(token) => {
                             manager
                                 .security
                                 .store
-                                .active(token, chrono::Utc::now().timestamp_millis())
+                                .active(token.clone(), chrono::Utc::now().timestamp_millis())
                                 .await
                         }
                         None => Ok(true),
                     };
                     let retry = match active {
-                        Ok(true) => !matches!(
-                            self.bot
-                                .send(reply.id, &reply.chat, &reply.text, reply.receipt.as_ref())
-                                .await,
-                            Ok(()) | Err(Some(400 | 403))
-                        ),
+                        Ok(true) => {
+                            if reply.file.is_some() {
+                                match self.deliver_file(manager, &reply).await {
+                                    Ok(()) => false,
+                                    Err(status) => {
+                                        if reply.attempts >= 2
+                                            || matches!(
+                                                status,
+                                                Some(400 | 403 | 404 | 413 | 415 | 422)
+                                            )
+                                        {
+                                            tracing::warn!(
+                                                channel = self.bot.name(),
+                                                reply_id = reply.id,
+                                                status,
+                                                "Channel file delivery failed"
+                                            );
+                                            let link = reply.file.as_ref().and_then(|file| {
+                                                self.web_url
+                                                    .join(&format!("chat/{}", file.session))
+                                                    .ok()
+                                            });
+                                            let text = format!(
+                                                "File delivery failed. Open Kyler Web to download the file.\n{}",
+                                                link.map(|u| u.to_string()).unwrap_or_default()
+                                            );
+                                            if self.store.file_failed(reply.id, text).await.is_err()
+                                            {
+                                                tracing::warn!(
+                                                    channel = self.bot.name(),
+                                                    reply_id = reply.id,
+                                                    "Could not save file delivery failure"
+                                                );
+                                            }
+                                            continue;
+                                        }
+                                        true
+                                    }
+                                }
+                            } else {
+                                !matches!(
+                                    self.bot
+                                        .send(
+                                            reply.id,
+                                            &reply.chat,
+                                            &reply.text,
+                                            reply.receipt.as_ref()
+                                        )
+                                        .await,
+                                    Ok(()) | Err(Some(400 | 403))
+                                ) && (!matches!(self.bot, Adapter::QqBot(_)) || reply.attempts < 3)
+                            }
+                        }
                         Ok(false) => false,
                         Err(_) => true,
                     };
@@ -247,15 +296,20 @@ impl Channel {
                 .await;
         }
         if let Some(run) = &job.run {
+            let mut files = Vec::new();
             let reply =
                 match manager.entry(run).await {
                     Ok(entry) => {
                         let info = entry.info();
                         match info.status {
-                            RunStatus::Completed => info
-                                .output
-                                .filter(|text| !text.trim().is_empty())
-                                .unwrap_or_else(|| format!("Run completed.\n{link}")),
+                            RunStatus::Completed => {
+                                if matches!(&self.bot, Adapter::QqBot(_)) {
+                                    files = self.registered_files(manager, &info).await?;
+                                }
+                                info.output
+                                    .filter(|text| !text.trim().is_empty())
+                                    .unwrap_or_else(|| format!("Run completed.\n{link}"))
+                            }
                             RunStatus::Failed => {
                                 format!("Run failed. Open Kyler Web for details.\n{link}")
                             }
@@ -298,7 +352,15 @@ impl Channel {
                     }
                     Err(_) => anyhow::bail!("Could not read channel run"),
                 };
-            return self.store.complete(job, reply, false, false).await;
+            let reply = if files.is_empty() {
+                reply
+            } else {
+                format!("{link}\n{reply}")
+            };
+            return self
+                .store
+                .complete_with_files(job, reply, false, false, files)
+                .await;
         }
         let request_id = match &self.bot {
             Adapter::Telegram(_) => format!("telegram:{}:{}", self.bot.namespace(), job.id),
@@ -357,6 +419,17 @@ impl Channel {
         {
             return Ok(());
         }
+        let attachment_ids = match self.prepare_attachments(manager, job).await {
+            Ok(ids) => ids,
+            Err(_) if job.attachment_attempts < 2 => {
+                self.store.attachment_failed(job.id).await?;
+                return Ok(());
+            }
+            Err(_) => {
+                return self.store.complete(job,
+                    "Could not receive the attachments. Use supported images, PDF, Word, Excel or text files (up to 8 files, 20 MiB each), and resend. No agent run was started.".into(), false, false).await;
+            }
+        };
         let audit = manager
             .security
             .store
@@ -380,10 +453,14 @@ impl Channel {
                 principal,
                 binding.session.clone(),
                 CreateRunRequest {
-                    input: job.input.clone(),
+                    input: if job.input.trim().is_empty() && !attachment_ids.is_empty() {
+                        "Please inspect the attached files.".into()
+                    } else {
+                        job.input.clone()
+                    },
                     command: None,
                     skills: Vec::new(),
-                    attachment_ids: Vec::new(),
+                    attachment_ids,
                     resume: false,
                     images: Vec::new(),
                     client_request_id: Some(request_id),
@@ -413,14 +490,18 @@ impl Channel {
                 self.store.clear_dispatch(job.id).await
             }
             Err(error) if error.status.is_server_error() => Ok(()),
-            Err(_) => {
+            Err(error) => {
+                let detail = match error.body.code.as_str() {
+                    "model_image_unsupported" => {
+                        "The selected model cannot view images. Select a vision-capable model in Kyler Web and resend."
+                    }
+                    "model_tools_unsupported" => {
+                        "The selected model cannot read files. Select a tool-capable model in Kyler Web and resend."
+                    }
+                    _ => "Kyler could not start this run.",
+                };
                 self.store
-                    .complete(
-                        job,
-                        format!("Kyler could not start this run.\n{link}"),
-                        false,
-                        false,
-                    )
+                    .complete(job, format!("{detail}\n{link}"), false, false)
                     .await
             }
         }

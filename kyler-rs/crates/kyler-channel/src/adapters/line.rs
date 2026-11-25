@@ -63,6 +63,7 @@ impl Line {
                 let update = event["webhookEventId"].as_str()?;
                 let text = message["text"].as_str()?;
                 (user_id(chat) && !update.is_empty() && !text.trim().is_empty()).then(|| Incoming {
+                    attachments: Vec::new(),
                     update: update.into(),
                     chat: chat.into(),
                     text: text.into(),

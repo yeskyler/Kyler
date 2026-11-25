@@ -192,6 +192,7 @@ fn incoming(bot: &str, event: &Value) -> Option<Incoming> {
         return None;
     }
     Some(Incoming {
+        attachments: Vec::new(),
         update: format!("wcb_{id}"),
         chat: format!("wcb_{}", hex::encode(chat)),
         text: text.into(),

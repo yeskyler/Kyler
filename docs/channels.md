@@ -309,8 +309,40 @@ Both delivery modes share the same stored bindings, sessions, deduplication, and
 reply flow, so switching modes does not require pairing again.
 
 Replies retain the original QQ message ID and a stable sequence number. Reply
-delivery uses QQ's one-hour private reply window and its five-reply limit per
-message. Open the session in Kyler Web for results that exceed those limits.
+delivery uses the one-hour private reply window, with a conservative cap of four
+replies per incoming message. Open the session in Kyler Web for results that
+exceed those limits.
+QQ replies are rendered as plain text: headings and emphasis lose their Markdown
+markers, code keeps its content and line breaks, links retain public URLs, and
+table rows become readable lines. Original Markdown remains in the Web session.
+
+Private QQ messages can include images or files, with or without text. Both
+WebSocket and Webhook delivery preserve attachments in the durable job queue.
+Kyler downloads attachments over HTTPS from QQ CDN hosts into the session's
+private attachment store; it does not place them in arbitrary workspace paths.
+Each message supports up to eight attachments, each up to 20 MiB. Supported input
+formats follow Kyler's attachment reader: images, PDF, DOCX, XLSX, CSV/TSV and
+UTF-8 text. A vision-capable model is required for images; documents require a
+model with tool support. Unsupported or expired attachments produce a message
+instead of silently starting a task without the files.
+
+For outgoing files, the agent must explicitly register its completed deliverables
+with `register_artifacts`. After the run completes, Kyler queues immutable artifacts
+from that execution only. Text goes first, followed by up to three files (fewer if
+an earlier notice used a reply slot). Files beyond the available reply budget
+remain downloadable in Kyler Web. PNG/JPEG artifacts are sent as images; other
+artifacts use QQ file messages, subject to the bot's platform permissions.
+Small files use binary upload; files over 8 MiB use QQ's presigned multipart
+upload, up to Kyler's 20 MiB artifact limit. No public file server is required.
+
+Attachment IDs and outgoing file jobs survive process restarts. Cached media
+handles and stable reply sequence numbers are reused for retries. File transfers
+have bounded retries; a permanent failure becomes a plain-text notification with
+a Web session link while successful text/file queue entries stay completed.
+A network timeout can still leave delivery uncertain at the platform boundary;
+this is not a guarantee of exactly-once delivery. Expired reply windows cannot
+be extended by retrying; open the session in Web to retrieve the files.
+
 Previous bridge bindings require pairing again.
 See [QQ event subscriptions and Gateway lifecycle](https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html),
 the [QQ Bot SDK](https://github.com/tencent-connect/botgo), and the

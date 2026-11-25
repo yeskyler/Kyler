@@ -181,6 +181,7 @@ fn incoming(user: &str, value: &Value) -> Option<Incoming> {
         return None;
     }
     Some(Incoming {
+        attachments: Vec::new(),
         update: format!("ha_{context}"),
         chat: format!("ha_{user}"),
         text: text.into(),

@@ -290,6 +290,7 @@ mod tests {
     fn test_bot() -> QqBot {
         QqBot {
             app: "123456".into(),
+            api_base: None,
             websocket: true,
             secret: "TEST_SECRET".into(),
             signing: super::super::key("TEST_SECRET").unwrap(),

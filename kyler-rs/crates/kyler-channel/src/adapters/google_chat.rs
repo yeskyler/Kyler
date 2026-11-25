@@ -174,6 +174,7 @@ fn message(event: &Value) -> Option<Incoming> {
         return None;
     }
     Some(Incoming {
+        attachments: Vec::new(),
         update: format!("gc_{}", digest(full_id)),
         chat: format!("gc_{space}"),
         text: text.to_owned(),

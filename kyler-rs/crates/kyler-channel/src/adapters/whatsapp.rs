@@ -79,6 +79,7 @@ impl WhatsApp {
                 let update = message["id"].as_str()?;
                 let text = message["text"]["body"].as_str()?;
                 (digits(chat) && !update.is_empty() && !text.trim().is_empty()).then(|| Incoming {
+                    attachments: Vec::new(),
                     update: update.into(),
                     chat: chat.into(),
                     text: text.into(),

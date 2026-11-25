@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use crate::{Binding, Incoming, bindings::pairing_digest};
-use anyhow::Result;
+use crate::{Binding, Incoming, IncomingAttachment, OutgoingFile, bindings::pairing_digest};
+use anyhow::{Result, ensure};
 use rusqlite::{OptionalExtension, Transaction, params};
 use uuid::Uuid;
 
@@ -11,6 +11,9 @@ pub struct Job {
     pub id: i64,
     pub binding: Binding,
     pub input: String,
+    pub attachments: Vec<IncomingAttachment>,
+    pub attachment_ids: Vec<String>,
+    pub attachment_attempts: u32,
     pub run: Option<String>,
     pub notified: bool,
     pub dispatched_at: Option<i64>,
@@ -23,6 +26,9 @@ pub struct Reply {
     pub text: String,
     pub token: Option<String>,
     pub receipt: Option<ReplyReceipt>,
+    pub file: Option<OutgoingFile>,
+    pub media: Option<String>,
+    pub attempts: u32,
 }
 
 pub struct ReplyReceipt {
@@ -38,6 +44,27 @@ pub struct ChannelStore {
 }
 
 fn enqueue(
+    tx: &Transaction<'_>,
+    bot: &str,
+    chat: &str,
+    text: &str,
+    token: Option<&str>,
+    key: Option<&str>,
+) -> Result<()> {
+    let rendered = bot
+        .starts_with("qqbot:")
+        .then(|| crate::plain_text::render(text));
+    enqueue_plain(
+        tx,
+        bot,
+        chat,
+        rendered.as_deref().unwrap_or(text),
+        token,
+        key,
+    )
+}
+
+fn enqueue_plain(
     tx: &Transaction<'_>,
     bot: &str,
     chat: &str,
@@ -65,8 +92,13 @@ fn enqueue(
             let sequence: Option<i64> = tx
                 .query_row(
                     "UPDATE updates SET reply_count=reply_count+1 WHERE bot=?1 AND update_id=?2
-                 AND reply_count<5 AND received>?3 RETURNING reply_count",
-                    params![bot, key, chrono::Utc::now().timestamp() - 3600],
+                 AND reply_count<?4 AND received>?3 RETURNING reply_count",
+                    params![
+                        bot,
+                        key,
+                        chrono::Utc::now().timestamp() - 3600,
+                        if qq { 4 } else { 5 }
+                    ],
                     |row| row.get(0),
                 )
                 .optional()?;
@@ -105,7 +137,7 @@ fn enqueue(
 impl ChannelStore {
     pub fn open(path: &Path, bot: String) -> Result<Self> {
         let database = Database::open(path)?;
-        database.migrate(3, |tx, version| {
+        database.migrate(4, |tx, version| {
             if version == 0 {
                 tx.execute_batch("
                 CREATE TABLE pairs(bot INTEGER, digest BLOB, token TEXT, workspace TEXT, expires INTEGER,
@@ -131,10 +163,18 @@ impl ChannelStore {
                 ALTER TABLE updates ADD COLUMN reply_count INTEGER NOT NULL DEFAULT 0;
             ")?;
             }
+            if version < 3 {
             tx.execute_batch("
                 ALTER TABLE updates ADD COLUMN reply_context TEXT;
                 CREATE TABLE adapter_state(bot TEXT NOT NULL,key TEXT NOT NULL,value TEXT NOT NULL, PRIMARY KEY(bot,key));
             ")?;
+            }
+            tx.execute_batch("ALTER TABLE jobs ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+                ALTER TABLE jobs ADD COLUMN attachment_ids TEXT NOT NULL DEFAULT '[]';
+                ALTER TABLE jobs ADD COLUMN attachment_attempts INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE replies ADD COLUMN file TEXT;
+                ALTER TABLE replies ADD COLUMN media TEXT;
+                ALTER TABLE replies ADD COLUMN media_expires INTEGER;")?;
             Ok(())
         })?;
         Ok(Self { database, bot })
@@ -256,7 +296,7 @@ impl ChannelStore {
             tx.execute("DELETE FROM updates WHERE received < ?1", [now-7*86400])?;
             tx.execute("DELETE FROM pairs WHERE expires <= ?1", [now])?;
             for (message, reply_context) in messages {
-                let Incoming { update, chat, text } = message;
+                let Incoming { update, chat, text, attachments } = message;
                 if tx.execute("INSERT OR IGNORE INTO updates(bot,update_id,received,reply_context) VALUES (?1,?2,?3,?4)", params![bot,update,now,reply_context])? == 0 {
                     continue;
                 }
@@ -286,9 +326,9 @@ impl ChannelStore {
                         Some("cancel") if argument.trim().is_empty() => "/cancel",
                         _ => &text,
                     };
-                    let bound = tx.execute("INSERT INTO jobs(bot,chat,token,workspace,session,input,reply_key)
-                        SELECT bot,chat,token,workspace,session,?3,?4 FROM bindings WHERE bot=?1 AND chat=?2",
-                        params![bot,chat,text,reply_key])?;
+                    let bound = tx.execute("INSERT INTO jobs(bot,chat,token,workspace,session,input,reply_key,attachments)
+                        SELECT bot,chat,token,workspace,session,?3,?4,?5 FROM bindings WHERE bot=?1 AND chat=?2",
+                        params![bot,chat,text,reply_key,serde_json::to_string(&attachments)?])?;
                     if bound == 0 {
                         enqueue(&tx,&bot,&chat,"Pair this chat from Kyler Web before sending a message.", None, reply_key)?;
                     }
@@ -309,7 +349,7 @@ impl ChannelStore {
             .with_async(move |db| {
                 // Let cancellation pass queued prompts, while dispatching one prompt per chat.
                 let mut query = db.prepare(
-                    "SELECT id,CAST(chat AS TEXT),token,workspace,session,input,run,notified,dispatched_at,reply_key
+                    "SELECT id,CAST(chat AS TEXT),token,workspace,session,input,run,notified,dispatched_at,reply_key,attachments,attachment_ids,attachment_attempts
                 FROM jobs j WHERE j.bot=?1 AND (trim(j.input)='/cancel' OR j.id=(
                     SELECT min(id) FROM jobs WHERE bot=j.bot AND chat=j.chat
                 )) ORDER BY (trim(input)='/cancel') DESC,id",
@@ -329,11 +369,53 @@ impl ChannelStore {
                             notified: r.get(7)?,
                             dispatched_at: r.get(8)?,
                             reply_key: r.get(9)?,
+                            attachments: decode_json(r, 10)?,
+                            attachment_ids: decode_json(r, 11)?,
+                            attachment_attempts: r.get(12)?,
                         })
                     })?
                     .collect::<rusqlite::Result<_>>()?)
             })
             .await
+    }
+
+    pub async fn save_attachment_ids(&self, id: i64, ids: Vec<String>) -> Result<()> {
+        let bot = self.bot.clone();
+        self.database
+            .with_async(move |db| {
+                db.execute(
+                    "UPDATE jobs SET attachment_ids=?3 WHERE id=?1 AND bot=?2",
+                    params![id, bot, serde_json::to_string(&ids)?],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+    pub async fn attachment_failed(&self, id: i64) -> Result<()> {
+        let bot = self.bot.clone();
+        self.database.with_async(move |db| {
+            db.execute("UPDATE jobs SET attachment_attempts=attachment_attempts+1 WHERE id=?1 AND bot=?2", params![id,bot])?;
+            Ok(())
+        }).await
+    }
+    pub async fn save_media(&self, id: i64, media: String, expires_at: i64) -> Result<()> {
+        let bot = self.bot.clone();
+        self.database
+            .with_async(move |db| {
+                db.execute(
+                    "UPDATE replies SET media=?3,media_expires=?4 WHERE id=?1 AND bot=?2",
+                    params![id, bot, media, expires_at],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+    pub async fn file_failed(&self, id: i64, text: String) -> Result<()> {
+        let bot = self.bot.clone();
+        self.database.with_async(move |db| {
+            db.execute("UPDATE replies SET file=NULL,media=NULL,text=?3,attempts=0,retry_after=0 WHERE id=?1 AND bot=?2", params![id,bot,text])?;
+            Ok(())
+        }).await
     }
 
     pub async fn mark_dispatch(&self, id: i64) -> Result<bool> {
@@ -372,6 +454,26 @@ impl ChannelStore {
         new_session: bool,
         notice: bool,
     ) -> Result<()> {
+        self.complete_with_files(job, text, new_session, notice, Vec::new())
+            .await
+    }
+
+    pub async fn complete_with_files(
+        &self,
+        job: &Job,
+        text: String,
+        new_session: bool,
+        notice: bool,
+        files: Vec<OutgoingFile>,
+    ) -> Result<()> {
+        ensure!(
+            files.is_empty() || self.bot.starts_with("qqbot:"),
+            "File delivery is unsupported on this channel"
+        );
+        ensure!(
+            files.iter().all(|file| file.session == job.binding.session),
+            "File belongs to another session"
+        );
         let (bot, id, chat, token, old_session) = (
             self.bot.clone(),
             job.id,
@@ -395,7 +497,32 @@ impl ChannelStore {
                     tx.execute("UPDATE jobs SET session=?5 WHERE bot=?1 AND chat=?2 AND token=?3 AND session=?4 AND id>?6",
                         params![bot,chat,token,old_session,session,id])?;
                 }
-                enqueue(&tx,&bot,&chat,&text,Some(&token),reply_key.as_deref())?;
+                // Reserve QQ reply slots for files before splitting the text.
+                // Text is queued first; sequence numbers are allocated in send order below.
+                let qq_files = bot.starts_with("qqbot:") && !files.is_empty();
+                let text = if qq_files {
+                    let plain = crate::plain_text::render(&text);
+                    let mut short = String::new();
+                    for ch in plain.chars() {
+                        if short.encode_utf16().count() + ch.len_utf16() > 1200 { break; }
+                        short.push(ch);
+                    }
+                    format!("{short}\nFiles are sent separately. If a file is missing, open Kyler Web.")
+                } else { text };
+                if qq_files {
+                    enqueue_plain(&tx,&bot,&chat,&text,Some(&token),reply_key.as_deref())?;
+                } else {
+                    enqueue(&tx,&bot,&chat,&text,Some(&token),reply_key.as_deref())?;
+                }
+                for file in files {
+                    if let Some(key) = reply_key.as_deref() {
+                        let seq: Option<i64> = tx.query_row("UPDATE updates SET reply_count=reply_count+1 WHERE bot=?1 AND update_id=?2 AND reply_count<4 AND received>?3 RETURNING reply_count",
+                            params![bot,key,chrono::Utc::now().timestamp()-3600], |r|r.get(0)).optional()?;
+                        if let Some(seq) = seq {
+                            tx.execute("INSERT INTO replies(bot,chat,text,token,reply_key,reply_seq,file) VALUES (?1,?2,'',?3,?4,?5,?6)",params![bot,chat,token,key,seq,serde_json::to_string(&file)?])?;
+                        }
+                    }
+                }
             }
             tx.commit()?;
             Ok(())
@@ -408,7 +535,7 @@ impl ChannelStore {
             .with_async(move |db| {
                 Ok(db
                     .query_row(
-                        "SELECT r.id,CAST(r.chat AS TEXT),r.text,r.token,r.reply_key,r.reply_seq,u.received,u.reply_context
+                        "SELECT r.id,CAST(r.chat AS TEXT),r.text,r.token,r.reply_key,r.reply_seq,u.received,u.reply_context,r.file,CASE WHEN r.media_expires>?2 THEN r.media ELSE NULL END,r.attempts
                 FROM replies r LEFT JOIN updates u ON u.bot=r.bot AND u.update_id=r.reply_key
                 WHERE r.bot=?1 AND r.retry_after<=?2 AND r.id=(
                     SELECT min(id) FROM replies WHERE bot=r.bot AND chat=r.chat
@@ -420,6 +547,9 @@ impl ChannelStore {
                                 chat: r.get(1)?,
                                 text: r.get(2)?,
                                 token: r.get(3)?,
+                                file: r.get::<_, Option<String>>(8)?.map(|s| serde_json::from_str(&s).map_err(|e| rusqlite::Error::FromSqlConversionFailure(8,rusqlite::types::Type::Text,Box::new(e)))).transpose()?,
+                                media: r.get(9)?,
+                                attempts: r.get(10)?,
                                 receipt: r.get::<_,Option<String>>(4)?.zip(r.get::<_,Option<i64>>(5)?)
                                     .map(|(message_id, sequence)| -> rusqlite::Result<_> {
                                         Ok(ReplyReceipt {message_id, sequence, expires:r.get::<_,Option<i64>>(6)?.unwrap_or_default()+3600, context_token:r.get(7)?})
@@ -452,6 +582,7 @@ mod tests {
 
     fn message(update: i64, chat: i64, text: impl Into<String>) -> Incoming {
         Incoming {
+            attachments: Vec::new(),
             update: update.to_string(),
             chat: chat.to_string(),
             text: text.into(),
@@ -549,6 +680,7 @@ mod tests {
         let store = ChannelStore::open(&file, "qqbot:bot".into())?;
         let code = store.pair("credential".into(), "/workspace".into()).await?;
         let post = |id: &str, text: String| Incoming {
+            attachments: Vec::new(),
             update: format!("qq_{id}"),
             chat: "qq_user".into(),
             text,
@@ -570,7 +702,7 @@ mod tests {
         let pairing = store.next_reply().await?.unwrap();
         assert_eq!(pairing.receipt.unwrap().message_id, "qq_pair");
         store.delivery(pairing.id, false).await?;
-        for sequence in 1..=5 {
+        for sequence in 1..=4 {
             let reply = store.next_reply().await?.unwrap();
             let receipt = reply.receipt.unwrap();
             assert_eq!(receipt.message_id, "qq_first");
@@ -625,6 +757,175 @@ mod tests {
             store.bindings().await?[0].session,
             queued[0].binding.session
         );
+        Ok(())
+    }
+}
+
+fn decode_json<T: serde::de::DeserializeOwned>(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<T> {
+    serde_json::from_str(&row.get::<_, String>(index)?).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn version_three_queue_migrates_without_losing_existing_jobs() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("channels.sqlite");
+        let database = Database::open(&path)?;
+        database.migrate(3,|tx,_| {
+            tx.execute_batch("CREATE TABLE jobs(id INTEGER PRIMARY KEY,bot TEXT,chat TEXT,token TEXT,workspace TEXT,session TEXT,input TEXT,run TEXT,dispatched_at INTEGER,notified INTEGER DEFAULT 0,reply_key TEXT);
+                CREATE TABLE replies(id INTEGER PRIMARY KEY,bot TEXT,chat TEXT,text TEXT,token TEXT,retry_after INTEGER DEFAULT 0,attempts INTEGER DEFAULT 0,reply_key TEXT,reply_seq INTEGER);
+                CREATE TABLE updates(bot TEXT,update_id TEXT,received INTEGER,reply_count INTEGER DEFAULT 0,reply_context TEXT);
+                INSERT INTO jobs(id,bot,chat,token,workspace,session,input) VALUES(1,'qqbot:legacy','qq_user','credential','/workspace','session','existing prompt');")?;
+            Ok(())
+        })?;
+        drop(database);
+        let store = ChannelStore::open(&path, "qqbot:legacy".into())?;
+        let job = store.jobs().await?.remove(0);
+        assert_eq!(job.input, "existing prompt");
+        assert!(job.attachments.is_empty());
+        assert!(job.attachment_ids.is_empty());
+        assert_eq!(job.attachment_attempts, 0);
+        assert!(store.next_reply().await?.is_none());
+        drop(store);
+        assert_eq!(
+            ChannelStore::open(&path, "qqbot:legacy".into())?
+                .jobs()
+                .await?
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn attachment_checkpoints_and_file_delivery_survive_restart_without_duplicate_text()
+    -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("channels.sqlite");
+        let store = ChannelStore::open(&path, "qqbot:files".into())?;
+        let pair = store.pair("credential".into(), "/workspace".into()).await?;
+        store
+            .ingest(vec![Incoming {
+                update: "qq_pair".into(),
+                chat: "qq_user".into(),
+                text: format!("!pair {pair}"),
+                attachments: vec![],
+            }])
+            .await?;
+        let pairing = store.next_reply().await?.unwrap();
+        store.delivery(pairing.id, false).await?;
+        let message = || Incoming {
+            update: "qq_file".into(),
+            chat: "qq_user".into(),
+            text: String::new(),
+            attachments: vec![IncomingAttachment {
+                name: "report.pdf".into(),
+                url: "https://a.qpic.cn/file?private=value".into(),
+                content_type: "application/pdf".into(),
+                size: Some(10),
+            }],
+        };
+        store.ingest(vec![message(), message()]).await?;
+        let jobs = store.jobs().await?;
+        assert_eq!(jobs.len(), 1);
+        assert!(jobs[0].input.is_empty());
+        store
+            .save_attachment_ids(jobs[0].id, vec!["attachment-id".into()])
+            .await?;
+        store.attachment_failed(jobs[0].id).await?;
+        drop(store);
+        let store = ChannelStore::open(&path, "qqbot:files".into())?;
+        let job = store.jobs().await?.remove(0);
+        assert_eq!(job.attachment_ids, vec!["attachment-id"]);
+        assert_eq!(job.attachments[0].name, "report.pdf");
+        assert_eq!(job.attachment_attempts, 1);
+        assert!(
+            store
+                .complete_with_files(
+                    &job,
+                    "ignored".into(),
+                    false,
+                    false,
+                    vec![OutgoingFile {
+                        session: "another-session".into(),
+                        artifact: "file".into()
+                    }]
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(store.jobs().await?.len(), 1);
+        let files = (0..5)
+            .map(|index| OutgoingFile {
+                session: job.binding.session.clone(),
+                artifact: format!("artifact-{index}"),
+            })
+            .collect();
+        store
+            .complete_with_files(
+                &job,
+                "**完成**\n```sh\necho '**keep**'\n```".into(),
+                false,
+                false,
+                files,
+            )
+            .await?;
+        let text = store.next_reply().await?.unwrap();
+        assert!(text.text.contains("完成\necho '**keep**'"));
+        assert!(!text.text.contains("```"));
+        assert!(text.file.is_none());
+        assert_eq!(text.receipt.unwrap().sequence, 1);
+        store.delivery(text.id, false).await?;
+        let file = store.next_reply().await?.unwrap();
+        assert_eq!(file.file.as_ref().unwrap().artifact, "artifact-0");
+        assert_eq!(file.receipt.as_ref().unwrap().sequence, 2);
+        store
+            .save_media(
+                file.id,
+                "expired-token".into(),
+                chrono::Utc::now().timestamp() - 1,
+            )
+            .await?;
+        assert!(store.next_reply().await?.unwrap().media.is_none());
+        store
+            .save_media(
+                file.id,
+                "media-token".into(),
+                chrono::Utc::now().timestamp() + 300,
+            )
+            .await?;
+        drop(store);
+        let store = ChannelStore::open(&path, "qqbot:files".into())?;
+        let retry = store.next_reply().await?.unwrap();
+        assert_eq!(retry.id, file.id);
+        assert_eq!(retry.media.as_deref(), Some("media-token"));
+        assert_eq!(retry.receipt.unwrap().sequence, 2);
+        store.delivery(retry.id, false).await?;
+        let failed = store.next_reply().await?.unwrap();
+        store
+            .file_failed(failed.id, "File delivery failed. Open Kyler Web.".into())
+            .await?;
+        let failure = store.next_reply().await?.unwrap();
+        assert!(failure.file.is_none());
+        assert!(failure.text.contains("File delivery failed"));
+        store.delivery(failure.id, false).await?;
+        let last = store.next_reply().await?.unwrap();
+        assert_eq!(last.receipt.unwrap().sequence, 4);
+        store.delivery(last.id, false).await?;
+        assert!(store.next_reply().await?.is_none());
+        assert!(store.jobs().await?.is_empty());
         Ok(())
     }
 }

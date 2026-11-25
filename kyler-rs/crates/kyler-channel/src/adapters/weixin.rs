@@ -204,6 +204,7 @@ fn incoming(user: &str, bot: &str, value: &Value) -> Option<(Incoming, String)> 
     }
     Some((
         Incoming {
+            attachments: Vec::new(),
             update: format!("wx_{id}"),
             chat: format!("wx_{}", hex::encode(user)),
             text,

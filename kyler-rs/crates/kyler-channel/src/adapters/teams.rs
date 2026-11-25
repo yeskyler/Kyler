@@ -151,6 +151,7 @@ impl Teams {
         );
         Ok(Webhook::Contextual(
             Incoming {
+                attachments: Vec::new(),
                 update,
                 chat: route.chat(),
                 text: text.to_owned(),

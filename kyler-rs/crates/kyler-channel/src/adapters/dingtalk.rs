@@ -227,6 +227,7 @@ fn decode_frame(corp: &str, robot: &str, frame: &Value) -> Result<(Value, Option
                 && !text.trim().is_empty() =>
         {
             Some(Incoming {
+                attachments: Vec::new(),
                 update: format!("dt_{id}"),
                 chat: format!("dt_{staff}"),
                 text: text.into(),

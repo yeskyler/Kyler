@@ -163,6 +163,7 @@ fn incoming(
         return None;
     }
     Some(Incoming {
+        attachments: Vec::new(),
         update: format!("sig_{sender}_{timestamp}"),
         chat: format!("sig_{sender}"),
         text: text.into(),

@@ -126,6 +126,7 @@ fn decode(app: &str, body: &[u8]) -> Result<Webhook> {
     Ok(Webhook::Response(
         json!({"type":4,"data":{"content":"Received. Kyler will reply here."}}),
         vec![Incoming {
+            attachments: Vec::new(),
             update: format!("d_{id}"),
             chat: format!("d_{channel}"),
             text: text.into(),

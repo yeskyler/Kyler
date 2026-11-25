@@ -184,6 +184,7 @@ fn incoming(bot: &str, frame: &Value) -> Option<Incoming> {
         return None;
     }
     Some(Incoming {
+        attachments: Vec::new(),
         update: format!("mm_{id}"),
         chat: format!("mm_{chat}"),
         text: text.into(),

@@ -147,6 +147,7 @@ impl Email {
                     if let Some(text) = command(&message, &self.sender, &self.message_secret) {
                         store
                             .ingest(vec![Incoming {
+                                attachments: Vec::new(),
                                 update: format!("gmail_{id}"),
                                 chat: self.chat(),
                                 text,
