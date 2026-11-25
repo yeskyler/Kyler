@@ -22,7 +22,7 @@ members = [
 
 [workspace.package]
 license = "MIT"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 repository = "https://github.com/yeskyler/Kyler"
 homepage = "https://www.kyler.work"
@@ -34,24 +34,24 @@ flate2 = "1"
 pulldown-cmark = { version = "0.13.6", default-features = false }
 percent-encoding = "2.3.2"
 # local crates
-kyler-protocol = { path = "crates/kyler-protocol", version = "0.0.1" }
-kyler-core = { path = "crates/kyler-core", version = "0.0.1" }
-kyler-channel = { path = "crates/kyler-channel", version = "0.0.1" }
-kyler-gateway = { path = "crates/kyler-gateway", version = "0.0.1" }
-kyler-provider = { path = "crates/kyler-provider", version = "0.0.1" }
-kyler-mcp = { path = "crates/kyler-mcp", version = "0.0.1" }
-kyler-skills = { path = "crates/kyler-skills", version = "0.0.1" }
-kyler-store = { path = "crates/kyler-store", version = "0.0.1" }
-kyler-acp = { path = "crates/kyler-acp", version = "0.0.1" }
+kyler-protocol = { path = "crates/kyler-protocol", version = "0.0.2" }
+kyler-core = { path = "crates/kyler-core", version = "0.0.2" }
+kyler-channel = { path = "crates/kyler-channel", version = "0.0.2" }
+kyler-gateway = { path = "crates/kyler-gateway", version = "0.0.2" }
+kyler-provider = { path = "crates/kyler-provider", version = "0.0.2" }
+kyler-mcp = { path = "crates/kyler-mcp", version = "0.0.2" }
+kyler-skills = { path = "crates/kyler-skills", version = "0.0.2" }
+kyler-store = { path = "crates/kyler-store", version = "0.0.2" }
+kyler-acp = { path = "crates/kyler-acp", version = "0.0.2" }
 agent-client-protocol = { version = "=5.4.0", features = ["stdio"] }
-kyler-cli = { path = "crates/kyler-cli", version = "0.0.1" }
-kyler-client = { path = "crates/kyler-client", version = "0.0.1" }
-kyler-config = { path = "crates/kyler-config", version = "0.0.1" }
-kyler-logging = { path = "crates/kyler-logging", version = "0.0.1" }
-kyler-tui = { path = "crates/kyler-tui", version = "0.0.1" }
-kyler-server = { path = "crates/kyler-server", version = "0.0.1" }
-kyler-scheduler = { path = "crates/kyler-scheduler", version = "0.0.1" }
-kyler-evals = { path = "crates/kyler-evals", version = "0.0.1" }
+kyler-cli = { path = "crates/kyler-cli", version = "0.0.2" }
+kyler-client = { path = "crates/kyler-client", version = "0.0.2" }
+kyler-config = { path = "crates/kyler-config", version = "0.0.2" }
+kyler-logging = { path = "crates/kyler-logging", version = "0.0.2" }
+kyler-tui = { path = "crates/kyler-tui", version = "0.0.2" }
+kyler-server = { path = "crates/kyler-server", version = "0.0.2" }
+kyler-scheduler = { path = "crates/kyler-scheduler", version = "0.0.2" }
+kyler-evals = { path = "crates/kyler-evals", version = "0.0.2" }
 
 # external crates
 cliclack = "=0.5.7"

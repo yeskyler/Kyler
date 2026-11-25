@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.0.1 — Unreleased
+## 0.0.2 — Unreleased
+
+### Added
+
+- QQ Bot WebSocket delivery with heartbeat monitoring, reconnect/resume, and private-message pairing.
+- Independent provider model selection and defaults in Web Settings and CLI setup.
+- Automatic thinking-level fallback when model capabilities are unavailable.
+
+### Fixed
+
+- Keep hosted model aliases out of native DeepSeek connections after provider changes.
+- Simplify provider labels and align selection indicators in the chat model menu.
+
+## 0.0.1
 
 The public release series starts at 0.0.1.
 
