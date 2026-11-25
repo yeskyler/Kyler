@@ -84,8 +84,16 @@ impl Channel {
                         tracing::error!(channel = self.bot.name(), error = %reason, "Channel stream stopped; update configuration and restart");
                         return;
                     }
+                    // QQ errors expose only fixed stage labels or numeric close/status codes.
+                    // Do not render the full chain, which may include transport details.
+                    let reason = if matches!(&self.bot, Adapter::QqBot(_)) {
+                        error.to_string()
+                    } else {
+                        "Stream disconnected or unavailable".into()
+                    };
                     tracing::warn!(
                         channel = self.bot.name(),
+                        reason,
                         "Channel stream disconnected or unavailable"
                     );
                 }
@@ -123,6 +131,8 @@ impl Channel {
                         if self.process(manager, &job).await.is_err() {
                             tracing::warn!(
                                 channel = self.bot.name(),
+                                job_id = job.id,
+                                session_id = %job.binding.session,
                                 "Could not advance channel job"
                             );
                         }
@@ -745,4 +755,100 @@ pub(crate) async fn acknowledge_reply(
         .await
         .map_err(ApiError::storage)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Server;
+
+    use kyler_core::{
+        Agent, ExecutionEnvironment, SandboxPolicy, SessionStore, ToolBox,
+        sandbox::direct::DirectSandbox,
+    };
+
+    #[tokio::test]
+    async fn channel_session_creation_recovers_after_ownership_was_saved_first() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let workspace = workspace.canonicalize().unwrap();
+        let environment = ExecutionEnvironment::new(
+            &workspace,
+            &workspace,
+            SandboxPolicy::workspace_write("channel-recovery", &workspace),
+            std::env::current_exe().unwrap(),
+            Arc::new(DirectSandbox),
+        )
+        .unwrap();
+        let store = Arc::new(
+            SessionStore::new(root.path().join("sessions"))
+                .await
+                .unwrap(),
+        );
+        let agent = Agent::new(
+            "http://127.0.0.1:9/v1".into(),
+            "TEST_ONLY_KEY".into(),
+            "fixture",
+            None::<String>,
+            Arc::new(ToolBox::default()),
+        )
+        .with_environment(Arc::new(environment));
+        let server = Server::with_agent(Default::default(), Arc::new(agent), store.clone())
+            .await
+            .unwrap();
+        let principal = Principal {
+            id: uuid::Uuid::new_v4().to_string(),
+            token_id: None,
+            role: Role::Member,
+            scope: Scope {
+                workspaces: vec![workspace.to_str().unwrap().into()],
+                ..Default::default()
+            },
+        };
+        let binding = Binding {
+            chat: "qq_fixture".into(),
+            token: "TEST_ONLY_TOKEN_ID".into(),
+            workspace: workspace.to_str().unwrap().into(),
+            session: uuid::Uuid::new_v4().to_string(),
+        };
+        let manager = &server.state.runs;
+        manager
+            .security
+            .bind_session(&principal, &binding.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.load(&binding.session).await.unwrap_err().to_string(),
+            "session not found"
+        );
+        ensure_session(manager, &principal, &binding).await.unwrap();
+        let session = store.load(&binding.session).await.unwrap();
+        assert_eq!(session.environment.unwrap().cwd, workspace);
+        assert!(
+            manager
+                .security
+                .store
+                .owns(
+                    "session".into(),
+                    binding.session.clone(),
+                    principal.id.clone()
+                )
+                .await
+                .unwrap()
+        );
+        ensure_session(manager, &principal, &binding).await.unwrap();
+        assert_eq!(
+            manager
+                .security
+                .store
+                .audit(None, 100)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.action == "session.bind")
+                .count(),
+            1
+        );
+    }
 }

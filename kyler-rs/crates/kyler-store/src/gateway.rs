@@ -133,7 +133,19 @@ impl GatewayStore {
     ) -> Result<()> {
         self.0.with_async(move |c| {
             let tx=c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            tx.execute("INSERT INTO resource_owners(kind,resource,principal_id) VALUES(?,?,?)",params![kind,resource,principal])?;
+            let inserted = tx.execute(
+                "INSERT INTO resource_owners(kind,resource,principal_id) VALUES(?,?,?) ON CONFLICT(kind,resource) DO NOTHING",
+                params![kind,resource,principal],
+            )?;
+            if inserted == 0 {
+                let same_owner: bool = tx.query_row(
+                    "SELECT principal_id=? FROM resource_owners WHERE kind=? AND resource=?",
+                    params![principal,kind,resource], |row| row.get(0),
+                )?;
+                ensure!(same_owner, "Resource already belongs to another identity");
+                tx.commit()?;
+                return Ok(());
+            }
             tx.execute("INSERT INTO audit(request_id,principal_id,action,resource,started_at,finished_at,status) VALUES(?,?,?,?,?,?,200)",params![uuid::Uuid::new_v4().to_string(),principal,format!("{kind}.bind"),resource,now,now])?;
             tx.commit()?;Ok(())
         }).await
@@ -161,5 +173,85 @@ impl GatewayStore {
     pub async fn audit(&self, before: Option<i64>, limit: usize) -> Result<Vec<AuditRecord>> {
         ensure!((1..=500).contains(&limit), "Audit limit must be in 1..=500");
         self.0.with_async(move |c|Ok(c.prepare("SELECT id,request_id,principal_id,token_id,action,resource,started_at,finished_at,status FROM audit WHERE (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?")?.query_map(params![before,before,limit as i64],|r|Ok(AuditRecord{id:r.get(0)?,request_id:r.get(1)?,principal_id:r.get(2)?,token_id:r.get(3)?,action:r.get(4)?,resource:r.get(5)?,started_at:r.get(6)?,finished_at:r.get(7)?,status:r.get(8)?}))?.collect::<rusqlite::Result<_>>()?)).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn resource_binding_retries_after_restart_preserve_owner_and_audit_once() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("gateway.sqlite");
+        let store = GatewayStore::open(&path)?;
+        store
+            .bind(
+                "session".into(),
+                "pending-session".into(),
+                "owner".into(),
+                1,
+            )
+            .await?;
+        drop(store);
+        // Ownership may be durable even if the session save failed or never ran.
+        let store = GatewayStore::open(&path)?;
+        let other = GatewayStore::open(&path)?;
+        let (first, second) = tokio::join!(
+            store.bind(
+                "session".into(),
+                "pending-session".into(),
+                "owner".into(),
+                2
+            ),
+            other.bind(
+                "session".into(),
+                "pending-session".into(),
+                "owner".into(),
+                3
+            ),
+        );
+        first?;
+        second?;
+        assert!(
+            store
+                .owns("session".into(), "pending-session".into(), "owner".into())
+                .await?
+        );
+        let audit = store.audit(None, 100).await?;
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].action, "session.bind");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn competing_owners_cannot_replace_a_binding() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("gateway.sqlite");
+        let first = GatewayStore::open(&path)?;
+        let second = GatewayStore::open(&path)?;
+        let (a, b) = tokio::join!(
+            first.bind("session".into(), "shared".into(), "first".into(), 1),
+            second.bind("session".into(), "shared".into(), "second".into(), 1),
+        );
+        assert_ne!(a.is_ok(), b.is_ok());
+        let (owner, rejected) = if a.is_ok() {
+            ("first", "second")
+        } else {
+            ("second", "first")
+        };
+        assert!(
+            first
+                .bind("session".into(), "shared".into(), rejected.into(), 2)
+                .await
+                .is_err()
+        );
+        assert!(
+            first
+                .owns("session".into(), "shared".into(), owner.into())
+                .await?
+        );
+        assert_eq!(first.audit(None, 100).await?.len(), 1);
+        Ok(())
     }
 }

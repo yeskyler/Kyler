@@ -180,7 +180,7 @@ impl QqBot {
                                 _ => {
                                     ensure!(session.id.is_some(), "QQ Bot event arrived before authentication");
                                     if let Some(message) = incoming(&payload, chrono::Utc::now().timestamp()) {
-                                        store.ingest(vec![message]).await?;
+                                        store.ingest(vec![message]).await.context("QQ Bot message persistence failed")?;
                                     }
                                 }
                             }

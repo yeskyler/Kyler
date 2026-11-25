@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Recover channel session creation when ownership was saved before a failed or interrupted session write.
+- Include safe QQ WebSocket failure stages and channel job identifiers in diagnostic logs.
 - Keep hosted model aliases out of native DeepSeek connections after provider changes.
 - Simplify provider labels and align selection indicators in the chat model menu.
 
