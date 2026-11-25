@@ -1,3 +1,4 @@
+import { thinkingLevels } from "./model-settings.ts";
 import type { ModelCatalog, PermissionMode, ThinkingLevel } from "./types.ts";
 export type TaskConfig = {
   name: string;
@@ -124,23 +125,19 @@ export function mergeRuns(previous: AutomationRun[], incoming: AutomationRun[]) 
   );
 }
 
-/** Preserve a selection only when the selected model explicitly supports it. */
+/** Manual intent does not depend on provider capability discovery. */
 export function thinkingForModel(
   catalog: ModelCatalog,
   profile: string | null,
   preferred?: ThinkingLevel,
 ) {
   const capabilities = catalog.models.find((m) => m.profile === profile)?.capabilities?.reasoning;
-  const levels: ThinkingLevel[] = capabilities
-    ? capabilities.levels.length
-      ? capabilities.levels
-      : ["off"]
-    : [];
+  const levels: ThinkingLevel[] = [...thinkingLevels];
   return {
     levels,
     level:
       preferred && levels.includes(preferred)
         ? preferred
-        : (capabilities?.default ?? ("off" as ThinkingLevel)),
+        : (capabilities?.default ?? ("auto" as ThinkingLevel)),
   };
 }

@@ -52,6 +52,9 @@ impl ModelRegistry {
                 .map(
                     |(name, p)| kyler_protocol::api::models::ProviderDiscoveryState {
                         provider: name.clone(),
+                        display_name: String::new(),
+                        adapter: String::new(),
+                        checked_at: None,
                         connection_status: "untested".into(),
                         status: if p.discover_models {
                             "pending"
@@ -64,10 +67,37 @@ impl ModelRegistry {
                 )
                 .collect();
         }
+        for status in &mut statuses {
+            if let Some(provider) = settings.providers.get(&status.provider) {
+                let adapter =
+                    kyler_provider::Adapter::resolve(provider.adapter, &provider.base_url);
+                let name = adapter.0.preset().name;
+                status.display_name = if status.provider == "default" {
+                    name.into()
+                } else {
+                    format!("{name} ({})", status.provider)
+                };
+                status.adapter = serde_json::to_value(adapter.0)?
+                    .as_str()
+                    .unwrap()
+                    .to_owned();
+            }
+        }
         let mut models = BTreeMap::new();
         for (name, profile) in settings.profiles {
             let provider = &settings.providers[&profile.provider];
+            if provider
+                .enabled_models
+                .as_ref()
+                .is_some_and(|models| !models.contains(&profile.model))
+            {
+                continue;
+            }
             let adapter = kyler_provider::Adapter::resolve(provider.adapter, &provider.base_url);
+            // Old connection edits may have left hosted aliases in persisted profiles.
+            if !adapter.accepts_model_id(&profile.model) {
+                continue;
+            }
             let capabilities = adapter.resolve_capabilities(
                 &profile.model,
                 &profile.capabilities,
@@ -407,6 +437,103 @@ api_key="fixture"
                 .unwrap()
                 .reasoning_effort,
             Some(kyler_protocol::api::models::ThinkingLevel::High)
+        );
+    }
+}
+
+#[cfg(test)]
+mod provider_label_tests {
+    use super::*;
+
+    #[test]
+    fn native_deepseek_catalog_excludes_persisted_hosted_aliases() {
+        let mut config = AppConfig::default();
+        config.llm.base_url = "https://api.deepseek.com/v1".into();
+        config.llm.model = "deepseek-flash".into();
+        config.llm.api_key = kyler_config::SecretString::new("TEST_ONLY_KEY");
+        config.models = config.effective_models();
+        let mut legacy = config.models.profiles["default"].clone();
+        legacy.model = "Qwen/Qwen3-32B".into();
+        config
+            .models
+            .profiles
+            .insert("old-hosted".into(), legacy.clone());
+        legacy.model = "deepseek-ai/DeepSeek-V4-Flash".into();
+        config
+            .models
+            .profiles
+            .insert("old-deepseek-alias".into(), legacy);
+        let catalog = ModelRegistry::new(&config).unwrap().catalog();
+        assert_eq!(catalog.models.len(), 1);
+        assert_eq!(catalog.models[0].model, "deepseek-flash");
+        // Compatible hosting connections continue to accept qualified model IDs.
+        config.models.providers.get_mut("default").unwrap().adapter =
+            kyler_provider::AdapterKind::Siliconflow;
+        assert_eq!(
+            ModelRegistry::new(&config).unwrap().catalog().models.len(),
+            3
+        );
+    }
+
+    #[test]
+    fn provider_labels_use_connection_identity_and_never_credentials() {
+        let mut config = AppConfig::default();
+        config.llm.base_url = "https://api.deepseek.com/v1".into();
+        config.llm.model = "deepseek-flash".into();
+        config.llm.api_key = kyler_config::SecretString::new("PRIVATE_LABEL_TEST_KEY");
+        let catalog = ModelRegistry::new(&config).unwrap().catalog();
+        assert_eq!(catalog.providers[0].provider, "default");
+        assert_eq!(catalog.providers[0].display_name, "DeepSeek");
+        assert_eq!(catalog.providers[0].adapter, "deepseek");
+        assert!(
+            !serde_json::to_string(&catalog)
+                .unwrap()
+                .contains("PRIVATE_LABEL_TEST_KEY")
+        );
+
+        config.models = config.effective_models();
+        let provider = config.models.providers.remove("default").unwrap();
+        let profile = config.models.profiles.remove("default").unwrap();
+        for name in ["work", "personal"] {
+            config
+                .models
+                .providers
+                .insert(name.into(), provider.clone());
+            let mut profile = profile.clone();
+            profile.provider = name.into();
+            config.models.profiles.insert(name.into(), profile);
+        }
+        config.models.default = "work".into();
+        let catalog = ModelRegistry::new(&config).unwrap().catalog();
+        assert_eq!(catalog.providers.len(), 2);
+        assert!(
+            catalog
+                .providers
+                .iter()
+                .any(|p| p.provider == "work" && p.display_name == "DeepSeek (work)")
+        );
+        assert!(
+            catalog
+                .providers
+                .iter()
+                .any(|p| p.provider == "personal" && p.display_name == "DeepSeek (personal)")
+        );
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .filter(|m| m.model == "deepseek-flash")
+                .count(),
+            2
+        );
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .find(|m| m.profile == "work")
+                .unwrap()
+                .provider,
+            "work"
         );
     }
 }

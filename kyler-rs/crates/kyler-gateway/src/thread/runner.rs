@@ -158,7 +158,7 @@ async fn start_turn(
     let thinking_path =
         super::preferences::migrate_thinking_path(&thinking_path, &agent.model_preference_key())?;
     let level = super::preferences::read_thinking(&thinking_path)?
-        .unwrap_or(kyler_protocol::api::models::ThinkingLevel::Off);
+        .unwrap_or_else(|| agent.default_thinking_level());
     let agent = agent.with_manual_thinking_level(level)?;
     *state.environment.write().await = agent.execution_environment();
     let permissions = state.permissions.read().await.clone();

@@ -92,13 +92,26 @@ impl Prompts {
         )?;
         Ok(presets[index].kind)
     }
-    pub fn connection(&mut self, names: &[String], default: &str) -> Result<String> {
-        let index = self.select(
-            "Provider connection",
-            names.to_vec(),
-            names.iter().position(|n| n == default).unwrap_or(0),
-        )?;
-        Ok(names[index].clone())
+    pub fn provider_name(&mut self, existing: &[String]) -> Result<String> {
+        let names = existing.to_vec();
+        Input::new("Provider connection name")
+            .validate(move |value: &String| {
+                let value = value.trim();
+                if !value.is_empty()
+                    && value.len() <= 128
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+                    && !names.iter().any(|name| name == value)
+                {
+                    Ok(())
+                } else {
+                    Err("Use a unique name with 1–128 letters, numbers, underscores or hyphens.")
+                }
+            })
+            .interact::<String>()
+            .map(|value| value.trim().to_owned())
+            .map_err(prompt_error)
     }
     pub fn model_choice(
         &mut self,

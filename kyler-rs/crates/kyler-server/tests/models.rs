@@ -1004,7 +1004,9 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
     );
     assert_eq!(
         state.levels,
-        kyler_protocol::api::models::ThinkingLevel::ALL.to_vec()
+        std::iter::once(kyler_protocol::api::models::ThinkingLevel::Auto)
+            .chain(kyler_protocol::api::models::ThinkingLevel::ALL)
+            .collect::<Vec<_>>()
     );
     let selected: SessionModel = client
         .put(&model_url)
@@ -1066,7 +1068,10 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
             .unwrap();
         let state = selected.thinking.unwrap();
         assert!(!state.enabled);
-        assert_eq!(state.level, kyler_protocol::api::models::ThinkingLevel::Off);
+        assert_eq!(
+            state.level,
+            kyler_protocol::api::models::ThinkingLevel::Auto
+        );
         assert_eq!(
             state.status,
             if profile == "plain" {
@@ -1099,7 +1104,32 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
         .unwrap();
     assert_eq!(
         selected.thinking.unwrap().level,
-        kyler_protocol::api::models::ThinkingLevel::Off
+        kyler_protocol::api::models::ThinkingLevel::Auto
+    );
+    let accepted: RunAccepted = client
+        .post(format!("{base}/v1/sessions/{id}/runs"))
+        .json(&json!({"input":"auto fixture"}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        terminal(&client, &base, &accepted.run_id).await.status,
+        kyler_protocol::api::run::RunStatus::Completed
+    );
+    assert!(
+        fixture
+            .requests
+            .lock()
+            .await
+            .last()
+            .unwrap()
+            .get("reasoning_effort")
+            .is_none()
     );
     stop.send(()).unwrap();
     service.await.unwrap().unwrap();
@@ -1114,7 +1144,7 @@ async fn installing_a_plain_model_does_not_pin_other_models_thinking_capabilitie
             .thinking
             .unwrap()
             .level,
-        kyler_protocol::api::models::ThinkingLevel::Off
+        kyler_protocol::api::models::ThinkingLevel::Auto
     );
     restarted.state.runs.shutdown().await;
     upstream.abort();
@@ -1128,7 +1158,9 @@ async fn provider_management_preserves_keys_profiles_and_default_without_inferen
     let base = format!("http://{}/v1", listener.local_addr().unwrap());
     let router = Router::new().route(
         "/v1/models",
-        axum::routing::get(|| async { Json(json!({"data":[{"id":"new-model"}]})) }),
+        axum::routing::get(|| async {
+            Json(json!({"data":[{"id":"new-model"},{"id":"disabled-model"}]}))
+        }),
     );
     let mock = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let source = root.path().join("config.toml");
@@ -1145,6 +1177,7 @@ async fn provider_management_preserves_keys_profiles_and_default_without_inferen
         key,
         models: vec!["new-model".into()],
         make_default,
+        default_model: None,
     };
     let tested = server
         .state
@@ -1152,7 +1185,7 @@ async fn provider_management_preserves_keys_profiles_and_default_without_inferen
         .test_provider("work", request(Some("TEST_ONLY_KEY".into()), false))
         .await
         .unwrap();
-    assert_eq!(tested.models, ["new-model"]);
+    assert_eq!(tested.models, ["disabled-model", "new-model"]);
     let before = server.state.runs.model_catalog().unwrap();
     let saved = server
         .state
@@ -1163,6 +1196,35 @@ async fn provider_management_preserves_keys_profiles_and_default_without_inferen
         )
         .await
         .unwrap();
+    let work = saved.providers.iter().find(|p| p.id == "work").unwrap();
+    assert_eq!(work.models, ["new-model"]);
+    assert_eq!(work.available_models, ["disabled-model", "new-model"]);
+    assert!(!work.is_default);
+    assert!(work.checked_at.is_some());
+    assert!(
+        !server
+            .state
+            .runs
+            .model_catalog()
+            .unwrap()
+            .models
+            .iter()
+            .any(|m| m.provider == "work" && m.model == "disabled-model")
+    );
+    let persisted = loader::load_from(&source).unwrap();
+    assert_eq!(
+        persisted.models.providers["work"].enabled_models.as_deref(),
+        Some(["new-model".to_string()].as_slice())
+    );
+    let restarted = kyler_core::models::ModelRegistry::new(&persisted).unwrap();
+    assert!(
+        !restarted
+            .catalog()
+            .models
+            .iter()
+            .any(|m| m.provider == "work" && m.model == "disabled-model")
+    );
+    assert_eq!(restarted.discovered_model_ids("work").len(), 2);
     let response = serde_json::to_string(&saved).unwrap();
     assert!(!response.contains("TEST_ONLY_KEY"));
     assert!(!response.contains("PRIVATE_MODEL_KEY"));
@@ -1214,6 +1276,7 @@ async fn provider_management_preserves_keys_profiles_and_default_without_inferen
                 key: None,
                 models: vec!["fast-v1".into(), "slow-v1".into()],
                 make_default: true,
+                default_model: None,
             }),
         )
         .await

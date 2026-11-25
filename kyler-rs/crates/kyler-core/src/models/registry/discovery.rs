@@ -80,7 +80,11 @@ pub(super) fn extend_profiles(settings: &mut ModelSettings, config: &AppConfig, 
             continue;
         };
         for entry in entries {
-            if entry.id.is_empty()
+            if provider
+                .enabled_models
+                .as_ref()
+                .is_some_and(|models| !models.contains(&entry.id))
+                || entry.id.is_empty()
                 || entry.id.len() > 256
                 || entry.id.chars().any(char::is_control)
                 || !adapter.selectable_model(&entry.id)
@@ -124,6 +128,23 @@ pub(super) fn extend_profiles(settings: &mut ModelSettings, config: &AppConfig, 
     }
 }
 impl ModelRegistry {
+    pub fn discovered_model_ids(&self, name: &str) -> Vec<DiscoveredModel> {
+        let catalog = self.current.read().expect("model registry poisoned");
+        let settings = catalog.config.effective_models();
+        let Some(provider) = settings.providers.get(name) else {
+            return Vec::new();
+        };
+        let adapter = Adapter::resolve(provider.adapter, &provider.base_url);
+        catalog
+            .discovered
+            .0
+            .get(&identity(name, provider))
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| adapter.selectable_model(&m.id))
+            .collect()
+    }
     /// Setup reuses the host-owned cache without constructing a runtime or sending requests.
     pub fn cached_model_ids(
         config: &AppConfig,
@@ -226,6 +247,14 @@ impl ModelRegistry {
                 live.0.insert(key, entries);
             }
             statuses.push(ProviderDiscoveryState {
+                display_name: String::new(),
+                adapter: String::new(),
+                checked_at: Some(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64,
+                ),
                 connection_status: connection_status.into(),
                 provider: name,
                 status: status.into(),

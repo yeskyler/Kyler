@@ -1,6 +1,7 @@
 import type { SessionModel, ThinkingLevel, ThinkingState } from "./types.ts";
 
 export const thinkingLevels: readonly ThinkingLevel[] = [
+  "auto",
   "off",
   "low",
   "medium",
@@ -10,6 +11,7 @@ export const thinkingLevels: readonly ThinkingLevel[] = [
   "ultra",
 ];
 export const thinkingLabels: Record<ThinkingLevel, string> = {
+  auto: "Auto",
   off: "Off",
   low: "Low",
   medium: "Medium",

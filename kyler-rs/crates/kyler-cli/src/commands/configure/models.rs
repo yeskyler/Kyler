@@ -37,6 +37,7 @@ pub(super) struct Wizard {
     models: Vec<DiscoveredModel>,
     discovered: Option<Vec<DiscoveredModel>>,
     force_fetch: bool,
+    make_default: bool,
 }
 impl Wizard {
     pub fn new(config: &AppConfig, values: &toml::Value) -> Self {
@@ -56,6 +57,8 @@ impl Wizard {
                 api_key: config.llm.api_key.clone(),
                 api_key_env: None,
                 discover_models: config.llm.discover_models,
+                enabled_models: None,
+                default_model: None,
             }
         } else {
             config.models.providers[&name].clone()
@@ -73,7 +76,7 @@ impl Wizard {
         Self {
             baseline: config.clone(),
             values: values.clone(),
-            step: if names.len() > 1 {
+            step: if !names.is_empty() || config.effective_models().validate().is_ok() {
                 Step::Connection
             } else {
                 Step::Provider
@@ -89,7 +92,32 @@ impl Wizard {
             models: Vec::new(),
             discovered: None,
             force_fetch: false,
+            make_default: true,
         }
+    }
+    pub fn manage_connections(&mut self) {
+        self.step = Step::Connection;
+    }
+    fn begin_new_connection(&mut self, name: String) {
+        if self.baseline.models.providers.is_empty()
+            && self.baseline.effective_models().validate().is_ok()
+        {
+            self.baseline.models = self.baseline.effective_models();
+        }
+        self.names = self.baseline.models.providers.keys().cloned().collect();
+        self.name = name;
+        self.provider = ProviderSettings {
+            enabled_models: Some(Vec::new()),
+            ..Default::default()
+        };
+        self.selected.clear();
+        self.profile = format!("setup_{}", uuid::Uuid::new_v4().simple());
+        self.window = None;
+        self.directory_for = None;
+        self.cached.clear();
+        self.models.clear();
+        self.discovered = None;
+        self.make_default = self.baseline.models.profiles.is_empty();
     }
     pub fn edit_model(&mut self) {
         self.step = Step::Model;
@@ -97,7 +125,12 @@ impl Wizard {
     fn previous(&mut self) -> Result<()> {
         self.step = match self.step {
             Step::Connection => return Err(super::input::cancelled()),
-            Step::Provider if self.names.len() > 1 => Step::Connection,
+            Step::Provider
+                if !self.names.is_empty()
+                    || self.baseline.effective_models().validate().is_ok() =>
+            {
+                Step::Connection
+            }
             Step::Provider => return Err(super::input::cancelled()),
             Step::Url => Step::Provider,
             Step::Key if self.provider.adapter.editable_url() => Step::Url,
@@ -191,23 +224,70 @@ impl Wizard {
     ) -> Result<Vec<Discovery>> {
         loop {
             let result: Result<bool> = match self.step {
-                Step::Connection => prompts.connection(&self.names, &self.name).map(|name| {
-                    if name != self.name {
-                        self.provider = self.baseline.models.providers[&name].clone();
-                        self.selected = self
-                            .baseline
-                            .models
-                            .profiles
-                            .values()
-                            .find(|p| p.provider == name)
-                            .map(|p| p.model.clone())
-                            .unwrap_or_default();
-                        self.window = None;
-                        self.name = name;
+                Step::Connection => {
+                    let names = if self.names.is_empty() {
+                        vec!["default".into()]
+                    } else {
+                        self.names.clone()
+                    };
+                    let settings = self.baseline.effective_models();
+                    let mut choices = names
+                        .iter()
+                        .map(|name| {
+                            let provider = &settings.providers[name];
+                            format!(
+                                "{} ({name})",
+                                Adapter::resolve(provider.adapter, &provider.base_url)
+                                    .0
+                                    .preset()
+                                    .name
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    choices.push("Add provider…".into());
+                    let result = prompts.select(
+                        "Provider connection",
+                        choices,
+                        names
+                            .iter()
+                            .position(|name| name == &self.name)
+                            .unwrap_or(0),
+                    );
+                    match result {
+                        Ok(index) if index == names.len() => match prompts.provider_name(&names) {
+                            Ok(name) => {
+                                self.begin_new_connection(name);
+                                self.step = Step::Provider;
+                                Ok(false)
+                            }
+                            Err(error) => Err(error),
+                        },
+                        Ok(index) => {
+                            let name = &names[index];
+                            if name != &self.name {
+                                self.provider = settings.providers[name].clone();
+                                self.selected = self
+                                    .provider
+                                    .default_model
+                                    .clone()
+                                    .or_else(|| {
+                                        settings
+                                            .profiles
+                                            .values()
+                                            .find(|p| p.provider == *name)
+                                            .map(|p| p.model.clone())
+                                    })
+                                    .unwrap_or_default();
+                                self.window = None;
+                                self.name = name.clone();
+                                self.directory_for = None;
+                            }
+                            self.step = Step::Provider;
+                            Ok(false)
+                        }
+                        Err(error) => Err(error),
                     }
-                    self.step = Step::Provider;
-                    false
-                }),
+                }
                 Step::Provider => prompts
                     .provider("Provider", wizard_adapter(&self.provider))
                     .map(|kind| {
@@ -331,6 +411,33 @@ impl Wizard {
                 Err(e) if e.code == super::input::BACK => self.previous()?,
                 Err(e) => return Err(e),
                 Ok(true) => {
+                    let replacing_default = self
+                        .baseline
+                        .models
+                        .profiles
+                        .get(&self.baseline.models.default)
+                        .is_some_and(|profile| profile.provider == self.name)
+                        && self
+                            .baseline
+                            .models
+                            .providers
+                            .get(&self.name)
+                            .is_some_and(|old| {
+                                old.adapter != self.provider.adapter
+                                    || old.base_url != self.provider.base_url
+                            });
+                    if replacing_default {
+                        self.make_default = true;
+                    } else if !self.names.is_empty() && !self.baseline.models.default.is_empty() {
+                        self.make_default = prompts.select(
+                            "Default provider and model",
+                            vec![
+                                format!("Use {} / {} as default", self.name, self.selected),
+                                "Keep current default".into(),
+                            ],
+                            if self.make_default { 0 } else { 1 },
+                        )? == 0;
+                    }
                     let (draft, raw) = self.project();
                     *config = draft;
                     *values = raw;
@@ -370,9 +477,14 @@ impl Wizard {
                 }
             }
         } else {
-            let old = &self.baseline.models.providers[&self.name];
-            let changed =
-                old.adapter != self.provider.adapter || old.base_url != self.provider.base_url;
+            let changed = self
+                .baseline
+                .models
+                .providers
+                .get(&self.name)
+                .is_none_or(|old| {
+                    old.adapter != self.provider.adapter || old.base_url != self.provider.base_url
+                });
             let profile = config
                 .models
                 .profiles
@@ -404,15 +516,72 @@ impl Wizard {
                     profile.context_tokens = n;
                 }
             }
-            config.models.default = self.profile.clone();
-            config
-                .models
-                .providers
-                .insert(self.name.clone(), self.provider.clone());
+            if self.make_default || config.models.default.is_empty() {
+                config.models.default = self.profile.clone();
+            }
+            if changed {
+                config
+                    .models
+                    .profiles
+                    .retain(|name, profile| profile.provider != self.name || name == &self.profile);
+            }
+            let mut provider = self.provider.clone();
+            if changed {
+                provider.enabled_models = Some(vec![self.selected.clone()]);
+            }
+            update_connection_defaults(&mut config, &self.name, &self.selected, &provider);
         }
         (config, values)
     }
 }
+fn update_connection_defaults(
+    config: &mut AppConfig,
+    name: &str,
+    selected: &str,
+    provider: &ProviderSettings,
+) {
+    let mut provider = provider.clone();
+    provider.default_model = Some(selected.into());
+    if let Some(enabled) = &mut provider.enabled_models {
+        if !enabled.iter().any(|model| model == selected) {
+            enabled.push(selected.into());
+        }
+    }
+    config.models.providers.insert(name.into(), provider);
+}
+
+pub(super) fn fill_auto_thinking(config: &mut AppConfig, discovered: &[Discovery]) {
+    let settings = config.effective_models();
+    for (name, profile) in &settings.profiles {
+        if profile.reasoning_effort.is_some() {
+            continue;
+        }
+        let provider = &settings.providers[&profile.provider];
+        let metadata = discovered
+            .iter()
+            .find(|(id, settings, _)| {
+                id == &profile.provider && settings.base_url == provider.base_url
+            })
+            .and_then(|(_, _, entries)| entries.iter().find(|entry| entry.id == profile.model))
+            .map(|entry| &entry.capabilities);
+        let capabilities = Adapter::resolve(provider.adapter, &provider.base_url)
+            .resolve_capabilities(&profile.model, &profile.capabilities, metadata, None)
+            .unwrap_or_default();
+        if capabilities
+            .reasoning
+            .as_ref()
+            .is_none_or(|caps| caps.levels.is_empty())
+        {
+            let auto = Some(kyler_protocol::api::models::ThinkingLevel::Auto);
+            if config.models.profiles.is_empty() {
+                config.llm.reasoning_effort = auto;
+            } else if let Some(profile) = config.models.profiles.get_mut(name) {
+                profile.reasoning_effort = auto;
+            }
+        }
+    }
+}
+
 fn window_policy(config: &AppConfig) -> (ContextPolicy, bool) {
     let mut policy = ContextPolicy::from(&config.context);
     if let Some(profile) = config.models.profiles.get(&config.models.default) {
@@ -524,13 +693,14 @@ fn summary(
     let reasoning = resolved.reasoning.as_ref();
     let level = effort
         .or_else(|| reasoning.map(|r| r.default))
-        .unwrap_or(kyler_protocol::api::models::ThinkingLevel::Off);
+        .unwrap_or(kyler_protocol::api::models::ThinkingLevel::Auto);
     let mut details = vec![
         format!("Model     {model}"),
         format!(
             "Thinking  {}",
             match (reasoning, level) {
-                (None, _) => "Unconfirmed",
+                (_, kyler_protocol::api::models::ThinkingLevel::Auto) => "Auto",
+                (None, _) => "Auto",
                 (_, kyler_protocol::api::models::ThinkingLevel::Off) => "Off",
                 (_, kyler_protocol::api::models::ThinkingLevel::Low) => "Low",
                 (_, kyler_protocol::api::models::ThinkingLevel::Medium) => "Medium",
@@ -650,6 +820,39 @@ output_tokens=8192
         assert_eq!(config.models.default, "original");
     }
     #[test]
+    fn adding_connection_preserves_legacy_provider_and_default() {
+        let mut config = AppConfig::default();
+        config.llm.base_url = "http://localhost:1234/v1".into();
+        config.llm.model = "existing-model".into();
+        config.llm.api_key = kyler_config::SecretString::new("EXISTING_TEST_KEY");
+        let original = config.effective_models();
+        let mut wizard = Wizard::new(&config, &toml::Value::Table(Default::default()));
+        wizard.begin_new_connection("work".into());
+        wizard.provider.base_url = "http://localhost:5678/v1".into();
+        wizard.provider.api_key = kyler_config::SecretString::new("NEW_TEST_KEY");
+        wizard.choose("new-model".into());
+        let (projected, _) = wizard.project();
+        assert_eq!(projected.models.default, original.default);
+        assert_eq!(projected.models.providers.len(), 2);
+        assert_eq!(
+            projected.models.providers["default"].base_url,
+            original.providers["default"].base_url
+        );
+        assert_eq!(
+            projected.models.providers["work"].default_model.as_deref(),
+            Some("new-model")
+        );
+        projected.models.validate().unwrap();
+        wizard.make_default = true;
+        let (projected, _) = wizard.project();
+        assert_eq!(
+            projected.models.profiles[&projected.models.default].provider,
+            "work"
+        );
+        projected.models.validate().unwrap();
+    }
+
+    #[test]
     fn window_serialization_distinguishes_fallback_from_manual_override() {
         let mut settings = toml::Table::new();
         settings.insert("context_tokens".into(), 64000.into());
@@ -694,5 +897,36 @@ output_tokens=8192
             default_url(AdapterKind::Siliconflow, "http://localhost:1234/v1"),
             "https://api.siliconflow.cn/v1"
         );
+    }
+}
+
+#[cfg(test)]
+mod auto_fallback_tests {
+    use super::*;
+    use kyler_protocol::api::models::ThinkingLevel;
+
+    #[test]
+    fn unknown_models_fill_auto_for_legacy_and_named_profiles() {
+        let mut config = AppConfig::default();
+        config.llm.base_url = "http://localhost:1234/v1".into();
+        config.llm.model = "unknown-model".into();
+        fill_auto_thinking(&mut config, &[]);
+        assert_eq!(config.llm.reasoning_effort, Some(ThinkingLevel::Auto));
+        config.llm.reasoning_effort = None;
+        config.models = config.effective_models();
+        fill_auto_thinking(&mut config, &[]);
+        assert_eq!(
+            config.models.profiles["default"].reasoning_effort,
+            Some(ThinkingLevel::Auto)
+        );
+    }
+
+    #[test]
+    fn manual_levels_are_kept_without_capability_discovery() {
+        let mut config = AppConfig::default();
+        config.llm.model = "unknown-model".into();
+        config.llm.reasoning_effort = Some(ThinkingLevel::Ultra);
+        fill_auto_thinking(&mut config, &[]);
+        assert_eq!(config.llm.reasoning_effort, Some(ThinkingLevel::Ultra));
     }
 }

@@ -23,12 +23,15 @@ import { SessionInspectorControls } from "./session-inspector";
 export { ChatSettingsProvider } from "./chat-settings-context";
 
 import { thinkingLabels, thinkingOptions, validateModelSettings } from "@/lib/kyler/model-settings";
+import { providerModelGroups } from "@/lib/kyler/provider-models";
 
 function SettingsSubmenu({
   label,
   value,
   children,
+  selected = false,
 }: {
+  selected?: boolean;
   label: string;
   value: string;
   children: ReactNode;
@@ -36,8 +39,11 @@ function SettingsSubmenu({
   return (
     <Menu.SubmenuRoot>
       <Menu.SubmenuTrigger className="flex min-h-9 w-full cursor-default items-center gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent">
-        <span className="shrink-0">{label}</span>
+        <span className="min-w-0 truncate" title={label}>
+          {label}
+        </span>
         <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">{value}</span>
+        {selected && <CheckIcon className="size-3.5 shrink-0" aria-label="Current provider" />}
         <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       </Menu.SubmenuTrigger>
       <Menu.Portal>
@@ -170,6 +176,7 @@ export function ModelThinkingControl() {
     }
   }
   const modelName = model?.selected?.model ?? initialModel;
+  const providerGroups = providerModelGroups(catalog, model?.selected?.provider);
   const displayedLevel = thinking?.level ?? "";
   const label = busy ? "Loading…" : !thinking ? "Unavailable" : thinkingLabels[thinking.level];
   return (
@@ -198,35 +205,23 @@ export function ModelThinkingControl() {
               className="max-h-[min(32rem,70vh)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border bg-popover p-1.5 text-popover-foreground shadow-lg outline-none"
               aria-label="Model and thinking settings"
             >
-              {[
-                ...new Set(
-                  catalog?.models
-                    .filter(
-                      (entry) =>
-                        !catalog.providers?.some(
-                          (provider) =>
-                            provider.provider === entry.provider && provider.status === "stale",
-                        ),
-                    )
-                    .map((entry) => entry.provider),
-                ),
-              ].map((provider) => (
-                <SettingsSubmenu
-                  key={provider}
-                  label={provider}
-                  value={model?.selected?.provider === provider ? modelName : ""}
-                >
-                  <Menu.RadioGroup
-                    aria-label={`${provider} models`}
-                    value={model?.selected?.profile ?? ""}
+              <SettingsSubmenu label="Model" value={modelName}>
+                {providerGroups.map((group) => (
+                  <SettingsSubmenu
+                    key={group.id}
+                    label={group.label}
+                    selected={group.selected}
+                    value=""
                   >
-                    {catalog?.models
-                      .filter((entry) => entry.provider === provider)
-                      .map((entry) => (
+                    <Menu.RadioGroup
+                      aria-label={`${group.label} models`}
+                      value={model?.selected?.profile ?? ""}
+                    >
+                      {group.models.map((entry) => (
                         <Menu.RadioItem
                           key={entry.profile}
                           value={entry.profile}
-                          title={entry.profile}
+                          title={entry.model}
                           onClick={() => void selectModel(entry.profile)}
                           disabled={busy || running}
                           className="flex min-h-9 cursor-default items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-40"
@@ -237,9 +232,15 @@ export function ModelThinkingControl() {
                           </Menu.RadioItemIndicator>
                         </Menu.RadioItem>
                       ))}
-                  </Menu.RadioGroup>
-                </SettingsSubmenu>
-              ))}
+                    </Menu.RadioGroup>
+                    {!group.models.length && (
+                      <p className="px-3 py-2 text-xs text-muted-foreground">
+                        No models configured
+                      </p>
+                    )}
+                  </SettingsSubmenu>
+                ))}
+              </SettingsSubmenu>
               <SettingsSubmenu label="Thinking level" value={label}>
                 <Menu.RadioGroup aria-label="Thinking level" value={displayedLevel}>
                   {thinkingOptions(thinking ?? undefined).map(

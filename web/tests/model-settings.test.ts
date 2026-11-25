@@ -22,7 +22,7 @@ function selection(
       revision: 4,
       status,
       supported: status === "supported",
-      enabled: level !== "off",
+      enabled: level !== "off" && level !== "auto",
       follows_default: true,
       source: "fixture",
       levels,
@@ -30,11 +30,20 @@ function selection(
     },
   };
 }
-test("all seven levels stay visible while all remain selectable", () => {
-  assert.deepEqual(thinkingLevels, ["off", "low", "medium", "high", "xhigh", "max", "ultra"]);
+test("Auto and all seven levels stay visible while all remain selectable", () => {
+  assert.deepEqual(thinkingLevels, [
+    "auto",
+    "off",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+  ]);
   const known = validateModelSettings(selection("supported", ["high", "max"], "high"));
   const options = thinkingOptions(known.thinking!);
-  assert.equal(options.length, 7);
+  assert.equal(options.length, 8);
   assert.deepEqual(
     options.filter((item) => item.available).map((item) => item.level),
     thinkingLevels,
@@ -43,7 +52,7 @@ test("all seven levels stay visible while all remain selectable", () => {
   assert.equal(options.find((item) => item.level === "off")?.available, true);
 });
 test("unknown, unsupported and failed loads never masquerade as one another", () => {
-  const unknown = validateModelSettings(selection("unknown", [], "off"));
+  const unknown = validateModelSettings(selection("unknown", [], "auto"));
   assert.ok(thinkingOptions(unknown.thinking!).every((item) => item.available));
   const unsupported = validateModelSettings(selection("unsupported", ["off"], "off"));
   assert.deepEqual(

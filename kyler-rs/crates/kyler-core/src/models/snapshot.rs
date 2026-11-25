@@ -52,6 +52,8 @@ impl ModelSnapshot {
             api_key_env: None,
             adapter: self.adapter_kind,
             discover_models: self.discover_models,
+            enabled_models: None,
+            default_model: None,
         }
     }
 }

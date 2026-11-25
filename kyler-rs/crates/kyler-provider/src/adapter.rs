@@ -1,4 +1,4 @@
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -258,7 +258,14 @@ impl Adapter {
             },
         )
     }
+    /// Native DeepSeek IDs are unqualified; hosted aliases belong to their hosting connection.
+    pub fn accepts_model_id(self, id: &str) -> bool {
+        self.0 != AdapterKind::Deepseek || !id.contains('/')
+    }
     pub fn selectable_model(self, id: &str) -> bool {
+        if !self.accepts_model_id(id) {
+            return false;
+        }
         if self.0 == AdapterKind::Openai {
             return (id.starts_with("gpt-")
                 || id.starts_with("chatgpt-")
@@ -357,6 +364,8 @@ impl Adapter {
         let default = explicit.filter(|v| levels.contains(v)).unwrap_or(
             if self.0 == AdapterKind::Siliconflow {
                 High
+            } else if self.0 == AdapterKind::Deepseek {
+                High
             } else {
                 Medium
             },
@@ -397,8 +406,9 @@ impl Adapter {
         model: &str,
         output: OutputTokenParameter,
         effort: Option<ThinkingLevel>,
-        levels: Option<&ReasoningCapabilities>,
+        _levels: Option<&ReasoningCapabilities>,
     ) -> Result<()> {
+        let effort = effort.filter(|level| *level != ThinkingLevel::Auto);
         let object = value
             .as_object_mut()
             .ok_or_else(|| anyhow::anyhow!("model request must be an object"))?;
@@ -408,6 +418,7 @@ impl Adapter {
         object.remove("max_tokens");
         object.remove("reasoning_effort");
         object.remove("enable_thinking");
+        object.remove("thinking");
         if let Some(limit) = limit {
             object.insert(
                 match self.output_parameter(model, output) {
@@ -418,7 +429,7 @@ impl Adapter {
                 limit,
             );
         }
-        if self.0 == AdapterKind::Deepseek {
+        if self.0 == AdapterKind::Deepseek && effort.is_some() {
             let enabled = effort.is_some_and(|level| level.enabled());
             object.insert(
                 "thinking".into(),
@@ -428,10 +439,6 @@ impl Adapter {
             );
         }
         if let Some(effort) = effort {
-            ensure!(
-                levels.is_some_and(|c| c.levels.contains(&effort)),
-                "Thinking level is not supported for this model/provider"
-            );
             if self.0 == AdapterKind::Deepseek {
                 if effort.enabled() {
                     object.insert("reasoning_effort".into(), effort.reasoning_effort().into());
@@ -534,7 +541,7 @@ mod tests {
                 Some(ThinkingLevel::High),
                 None
             )
-            .is_err()
+            .is_ok()
         );
         assert!(
             Adapter(AdapterKind::Openai)
@@ -587,34 +594,8 @@ impl Adapter {
             .max_output_tokens
             .or(metadata.max_output_tokens)
             .or(inferred.max_output_tokens);
-        if let Some(reasoning) = &mut result.reasoning {
-            ensure!(
-                reasoning.levels.len() <= ThinkingLevel::ALL.len(),
-                "Too many thinking levels"
-            );
-            ensure!(
-                reasoning
-                    .levels
-                    .iter()
-                    .enumerate()
-                    .all(|(index, level)| !reasoning.levels[..index].contains(level)),
-                "Duplicate thinking levels"
-            );
-            ensure!(
-                if reasoning.levels.is_empty() {
-                    reasoning.default == ThinkingLevel::Off
-                } else {
-                    reasoning.levels.contains(&reasoning.default)
-                },
-                "Default thinking level must be supported"
-            );
-            if let Some(effort) = effort {
-                ensure!(
-                    reasoning.levels.contains(&effort),
-                    "Configured thinking level is unsupported"
-                );
-                reasoning.default = effort;
-            }
+        if let (Some(reasoning), Some(effort)) = (&mut result.reasoning, effort) {
+            reasoning.default = effort;
         }
         Ok(result)
     }
@@ -705,7 +686,68 @@ mod capability_resolution_tests {
                     Some(ThinkingLevel::Ultra),
                     Some(&caps)
                 )
-                .is_err()
+                .is_ok()
+        );
+    }
+}
+
+#[cfg(test)]
+mod auto_thinking_tests {
+    use super::*;
+
+    #[test]
+    fn auto_omits_all_provider_thinking_controls() {
+        for kind in [
+            AdapterKind::Openai,
+            AdapterKind::Deepseek,
+            AdapterKind::Siliconflow,
+            AdapterKind::Generic,
+        ] {
+            let mut request = serde_json::json!({"reasoning_effort":"high","enable_thinking":true,"thinking":{"type":"enabled"}});
+            Adapter(kind)
+                .project(
+                    &mut request,
+                    "custom",
+                    OutputTokenParameter::Auto,
+                    Some(ThinkingLevel::Auto),
+                    None,
+                )
+                .unwrap();
+            for key in ["reasoning_effort", "enable_thinking", "thinking"] {
+                assert!(request.get(key).is_none(), "{kind:?}: {key}");
+            }
+        }
+    }
+
+    #[test]
+    fn missing_or_mismatched_thinking_metadata_does_not_block_resolution() {
+        let adapter = Adapter(AdapterKind::Generic);
+        assert!(
+            adapter
+                .resolve_capabilities("unknown", &Default::default(), None, None)
+                .unwrap()
+                .reasoning
+                .is_none()
+        );
+        let configured = ModelCapabilities {
+            reasoning: Some(ReasoningCapabilities {
+                levels: vec![ThinkingLevel::High],
+                default: ThinkingLevel::Medium,
+                source: "configuration".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(
+            adapter
+                .resolve_capabilities("custom", &configured, None, Some(ThinkingLevel::Ultra))
+                .is_ok()
+        );
+        assert_eq!(
+            Adapter(AdapterKind::Deepseek)
+                .reasoning("deepseek-flash", None)
+                .unwrap()
+                .default,
+            ThinkingLevel::High
         );
     }
 }

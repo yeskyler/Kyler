@@ -14,6 +14,11 @@ use kyler_protocol::api::providers::{
 };
 use kyler_provider::{Adapter, AdapterKind, PROVIDER_PRESETS};
 
+fn connection_changed(old: &ProviderSettings, new: &ProviderSettings) -> bool {
+    old.base_url.trim_end_matches('/') != new.base_url.trim_end_matches('/')
+        || Adapter::resolve(old.adapter, &old.base_url).0
+            != Adapter::resolve(new.adapter, &new.base_url).0
+}
 fn checked_provider(
     request: &ProviderUpdate,
     previous: Option<&ProviderSettings>,
@@ -22,6 +27,11 @@ fn checked_provider(
     let mut provider = previous.cloned().unwrap_or_default();
     provider.adapter = adapter;
     provider.base_url = request.base_url.trim().trim_end_matches('/').to_owned();
+    if previous.is_some_and(|old| connection_changed(old, &provider)) {
+        provider.api_key = SecretString::default();
+        provider.api_key_env = None;
+        provider.protocol = Default::default();
+    }
     if let Some(key) = request.key.as_ref().filter(|key| !key.is_empty()) {
         ensure!(
             key.len() <= 4096 && key.bytes().all(|b| b.is_ascii_graphic()),
@@ -30,11 +40,32 @@ fn checked_provider(
         provider.api_key = SecretString::new(key.clone());
         provider.api_key_env = None;
     }
-    validate_provider(&provider)?;
+    provider.enabled_models = Some(request.models.clone());
+    provider.default_model = request
+        .default_model
+        .clone()
+        .or_else(|| {
+            provider
+                .default_model
+                .clone()
+                .filter(|m| request.models.contains(m))
+        })
+        .or_else(|| request.models.first().cloned());
     ensure!(
-        request.models.len() <= 1000,
-        "At least one model is required"
+        provider
+            .default_model
+            .as_ref()
+            .is_none_or(|m| request.models.contains(m)),
+        "Default model must be enabled"
     );
+    ensure!(
+        request.models.iter().all(
+            |model| Adapter::resolve(provider.adapter, &provider.base_url).accepts_model_id(model)
+        ),
+        "Model ID does not belong to this provider"
+    );
+    validate_provider(&provider)?;
+    ensure!(request.models.len() <= 1000, "Too many model IDs");
     ensure!(
         request
             .models
@@ -62,6 +93,12 @@ fn connection_table(provider: &ProviderSettings) -> Result<toml::Value> {
     );
     value.insert("base_url".into(), provider.base_url.clone().into());
     value.insert("discover_models".into(), provider.discover_models.into());
+    if let Some(models) = &provider.enabled_models {
+        value.insert("enabled_models".into(), models.clone().into());
+    }
+    if let Some(model) = &provider.default_model {
+        value.insert("default_model".into(), model.clone().into());
+    }
     if let Some(env) = &provider.api_key_env {
         value.insert("api_key_env".into(), env.clone().into());
     } else {
@@ -131,19 +168,43 @@ impl RunManager {
                 models.dedup();
                 ProviderInfo {
                     id: id.clone(),
-                    adapter: serde_json::to_value(provider.adapter)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .into(),
+                    adapter: serde_json::to_value(
+                        Adapter::resolve(provider.adapter, &provider.base_url).0,
+                    )
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .into(),
                     base_url: provider.base_url.clone(),
                     key_configured: !provider.api_key.is_empty(),
-                    models,
+                    available_models: self
+                        .agent
+                        .model_registry()
+                        .map(|registry| {
+                            registry
+                                .discovered_model_ids(id)
+                                .into_iter()
+                                .map(|m| m.id)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    checked_at: catalog
+                        .providers
+                        .iter()
+                        .find(|p| p.provider == *id)
+                        .and_then(|p| p.checked_at),
+                    is_default: catalog
+                        .models
+                        .iter()
+                        .any(|m| m.provider == *id && m.profile == catalog.default_profile),
+                    models: models.clone(),
                     default_model: catalog
                         .models
                         .iter()
                         .find(|m| m.provider == *id && m.profile == catalog.default_profile)
-                        .map(|m| m.model.clone()),
+                        .map(|m| m.model.clone())
+                        .or_else(|| provider.default_model.clone())
+                        .or_else(|| models.first().cloned()),
                     status: catalog
                         .providers
                         .iter()
@@ -234,11 +295,13 @@ impl RunManager {
             for (name, profile) in &effective.profiles { profiles.insert(name.clone(), profile_table(profile)?); }
             let mut default = effective.default.clone();
             if let Some(request) = request {
-                ensure!(!request.models.is_empty(), "At least one model is required");
                 let provider = checked_provider(&request, effective.providers.get(&id))?;
                 connections.insert(id.clone(), connection_table(&provider)?);
-                profiles.retain(|_, p| p["provider"].as_str() != Some(&id) || request.models.iter().any(|m| Some(m.as_str()) == p["model"].as_str()));
+                let changed = effective.providers.get(&id).is_some_and(|old| connection_changed(old, &provider));
+                profiles.retain(|_, p| p["provider"].as_str() != Some(&id) || (!changed && request.models.iter().any(|m| Some(m.as_str()) == p["model"].as_str())));
+                let desired = provider.default_model.clone();
                 let mut first = None;
+                let mut preferred = None;
                 for model in &request.models {
                     let existing = profiles.iter().find(|(_, p)| p["provider"].as_str() == Some(&id) && p["model"].as_str() == Some(model)).map(|(name, _)| name.clone());
                     let name = existing.unwrap_or_else(|| format!("web_{}", uuid::Uuid::new_v4().simple()));
@@ -250,9 +313,13 @@ impl RunManager {
                         };
                         profiles.insert(name.clone(), profile_table(&profile)?);
                     }
+                    if desired.as_ref() == Some(model) { preferred = Some(name.clone()); }
                     first.get_or_insert(name);
                 }
-                if request.make_default || default.is_empty() { default = first.context("No default model")?; }
+                let editing_default = effective.profiles.get(&default).is_some_and(|p| p.provider == id);
+                if request.make_default || default.is_empty() || (editing_default && request.default_model.is_some()) {
+                    default = preferred.or(first).context("No default model")?;
+                }
             } else {
                 ensure!(connections.remove(&id).is_some(), "Provider not found");
                 profiles.retain(|_, p| p["provider"].as_str() != Some(&id));
@@ -292,4 +359,47 @@ fn ensure_id(id: &str) -> ApiResult<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_key_is_kept_only_for_the_same_connection() {
+        let old = ProviderSettings {
+            adapter: AdapterKind::Generic,
+            base_url: "http://localhost:1234/v1".into(),
+            api_key: SecretString::new("PRIVATE_TEST_KEY"),
+            ..Default::default()
+        };
+        let mut request = ProviderUpdate {
+            adapter: "generic".into(),
+            base_url: old.base_url.clone(),
+            key: None,
+            models: vec!["model".into()],
+            make_default: false,
+            default_model: Some("model".into()),
+        };
+        assert_eq!(
+            checked_provider(&request, Some(&old))
+                .unwrap()
+                .api_key
+                .expose(),
+            "PRIVATE_TEST_KEY"
+        );
+        request.base_url = "http://localhost:5678/v1".into();
+        assert!(checked_provider(&request, Some(&old)).is_err());
+        request.key = Some("REPLACEMENT_TEST_KEY".into());
+        let changed = checked_provider(&request, Some(&old)).unwrap();
+        assert_eq!(changed.api_key.expose(), "REPLACEMENT_TEST_KEY");
+        request.adapter = "deepseek".into();
+        request.models = vec!["Qwen/Qwen3-32B".into()];
+        request.default_model = None;
+        assert!(checked_provider(&request, Some(&old)).is_err());
+        request.models = vec!["deepseek-flash".into()];
+        assert!(checked_provider(&request, Some(&old)).is_ok());
+        request.default_model = Some("disabled".into());
+        assert!(checked_provider(&request, Some(&old)).is_err());
+    }
 }

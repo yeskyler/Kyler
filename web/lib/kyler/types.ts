@@ -7,7 +7,7 @@ export type Session = {
   updated_at?: number;
   status?: string | null;
 };
-export type ThinkingLevel = "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+export type ThinkingLevel = "auto" | "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type ThinkingState = {
   status: "supported" | "unsupported" | "unknown";
   source: string | null;
@@ -37,7 +37,13 @@ export type ModelInfo = {
 export type ModelCatalog = {
   models: ModelInfo[];
   default_profile: string;
-  providers?: { provider: string; status: string; error?: string | null }[];
+  providers?: {
+    provider: string;
+    display_name?: string;
+    adapter?: string;
+    status: string;
+    error?: string | null;
+  }[];
 };
 export type SessionModel = {
   thinking: ThinkingState | null;

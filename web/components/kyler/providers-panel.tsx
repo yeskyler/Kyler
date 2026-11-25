@@ -6,6 +6,7 @@ import { ArrowLeftIcon, CheckIcon, ChevronDownIcon, PlusIcon } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/kyler/client";
+import { nextProviderId } from "@/lib/kyler/provider-models";
 import { providerConnection, modelDiscovery } from "@/lib/kyler/provider-status";
 
 type Provider = {
@@ -15,6 +16,9 @@ type Provider = {
   key_configured: boolean;
   models: string[];
   default_model: string | null;
+  available_models: string[];
+  is_default: boolean;
+  checked_at: number | null;
   status: string;
   discovery_status: string;
   discovery_error: string | null;
@@ -28,6 +32,8 @@ type Draft = {
   key: string;
   models: string[];
   make_default: boolean;
+  default_model: string;
+  available_models: string[];
 };
 
 export function ProvidersPanel() {
@@ -56,7 +62,16 @@ export function ProvidersPanel() {
   }, [reload]);
   function update(value: Partial<Draft>) {
     setDirty(true);
-    setDraft((current) => (current ? { ...current, ...value } : current));
+    setDraft((current) => {
+      if (!current) return current;
+      const models = (value.models ?? current.models).map((m) => m.trim()).filter(Boolean);
+      const selected = value.default_model ?? current.default_model;
+      return {
+        ...current,
+        ...value,
+        default_model: models.includes(selected) ? selected : (models[0] ?? ""),
+      };
+    });
     setNotice("");
   }
   async function perform(action: () => Promise<void>) {
@@ -81,8 +96,14 @@ export function ProvidersPanel() {
     /^[a-zA-Z0-9_-]{1,128}$/.test(draft.id) &&
     (editing || !catalog?.providers.some((provider) => provider.id === draft.id)) &&
     draft.base_url.trim() &&
-    (!preset?.key_required || draft.key || previous?.key_configured);
-  const valid = validConnection && draft?.models.some((model) => model.trim());
+    (!preset?.key_required ||
+      draft.key ||
+      (previous?.key_configured &&
+        previous.adapter === draft.adapter &&
+        previous.base_url.replace(/\/$/, "") === draft.base_url.trim().replace(/\/$/, "")));
+  const valid =
+    validConnection &&
+    (!(draft?.make_default || previous?.is_default) || draft?.models.some((model) => model.trim()));
   const request = draft
     ? {
         adapter: draft.adapter,
@@ -90,6 +111,7 @@ export function ProvidersPanel() {
         key: draft.key || null,
         models: [...new Set(draft.models.map((m) => m.trim()).filter(Boolean))],
         make_default: draft.make_default,
+        default_model: draft.default_model || null,
       }
     : undefined;
   return (
@@ -154,7 +176,15 @@ export function ProvidersPanel() {
                         value={draft.adapter}
                         onValueChange={(adapter) => {
                           const preset = catalog?.presets.find((p) => p.adapter === adapter);
-                          update({ adapter, base_url: preset?.base_url ?? "", key: "" });
+                          update({
+                            adapter,
+                            id: editing ?? nextProviderId(adapter, catalog?.providers ?? []),
+                            base_url: preset?.base_url ?? "",
+                            key: "",
+                            models: [""],
+                            default_model: "",
+                            available_models: [],
+                          });
                         }}
                       >
                         {catalog?.presets.map((p) => (
@@ -176,27 +206,20 @@ export function ProvidersPanel() {
               </Menu.Root>
             </div>
             <label className="block space-y-2 text-sm font-medium">
-              <span>Provider name</span>
-              <Input
-                required
-                disabled={busy || !!editing}
-                value={draft.id}
-                pattern="[a-zA-Z0-9_-]{1,128}"
-                placeholder="e.g. openai-work"
-                onChange={(e) => update({ id: e.target.value })}
-              />
-              <span className="block text-xs font-normal text-muted-foreground">
-                Letters, numbers, underscores and hyphens. Shown in the chat model menu.
-              </span>
-            </label>
-            <label className="block space-y-2 text-sm font-medium">
               <span>Base URL</span>
               <Input
                 required
                 type="url"
                 disabled={busy}
                 value={draft.base_url}
-                onChange={(e) => update({ base_url: e.target.value })}
+                onChange={(e) =>
+                  update({
+                    base_url: e.target.value,
+                    models: [""],
+                    default_model: "",
+                    available_models: [],
+                  })
+                }
               />
             </label>
             <label className="block space-y-2 text-sm font-medium">
@@ -207,13 +230,45 @@ export function ProvidersPanel() {
                 disabled={busy}
                 value={draft.key}
                 placeholder={
-                  previous?.key_configured ? "Configured — leave blank to keep" : "Enter API key"
+                  previous?.key_configured &&
+                  previous.adapter === draft.adapter &&
+                  previous.base_url === draft.base_url
+                    ? "Configured — leave blank to keep"
+                    : "Enter API key"
                 }
                 onChange={(e) => update({ key: e.target.value })}
               />
             </label>
             <fieldset className="space-y-2" disabled={busy}>
-              <legend className="mb-2 text-sm font-medium">Models</legend>
+              <legend className="mb-2 text-sm font-medium">Enabled models</legend>
+              {previous?.checked_at && (
+                <p className="text-xs text-muted-foreground">
+                  Last directory check: {new Date(previous.checked_at).toLocaleString()}
+                </p>
+              )}
+              {!!draft.available_models.length && (
+                <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Discovered for this connection. Select models to show in the model menu.
+                  </p>
+                  {draft.available_models.map((id) => (
+                    <label key={id} className="flex items-center gap-2 text-sm font-normal">
+                      <input
+                        type="checkbox"
+                        checked={draft.models.some((m) => m.trim() === id)}
+                        onChange={(e) =>
+                          update({
+                            models: e.target.checked
+                              ? [...draft.models.filter((m) => m.trim()), id]
+                              : draft.models.filter((m) => m.trim() !== id),
+                          })
+                        }
+                      />
+                      <span className="break-all">{id}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
               {previous && (
                 <div className="space-y-1 text-xs font-normal text-muted-foreground">
                   <p>{modelDiscovery(previous.discovery_status)}</p>
@@ -240,7 +295,6 @@ export function ProvidersPanel() {
                     type="button"
                     variant="ghost"
                     aria-label={`Remove model ${index + 1}`}
-                    disabled={draft.models.length === 1}
                     onClick={() => update({ models: draft.models.filter((_, i) => i !== index) })}
                   >
                     Remove
@@ -256,19 +310,40 @@ export function ProvidersPanel() {
                 Add model
               </Button>
               <p className="text-xs text-muted-foreground">
-                The first model becomes the default when selecting this provider as the server
-                default. Discovered models are also available in chat.
+                Only enabled models appear in chat. You can also add a model ID manually.
               </p>
+              <label className="block space-y-2 text-sm font-medium">
+                <span>Default model for this provider</span>
+                <select
+                  className="w-full rounded-md border bg-background px-3 py-2"
+                  value={draft.default_model}
+                  disabled={!draft.models.some((m) => m.trim())}
+                  onChange={(e) => update({ default_model: e.target.value })}
+                >
+                  {!draft.default_model && <option value="">Choose an enabled model</option>}
+                  {[...new Set(draft.models.map((m) => m.trim()).filter(Boolean))].map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </fieldset>
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                disabled={busy}
+                disabled={busy || previous?.is_default}
                 checked={draft.make_default}
                 onChange={(e) => update({ make_default: e.target.checked })}
               />
               Use as default provider
             </label>
+            {(draft.make_default || previous?.is_default) &&
+              !draft.models.some((m) => m.trim()) && (
+                <p role="alert" className="text-sm text-destructive">
+                  Enable at least one model for the default provider.
+                </p>
+              )}
             <div className="flex flex-wrap justify-end gap-2">
               <Button
                 type="button"
@@ -281,20 +356,10 @@ export function ProvidersPanel() {
                       { method: "POST", body: JSON.stringify(request) },
                     );
                     setNotice(`Model list fetched. ${result.models.length} models found.`);
-                    if (result.models.length)
-                      setDraft((current) =>
-                        current
-                          ? {
-                              ...current,
-                              models: [
-                                ...new Set([
-                                  ...current.models.filter((m) => m.trim()),
-                                  ...result.models,
-                                ]),
-                              ],
-                            }
-                          : current,
-                      );
+                    setDirty(true);
+                    setDraft((current) =>
+                      current ? { ...current, available_models: result.models } : current,
+                    );
                   })
                 }
               >
@@ -359,12 +424,14 @@ export function ProvidersPanel() {
                 setNotice("");
                 setRemoving(false);
                 setDraft({
-                  id: "",
+                  id: nextProviderId(preset.adapter, catalog?.providers ?? []),
                   adapter: preset.adapter,
                   base_url: preset.base_url ?? "",
                   key: "",
                   models: [""],
                   make_default: false,
+                  default_model: "",
+                  available_models: [],
                 });
               }}
             >
@@ -391,7 +458,9 @@ export function ProvidersPanel() {
                   base_url: provider.base_url,
                   key: "",
                   models: provider.models.length ? provider.models : [""],
-                  make_default: false,
+                  make_default: provider.is_default,
+                  default_model: provider.default_model ?? provider.models[0] ?? "",
+                  available_models: provider.available_models ?? [],
                 });
                 setError("");
                 setNotice("");
@@ -399,7 +468,13 @@ export function ProvidersPanel() {
               }}
             >
               <div className="min-w-0">
-                <h3 className="font-medium">{provider.id}</h3>
+                <h3 className="font-medium">
+                  {catalog?.presets.find((preset) => preset.adapter === provider.adapter)?.name ??
+                    provider.adapter}
+                  {provider.is_default && (
+                    <span className="ml-2 text-xs text-muted-foreground">Default provider</span>
+                  )}
+                </h3>
                 <p className="mt-1 break-all text-sm text-muted-foreground">{provider.base_url}</p>
                 <p className="mt-2 text-xs text-muted-foreground">
                   {provider.models.length} models

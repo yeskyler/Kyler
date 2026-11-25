@@ -16,6 +16,9 @@ pub struct ProviderSettings {
     pub adapter: AdapterKind,
     /// Discover available model IDs without issuing inference requests.
     pub discover_models: bool,
+    /// None retains legacy automatic advertisement; Some is an explicit menu selection.
+    pub enabled_models: Option<Vec<String>>,
+    pub default_model: Option<String>,
     pub base_url: String,
     pub api_key: SecretString,
     pub api_key_env: Option<String>,
@@ -26,6 +29,8 @@ impl Default for ProviderSettings {
             protocol: WireProtocol::Auto,
             adapter: AdapterKind::Auto,
             discover_models: true,
+            enabled_models: None,
+            default_model: None,
             base_url: String::new(),
             api_key: SecretString::default(),
             api_key_env: None,
@@ -77,6 +82,17 @@ impl ModelSettings {
                 || self.profiles.contains_key(&self.default),
             "models.default must name an existing profile"
         );
+        if let Some(profile) = self.profiles.get(&self.default) {
+            if let Some(provider) = self.providers.get(&profile.provider) {
+                ensure!(
+                    provider
+                        .enabled_models
+                        .as_ref()
+                        .is_none_or(|models| models.contains(&profile.model)),
+                    "The default model must be enabled"
+                );
+            }
+        }
         for provider in self.providers.values() {
             validate_provider(provider)?;
         }
@@ -145,6 +161,8 @@ impl AppConfig {
                     adapter: self.llm.adapter,
                     protocol: self.llm.protocol,
                     discover_models: self.llm.discover_models,
+                    enabled_models: None,
+                    default_model: None,
                 },
             )]
             .into(),

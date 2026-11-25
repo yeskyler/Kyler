@@ -50,10 +50,7 @@ impl Agent {
     }
     pub fn default_thinking_level(&self) -> kyler_protocol::api::models::ThinkingLevel {
         use kyler_protocol::api::models::ThinkingLevel;
-        self.model_snapshot
-            .as_ref()
-            .and_then(|s| s.info.capabilities.reasoning.as_ref())
-            .map_or(ThinkingLevel::Off, |r| r.default)
+        self.reasoning_effort().unwrap_or(ThinkingLevel::Auto)
     }
     pub fn thinking_enabled(&self) -> bool {
         self.reasoning_effort()
@@ -74,10 +71,6 @@ impl Agent {
         mut self,
         level: kyler_protocol::api::models::ThinkingLevel,
     ) -> Result<Self> {
-        anyhow::ensure!(
-            self.thinking_levels().contains(&level),
-            "Thinking level is not supported for this model/provider"
-        );
         let snapshot = self
             .model_snapshot
             .as_mut()
@@ -153,7 +146,9 @@ impl Agent {
                 capabilities
             },
         )?;
-        if self.carries_reasoning() && self.thinking_enabled() {
+        if self.carries_reasoning()
+            && self.reasoning_effort() != Some(kyler_protocol::api::models::ThinkingLevel::Off)
+        {
             crate::models::attach_reasoning(&mut value["messages"], session);
         }
         Ok(value)
@@ -187,7 +182,9 @@ impl Agent {
         session: &crate::Session,
     ) -> Result<serde_json::Value> {
         let mut value = serde_json::to_value(messages)?;
-        if self.thinking_enabled() && self.carries_reasoning() {
+        if self.carries_reasoning()
+            && self.reasoning_effort() != Some(kyler_protocol::api::models::ThinkingLevel::Off)
+        {
             crate::models::attach_reasoning(&mut value, session);
         }
         Ok(value)
@@ -284,7 +281,7 @@ mod thinking_level_tests {
                 .get("reasoning_effort")
                 .is_none()
         );
-        assert!(bound.with_thinking_level(ThinkingLevel::High).is_err());
+        assert!(bound.with_thinking_level(ThinkingLevel::High).is_ok());
         config.llm.reasoning_effort = Some(ThinkingLevel::High);
         agent.model_registry = Some(Arc::new(ModelRegistry::new(&config).unwrap()));
         let bound = agent.bind_model(None).unwrap();
@@ -293,7 +290,7 @@ mod thinking_level_tests {
             bound
                 .clone()
                 .with_thinking_level(ThinkingLevel::Low)
-                .is_err()
+                .is_ok()
         );
         assert!(bound.with_thinking_level(ThinkingLevel::High).is_ok());
     }
@@ -332,7 +329,7 @@ mod thinking_level_tests {
             bound
                 .clone()
                 .with_thinking_level(ThinkingLevel::Low)
-                .is_err()
+                .is_ok()
         );
         for level in bound.thinking_levels() {
             let selected = bound.clone().with_thinking_level(level).unwrap();

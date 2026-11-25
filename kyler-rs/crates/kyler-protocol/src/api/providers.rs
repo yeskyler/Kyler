@@ -16,6 +16,9 @@ pub struct ProviderInfo {
     pub key_configured: bool,
     pub models: Vec<String>,
     pub default_model: Option<String>,
+    pub is_default: bool,
+    pub available_models: Vec<String>,
+    pub checked_at: Option<i64>,
     pub status: String,
     pub discovery_status: String,
     pub discovery_error: Option<String>,
@@ -35,6 +38,8 @@ pub struct ProviderUpdate {
     pub models: Vec<String>,
     #[serde(default)]
     pub make_default: bool,
+    #[serde(default)]
+    pub default_model: Option<String>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct ProviderTest {

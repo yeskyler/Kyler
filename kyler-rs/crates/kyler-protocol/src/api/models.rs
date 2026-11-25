@@ -67,6 +67,13 @@ pub struct ModelCatalog {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderDiscoveryState {
     #[serde(default)]
+    pub checked_at: Option<i64>,
+    /// User-facing connection label; the provider ID remains stable.
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub adapter: String,
+    #[serde(default)]
     pub connection_status: String,
     pub provider: String,
     pub status: String,
@@ -110,6 +117,7 @@ pub struct ModelConnectionUpdate {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingLevel {
+    Auto,
     #[serde(alias = "none")]
     Off,
     Low,
@@ -132,6 +140,7 @@ impl ThinkingLevel {
     /// Provider spelling differs from the UI's historical "off" preference.
     pub fn reasoning_effort(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Off => "none",
             Self::Low => "low",
             Self::Medium => "medium",
@@ -146,7 +155,7 @@ impl ThinkingLevel {
         if enabled { Self::High } else { Self::Off }
     }
     pub fn enabled(self) -> bool {
-        self != Self::Off
+        !matches!(self, Self::Auto | Self::Off)
     }
 }
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

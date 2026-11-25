@@ -51,7 +51,7 @@ test("automation proxy exposes only the supported scheduler operations", async (
   assert.equal(permittedPath(`automation-runs/${id}`, "DELETE"), false);
 });
 
-test("automation thinking follows model capabilities and drops unsupported preferences", () => {
+test("automation thinking preserves manual preferences and falls back to Auto", () => {
   const catalog = {
     default_profile: "openai",
     models: [
@@ -75,7 +75,8 @@ test("automation thinking follows model capabilities and drops unsupported prefe
     ],
   } satisfies import("../lib/kyler/types.ts").ModelCatalog;
   assert.equal(thinkingForModel(catalog, "openai", "low").level, "low");
-  assert.equal(thinkingForModel(catalog, "siliconflow", "low").level, "high");
+  assert.equal(thinkingForModel(catalog, "siliconflow", "low").level, "low");
   assert.equal(thinkingForModel(catalog, "siliconflow", "max").level, "max");
-  assert.deepEqual(thinkingForModel(catalog, "unknown", "high"), { levels: [], level: "off" });
+  assert.equal(thinkingForModel(catalog, "unknown").level, "auto");
+  assert.equal(thinkingForModel(catalog, "unknown", "high").level, "high");
 });

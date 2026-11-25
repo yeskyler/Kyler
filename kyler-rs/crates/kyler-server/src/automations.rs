@@ -153,12 +153,6 @@ impl ScheduledExecutor for AutomationExecutor {
             .agent
             .bind_model(config.model_profile.as_deref())
             .map_err(|_| Error::Invalid("The selected model profile is unavailable.".into()))?;
-        ensure!(
-            bound.thinking_levels().contains(&config.thinking)
-                || (!bound.thinking_supported()
-                    && config.thinking == kyler_protocol::api::models::ThinkingLevel::Off),
-            Error::Invalid("The selected thinking level is unavailable.".into())
-        );
         config.model_profile = Some(
             bound
                 .model_info()

@@ -32,6 +32,12 @@ configuration/environment and never requests a remote directory. In the wizard,
 Esc goes back, Ctrl+C cancels, and the final review can save, edit, or cancel the
 draft. API keys remain hidden, including completed-question summaries.
 
+With existing configuration, the wizard first selects a connection or adds a named
+connection. Adding one preserves other providers and their profiles, including a
+legacy `[llm]` connection. After choosing a model, choose whether it becomes the
+global default. The review screen's **Manage providers** action edits another
+connection before saving the draft.
+
 New installations use `[context].auto_model_window = true`. The runtime uses
 verified capacity metadata when known, with `context_tokens` as a fallback budget
 (default 128000), not an assertion about an unknown model's capacity. Existing
@@ -262,6 +268,25 @@ connection. Before a check, connection status is unverified. These checks do not
 inference or assert that a chat request will succeed. Model-list freshness and its
 sanitized error appear inside the provider's Models section.
 
+Web Settings → Providers asks for a provider type without a separate name field;
+connection IDs are generated internally. It manages each connection independently: credentials,
+discovered IDs, enabled models, manual model IDs, and a per-provider default model.
+Fetching a directory updates the available inventory; enable the models you want
+in chat separately. Saving persists `enabled_models` and `default_model` under
+`[models.providers.<name>]`. An absent `enabled_models` retains legacy automatic
+discovery; an empty list hides all models for that connection. A global default
+must stay enabled. Choose another global default before deleting its provider.
+Changing an endpoint or adapter requires credentials for the new connection and
+rebuilds that connection's profiles from the submitted model selection. Native
+DeepSeek connections exclude qualified hosted aliases such as `vendor/model`,
+including entries left in older configuration files after a connection change.
+Those IDs remain supported on compatible hosting connections.
+
+The chat selector shows the selected model and thinking level. Its model menu
+groups models by exact provider connection, including separate connections to the
+same service. Model IDs from one connection never populate another connection's
+submenu. Web Settings and CLI setup use the same configuration file.
+
 Model lists may omit capability details. Reasoning capability precedence is explicit
 per-model configuration, validated provider metadata, then adapter rules. Unknown
 capabilities remain unknown; the installation model never defines other models'
@@ -298,8 +323,11 @@ own `enable_thinking` field.
   opts in that one level. For additional verified levels, configure
   `capabilities.reasoning` with `levels`, `default`, and `source`.
 
-Web always displays selectable **Off, Low, Medium, High, Xhigh, Max, Ultra**.
-Selecting a model resets thinking to **Off**, including selecting a previously used
+Web always displays selectable **Auto, Off, Low, Medium, High, Xhigh, Max, Ultra**.
+Unknown thinking capabilities use `auto`; setup saves `reasoning_effort = "auto"`
+without blocking configuration or startup. Auto omits provider thinking controls
+and lets the provider choose its default. Declared level lists do not reject manual selections.
+Selecting a model resets thinking to **Auto**, including selecting a previously used
 model. Users can then choose any grade manually, independently of capability
 metadata. Manual grades pass through the adapter without remapping or silent
 fallback; a provider may reject an unsupported grade. Off uses a declared disable
@@ -441,6 +469,15 @@ Open **Settings → Providers** to add, edit, test, or delete provider connectio
 The provider type selector uses the same presets as the CLI. Names identify connections
 in the chat composer, where the first menu level is the provider and the second is the model.
 Provider names accept letters, numbers, underscores, and hyphens.
+The composer shows only the selected model and thinking level. The model menu
+uses three levels: Model → provider connection → model. Provider groups use
+connection IDs, including identically named models
+served through different endpoints. Legacy `default` connections display the
+resolved provider brand; named connections display the brand and connection name.
+Default-provider/model markers are separate from these names. Failed model-list
+refreshes retain configured and cached choices; connections without models remain
+visible with an empty-state message.
+
 
 Connection tests query the provider's model directory without sending inference requests.
 Some services do not support model listing; a failed directory test does not necessarily

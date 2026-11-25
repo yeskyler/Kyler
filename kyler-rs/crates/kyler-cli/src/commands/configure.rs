@@ -241,6 +241,8 @@ pub async fn configure(
                     }
                     let edit_channels = choices.len();
                     choices.push("Edit channels".into());
+                    let manage_providers = choices.len();
+                    choices.push("Manage providers".into());
                     let save_only = can_start.then_some(choices.len());
                     if can_start {
                         choices.push("Save without starting".into());
@@ -257,6 +259,11 @@ pub async fn configure(
                         }
                         Ok(2) if scope => page = Page::Access,
                         Ok(index) if index == edit_channels => page = Page::Channels,
+                        Ok(index) if index == manage_providers => {
+                            wizard = models::Wizard::new(&config, &values);
+                            wizard.manage_connections();
+                            page = Page::Model;
+                        }
                         Ok(index) if Some(index) == save_only => break,
                         Ok(_) => return Err(input::cancelled()),
                         Err(e) if e.code == input::BACK => {
@@ -288,6 +295,7 @@ pub async fn configure(
     {
         config.llm.capabilities.images = Some(true);
     }
+    models::fill_auto_thinking(&mut config, &discovered);
     config.session.enabled = true;
     config.validate().map_err(|e|CliError::new(2,format!("Configuration not saved: {e}. Run kyler configure to fix it; non-interactive setup requires credentials in the config or environment.")))?;
     for profile in config.effective_models().profiles.values() {
@@ -372,6 +380,12 @@ pub async fn configure(
             "auto_model_window",
         )?;
         let llm = table(root, "llm")?;
+        if let Some(level) = config.llm.reasoning_effort {
+            llm.insert(
+                "reasoning_effort".into(),
+                toml::Value::try_from(level).map_err(|e| CliError::new(2, e.to_string()))?,
+            );
+        }
         llm.insert(
             "protocol".into(),
             serde_json::to_value(config.llm.protocol)
@@ -407,6 +421,7 @@ pub async fn configure(
         }
     } else {
         let providers = table(table(root, "models")?, "providers")?;
+        providers.retain(|name, _| config.models.providers.contains_key(name));
         for (name, provider) in &config.models.providers {
             let value = table(providers, name)?;
             value.insert(
@@ -429,6 +444,17 @@ pub async fn configure(
                     .unwrap()
                     .into(),
             );
+            value.insert("discover_models".into(), provider.discover_models.into());
+            if let Some(models) = &provider.enabled_models {
+                value.insert("enabled_models".into(), models.clone().into());
+            } else {
+                value.remove("enabled_models");
+            }
+            if let Some(model) = &provider.default_model {
+                value.insert("default_model".into(), model.clone().into());
+            } else {
+                value.remove("default_model");
+            }
             if provider.api_key_env.is_none() {
                 value.remove("api_key_env");
                 value.insert("api_key".into(), provider.api_key.expose().into());
@@ -438,8 +464,25 @@ pub async fn configure(
     if !config.models.profiles.is_empty() {
         table(root, "models")?.insert("default".into(), config.models.default.clone().into());
         let profiles = table(table(root, "models")?, "profiles")?;
+        profiles.retain(|name, _| config.models.profiles.contains_key(name));
         for (name, profile) in &config.models.profiles {
             let value = table(profiles, name)?;
+            if let Some(level) = profile.reasoning_effort {
+                value.insert(
+                    "reasoning_effort".into(),
+                    toml::Value::try_from(level).map_err(|e| CliError::new(2, e.to_string()))?,
+                );
+            }
+            value.insert(
+                "capabilities".into(),
+                toml::Value::try_from(&profile.capabilities)
+                    .map_err(|e| CliError::new(2, e.to_string()))?,
+            );
+            value.insert(
+                "output_token_parameter".into(),
+                toml::Value::try_from(profile.output_token_parameter)
+                    .map_err(|e| CliError::new(2, e.to_string()))?,
+            );
             value.insert("provider".into(), profile.provider.clone().into());
             value.insert("model".into(), profile.model.clone().into());
             value.insert(

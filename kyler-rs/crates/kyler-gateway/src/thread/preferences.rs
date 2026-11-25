@@ -270,15 +270,13 @@ impl ThreadHandle {
             Some(caps) if !caps.levels.is_empty() => ThinkingSupport::Supported,
             Some(_) => ThinkingSupport::Unsupported,
         };
-        let levels = ThinkingLevel::ALL.to_vec();
-        let default = ThinkingLevel::Off;
+        let levels = std::iter::once(ThinkingLevel::Auto)
+            .chain(ThinkingLevel::ALL)
+            .collect::<Vec<_>>();
+        let default = snapshot.reasoning_effort.unwrap_or(ThinkingLevel::Auto);
         let path = migrate_thinking_path(&self.thinking_path().await, &snapshot.preference_key())?;
         if let Some(selection) = selection {
             if let Some(level) = selection {
-                ensure!(
-                    levels.contains(&level),
-                    "Thinking level is not supported for this model/provider"
-                );
                 save(&path, &serde_json::to_vec(&level)?)?;
             } else {
                 match std::fs::remove_file(&path) {
@@ -360,7 +358,7 @@ impl ThreadHandle {
             Ok(snapshot) => {
                 let reset = selection
                     .as_ref()
-                    .map(|_| Some(kyler_protocol::api::models::ThinkingLevel::Off));
+                    .map(|_| Some(kyler_protocol::api::models::ThinkingLevel::Auto));
                 let thinking = self.thinking_for_snapshot(&snapshot, reset).await?;
                 (Some(snapshot.info.clone()), Some(thinking), None)
             }
